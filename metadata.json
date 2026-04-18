@@ -1,0 +1,9 @@
+{
+  "name": "Vox Cadd mobile pro 10A",
+  "description": "Professional Mobile CAD Engine with Principal Architect AI. Supports visual drafting from prompts, sketches, and real-world building data via Google Search grounding.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
