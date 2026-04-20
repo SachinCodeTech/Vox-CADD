@@ -3,11 +3,12 @@ import React, { useState, useRef, useEffect } from 'react';
 import { X, HelpCircle, Info, ChevronRight, Cpu, MousePointer2, Zap, Settings, Command } from 'lucide-react';
 
 interface InfoPanelProps {
-  type: 'about' | 'help';
+  type: 'about' | 'help' | 'privacy';
   onClose: () => void;
+  onSwitch?: (type: 'about' | 'help' | 'privacy') => void;
 }
 
-const InfoPanel: React.FC<InfoPanelProps> = ({ type, onClose }) => {
+const InfoPanel: React.FC<InfoPanelProps> = ({ type, onClose, onSwitch }) => {
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [isInteracting, setIsInteracting] = useState(false);
   const isDragging = useRef(false);
@@ -93,6 +94,16 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ type, onClose }) => {
         </div>
       </div>
       
+      {onSwitch && (
+        <button 
+          onClick={() => onSwitch('privacy')}
+          className="mt-6 flex items-center gap-2 px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl hover:bg-emerald-500/20 transition-all group"
+        >
+          <Zap size={10} className="text-emerald-400 group-hover:scale-110 transition-transform" />
+          <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Privacy Protocol</span>
+        </button>
+      )}
+
       <p className="mt-8 text-[9px] text-neutral-600 uppercase font-medium">© 2024 Code Tech. All Rights Reserved.</p>
     </div>
   );
@@ -153,6 +164,53 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ type, onClose }) => {
   );
 
 
+  const renderPrivacy = () => (
+    <div className="p-5 space-y-6">
+      <div className="text-center pb-4 border-b border-white/5">
+        <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-500/20">
+          <Zap size={32} className="text-emerald-400" />
+        </div>
+        <h2 className="text-xl font-black text-white uppercase tracking-tighter">Privacy Protocol</h2>
+        <p className="text-[10px] text-neutral-500 mt-1 uppercase font-bold tracking-widest">Last Updated: April 2026</p>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <h4 className="text-[10px] font-black text-cyan-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+            <div className="w-1 h-1 bg-cyan-400 rounded-full" /> Data Collection
+          </h4>
+          <p className="text-[11px] text-neutral-400 leading-relaxed">
+            VoxCADD operates as a client-side drafting engine. Your architectural designs (.vox, .dxf) are stored locally in your browser's indexedDB or device storage. We do not transmit your drawing data to any central server unless explicitly shared by you through our collaboration features.
+          </p>
+        </div>
+
+        <div>
+          <h4 className="text-[10px] font-black text-cyan-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+            <div className="w-1 h-1 bg-cyan-400 rounded-full" /> Architectural AI
+          </h4>
+          <p className="text-[11px] text-neutral-400 leading-relaxed">
+            When you consult the Principal Architect (AI), only the necessary context (entity counts, scale, and active command) and your specified prompt are sent to the LLM processor. This interaction is transient and session-based.
+          </p>
+        </div>
+
+        <div>
+          <h4 className="text-[10px] font-black text-cyan-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+            <div className="w-1 h-1 bg-cyan-400 rounded-full" /> Device Permissions
+          </h4>
+          <p className="text-[11px] text-neutral-400 leading-relaxed">
+            The application requests camera and microphone access solely for the AI Voice Drafting and Sketch Interpretation features. This data is processed in real-time and is not recorded on our systems.
+          </p>
+        </div>
+
+        <div className="p-3 bg-white/5 rounded-xl border border-white/5">
+          <p className="text-[10px] text-neutral-500 leading-snug">
+            By using VoxCADD, you consent to this localized data processing protocol. For advanced enterprise security audits, please contact the developer directly.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div 
       className="fixed left-1/2 top-10 -translate-x-1/2 w-[340px] max-w-[95vw] bg-[#1a1a1a] border border-neutral-800 rounded-2xl shadow-[0_25px_60px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 select-none"
@@ -169,9 +227,11 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ type, onClose }) => {
         onTouchStart={e => { e.stopPropagation(); if (e.touches.length > 0) startDrag(e.touches[0].clientX, e.touches[0].clientY); }}
       >
         <div className="flex items-center gap-2 pointer-events-none">
-          {type === 'help' ? <HelpCircle size={18} className="text-cyan-400" /> : <Info size={18} className="text-cyan-400" />}
+          {type === 'help' && <HelpCircle size={18} className="text-cyan-400" />}
+          {type === 'about' && <Info size={18} className="text-cyan-400" />}
+          {type === 'privacy' && <Zap size={18} className="text-emerald-400" />}
           <h3 className="text-xs font-black text-neutral-200 uppercase tracking-widest">
-            {type === 'help' ? 'Help & Commands' : 'About VoxCADD'}
+            {type === 'help' ? 'Help & Commands' : type === 'about' ? 'About VoxCADD' : 'Privacy protocol'}
           </h3>
         </div>
         <button onClick={onClose} className="p-1 hover:bg-neutral-800 rounded-lg text-neutral-500 hover:text-white transition-colors cursor-pointer">
@@ -180,7 +240,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ type, onClose }) => {
       </div>
 
       <div className="flex-1 overflow-y-auto scrollbar-none max-h-[75vh]">
-        {type === 'help' ? renderHelp() : renderAbout()}
+        {type === 'help' && renderHelp()}
+        {type === 'about' && renderAbout()}
+        {type === 'privacy' && renderPrivacy()}
       </div>
 
       <div className="p-4 bg-[#121212] border-t border-neutral-800 flex justify-end shrink-0">

@@ -10,7 +10,7 @@ interface CommandBarProps {
   isCommandActive: boolean;
   isAiThinking?: boolean;
   prompt: string;      
-  message: string | null; 
+  history: string[]; 
   value: string;
   onChange: (val: string) => void;
 }
@@ -24,7 +24,7 @@ const COMMAND_LIST = [
 
 const CommandBar: React.FC<CommandBarProps> = ({ 
   onCommand, onAiQuery, onLiveToggle, isLiveActive, isCommandActive, isAiThinking,
-  prompt, message, value, onChange
+  prompt, history, value, onChange
 }) => {
   const [activeTab, setActiveTab] = useState<'cli' | 'ai' | null>(null);
   const [historyHeight, setHistoryHeight] = useState(0); 
@@ -39,6 +39,9 @@ const CommandBar: React.FC<CommandBarProps> = ({
 
   const isHistoryOpen = historyHeight > 0;
 
+  const inputHistory = useMemo(() => history.filter(h => h.startsWith("> ")).map(h => h.substring(2)), [history]);
+  const [histIdx, setHistIdx] = useState(-1);
+
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
     const trimmed = value.trim();
@@ -49,11 +52,33 @@ const CommandBar: React.FC<CommandBarProps> = ({
     if (activeTab === 'cli') {
         onCommand(trimmed);
         onChange('');
+        setHistIdx(-1);
         setShowSuggestions(false);
     } else {
         onAiQuery(trimmed, attachment);
         setAttachment(null);
         onChange('');
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (activeTab !== 'cli') return;
+    if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        const next = Math.min(histIdx + 1, inputHistory.length - 1);
+        if (next >= 0) {
+            setHistIdx(next);
+            onChange(inputHistory[inputHistory.length - 1 - next]);
+        }
+    } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const next = histIdx - 1;
+        setHistIdx(next);
+        if (next >= 0) {
+            onChange(inputHistory[inputHistory.length - 1 - next]);
+        } else {
+            onChange('');
+        }
     }
   };
 
@@ -105,7 +130,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
         behavior: 'smooth'
       });
     }
-  }, [message, isHistoryOpen]);
+  }, [history, isHistoryOpen]);
 
   const suggestions = useMemo(() => {
     if (!value || activeTab !== 'cli') return [];
@@ -131,10 +156,13 @@ const CommandBar: React.FC<CommandBarProps> = ({
           style={{ height: `${historyHeight}px` }}
           className="overflow-y-auto px-4 text-[9px] bg-black border-b border-white/5 scrollbar-none font-mono flex flex-col transition-[height] duration-75"
       >
-          <div className="py-2 min-h-full flex flex-col justify-end">
+          <div className="py-2 min-h-full flex flex-col justify-end gap-1">
             <div className="text-neutral-800 uppercase tracking-tighter mb-4 opacity-40">VOXCADD_CORE_V3 // KERNEL_ACTIVE</div>
-            {/* Fix: Added whitespace-pre-wrap to properly display multiline AI explanations and grounding links */}
-            {message && <div className="text-[#00bcd4] font-black uppercase mb-3 p-2 bg-cyan-500/5 border-l-2 border-cyan-500 whitespace-pre-wrap">{message}</div>}
+            {history.map((msg, i) => (
+               <div key={i} className="text-[#00bcd4] font-black uppercase p-2 bg-cyan-500/5 border-l-2 border-cyan-500 whitespace-pre-wrap break-words">
+                 {msg}
+               </div>
+            ))}
             <div className="mt-4 opacity-20 text-[7px] text-center uppercase tracking-widest border-t border-white/5 pt-2">SWIPE DOWN TO COLLAPSE</div>
           </div>
       </div>
@@ -171,6 +199,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
                     type="text"
                     value={value}
                     onChange={e => { onChange(e.target.value); setShowSuggestions(true); }}
+                    onKeyDown={handleKeyDown}
                     className="flex-1 bg-transparent text-white font-mono outline-none text-[11px] uppercase tracking-widest placeholder:text-neutral-900"
                     placeholder="COMMAND..."
                     autoComplete="off"

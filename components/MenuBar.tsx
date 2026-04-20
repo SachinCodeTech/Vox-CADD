@@ -140,6 +140,13 @@ const MenuBar: React.FC<MenuBarProps> = ({ onAction, currentFileName, units }) =
           color="bg-blue-500" 
           onClick={() => onAction('toggleAbout')} 
         />
+        <MenuButton 
+          icon={Zap} 
+          label="Privacy Protocol" 
+          desc="Data & Security Standards"
+          color="bg-emerald-500" 
+          onClick={() => onAction('togglePrivacy')} 
+        />
       </div>
 
       <div className="mt-12 text-center opacity-30 flex flex-col items-center gap-1">

@@ -1039,30 +1039,57 @@ export class OffsetCommand implements CADCommand {
 }
 
 export class TrimCommand implements CADCommand {
-    name = "TRIM"; public cutters: Shape[] = [];
+    name = "TRIM"; public cutters: Shape[] = []; selectingCutters = true;
     constructor(public ctx: CommandContext) {}
-    onStart() { this.ctx.setMessage("TRIM Select cutting edges or <Enter to select all>:"); }
+    onStart() { 
+        this.ctx.setMessage("TRIM Select cutting edges or <Enter to select all>:"); 
+        this.ctx.setSelectedIds([]);
+    }
     onClick(p: Point) {
         const all = Object.values(this.ctx.getLayers()).flat();
-        if (this.cutters.length === 0) {
-            const hit = all.find(s => hitTestShape(p.x, p.y, s, 10));
-            if (hit) { this.cutters.push(hit); this.ctx.setMessage("TRIM Select next cutting edge or <Enter to finish selection>:"); }
+        const ts = this.ctx.getViewState().scale; 
+        const threshold = 15 / ts;
+        const hit = all.find(s => hitTestShape(p.x, p.y, s, threshold));
+        
+        if (this.selectingCutters) {
+            if (hit) {
+                if (!this.cutters.find(c => c.id === hit.id)) {
+                    this.cutters.push(hit);
+                    this.ctx.setSelectedIds(this.cutters.map(c => c.id));
+                    this.ctx.setMessage(`TRIM ${this.cutters.length} selected. Select more or <Enter> to continue:`);
+                }
+            }
         } else {
-            const hit = all.find(s => hitTestShape(p.x, p.y, s, 10));
             if (hit) {
                 const results = getTrimmedShapes(this.cutters, [hit], p);
-                this.ctx.setLayers(prev => {
-                    const next = { ...prev };
-                    Object.keys(next).forEach(l => next[l] = next[l].filter(s => s.id !== hit.id).concat(results.filter(rs => rs.layer === l)));
-                    return next;
-                });
+                if (results.length > 0) {
+                    this.ctx.setLayers(prev => {
+                        const next = { ...prev };
+                        Object.keys(next).forEach(l => {
+                            const filtered = next[l].filter(s => s.id !== hit.id);
+                            const added = results.filter(rs => rs.layer === l || (!rs.layer && l === hit.layer));
+                            next[l] = [...filtered, ...added];
+                        });
+                        return next;
+                    });
+                    // After trimming, we stay in trim mode to allow more trims
+                    this.ctx.setMessage("TRIM Select object to trim:");
+                }
             }
         }
     }
     onMove() {}
     onEnter() {
-        if (this.cutters.length === 0) { this.cutters = Object.values(this.ctx.getLayers()).flat(); this.ctx.setMessage("TRIM Select object to trim:"); }
-        else { this.ctx.onFinish(); }
+        if (this.selectingCutters) {
+            if (this.cutters.length === 0) {
+                this.cutters = Object.values(this.ctx.getLayers()).flat();
+            }
+            this.selectingCutters = false;
+            this.ctx.setSelectedIds([]);
+            this.ctx.setMessage("TRIM Select object to trim:");
+        } else {
+            this.ctx.onFinish();
+        }
     }
     onCancel() { this.ctx.onFinish(); }
 }

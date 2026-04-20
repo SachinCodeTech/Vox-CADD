@@ -13,6 +13,7 @@ import DrawingProperties from './components/DrawingProperties';
 import InfoPanel from './components/InfoPanel';
 import NewFileDialog from './components/NewFileDialog';
 import MTextEditor from './components/MTextEditor';
+import LoadingScreen from './components/LoadingScreen';
 import { generateId } from './services/cadService';
 import { getCommandFromAI, connectLiveAgent } from './services/geminiService';
 import { shapesToDXF, dxfToShapes } from './services/dxfService';
@@ -55,7 +56,7 @@ const INITIAL_LAYERS_CONFIG: Record<string, LayerConfig> = {
 };
 
 export type ToolbarCategory = 'Draw' | 'Modify' | 'Anno' | 'View' | 'Assist' | 'History' | 'Edit';
-type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 'file' | 'mainmenu' | 'drawing_props' | 'help' | 'about' | 'new_file';
+type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 'file' | 'mainmenu' | 'drawing_props' | 'help' | 'about' | 'privacy' | 'new_file';
 
 const STORAGE_KEY = 'voxcadd_active_workspace';
 
@@ -77,7 +78,15 @@ const App: React.FC = () => {
   const [commandInput, setCommandInput] = useState('');
   const [isLiveActive, setIsLiveActive] = useState(false);
   const [prompt, setPrompt] = useState<string>("COMMAND:");
-  const [logMessage, setLogMessage] = useState<string | null>(null);
+  const [commandHistory, setCommandHistory] = useState<string[]>([]);
+  const [logMessage, _setLogMessage] = useState<string | null>(null);
+  const setLogMessage = useCallback((msg: string | null) => {
+    _setLogMessage(msg);
+    if (msg) setCommandHistory(prev => {
+        if (prev[prev.length - 1] === msg) return prev;
+        return [...prev.slice(-50), msg];
+    });
+  }, []);
   const [isCommandActive, setIsCommandActive] = useState(false);
   const [activeCommandName, setActiveCommandName] = useState<string | undefined>(undefined);
   const [showCircleOptions, setShowCircleOptions] = useState(false);
@@ -87,6 +96,7 @@ const App: React.FC = () => {
   const [mtextEditor, setMtextEditor] = useState<{ initialValue: string, callback: (text: string) => void } | null>(null);
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [lastAiCommandTime, setLastAiCommandTime] = useState(0);
+  const [isAppLoading, setIsAppLoading] = useState(true);
 
   const view = tabViews[activeTab];
   const setView = useCallback((updater: ViewState | ((v: ViewState) => ViewState)) => {
@@ -104,10 +114,15 @@ const App: React.FC = () => {
   const liveSessionRef = useRef<any>(null);
   const canvasHandleRef = useRef<CADCanvasHandle>(null);
 
+  const tabViewsRef = useRef(tabViews);
+  const activeTabRef = useRef(activeTab);
+
   useEffect(() => { settingsRef.current = settings; }, [settings]);
   useEffect(() => { layersRef.current = layers; }, [layers]);
   useEffect(() => { layerConfigRef.current = layerConfig; }, [layerConfig]);
   useEffect(() => { selectedIdsRef.current = selectedIds; }, [selectedIds]);
+  useEffect(() => { tabViewsRef.current = tabViews; }, [tabViews]);
+  useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
 
   // Restore session from LocalStorage
   useEffect(() => {
@@ -221,6 +236,7 @@ const App: React.FC = () => {
       case 'toggleDrawingProps': setActivePanel(activePanel === 'drawing_props' ? 'none' : 'drawing_props'); break;
       case 'toggleHelp': setActivePanel(activePanel === 'help' ? 'none' : 'help'); break;
       case 'toggleAbout': setActivePanel(activePanel === 'about' ? 'none' : 'about'); break;
+      case 'togglePrivacy': setActivePanel(activePanel === 'privacy' ? 'none' : 'privacy'); break;
       case 'zoomExtents': setView({ scale: 0.05, originX: 0, originY: 0 }); break;
       case 'zoomIn': setView(v => ({ ...v, scale: v.scale * 1.5 })); break;
       case 'zoomOut': setView(v => ({ ...v, scale: v.scale / 1.5 })); break;
@@ -312,6 +328,10 @@ const App: React.FC = () => {
 
   const executeCommand = useCallback((cmdStr: string) => {
     const trimmed = cmdStr.trim();
+    if (trimmed) {
+      setCommandHistory(prev => [...prev.slice(-50), "> " + trimmed.toUpperCase()]);
+    }
+
     if (engineRef.current?.active) { 
         if (engineRef.current.input(cmdStr)) { 
             setCommandInput(''); 
@@ -414,7 +434,7 @@ const App: React.FC = () => {
           } else setPrompt(msg?.toUpperCase() || "COMMAND:");
         },
         setView: setView as any,
-        getViewState: () => tabViews[activeTab],
+        getViewState: () => tabViewsRef.current[activeTabRef.current],
         onFinish: () => { 
           setPreviewShapes(null); 
           setPrompt("COMMAND:"); 
@@ -485,6 +505,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full w-full bg-black text-neutral-300 overflow-hidden select-none">
+      {isAppLoading && <LoadingScreen onComplete={() => setIsAppLoading(false)} />}
       <header className="h-10 flex items-center justify-between px-3 shrink-0 bg-black border-b border-white/5 z-[110]">
         <div className="flex items-center gap-2">
           <VoxIcon size={24} />
@@ -550,8 +571,9 @@ const App: React.FC = () => {
         {activePanel === 'drafting' && <DraftingSettings options={settings.snapOptions} settings={settings} onSettingsChange={(upd) => setSettings(s => ({...s, ...upd}))} onChange={(upd) => setSettings(s => ({...s, snapOptions: { ...s.snapOptions, ...upd }}))} onClose={() => setActivePanel('none')} />}
         {activePanel === 'file' && <FileManager currentName={currentFileName} onAction={handleAction} onClose={() => setActivePanel('none')} />}
         {activePanel === 'drawing_props' && <DrawingProperties settings={settings} onUpdateSettings={(upd) => setSettings(s => ({...s, ...upd}))} onClose={() => setActivePanel('none')} entityCount={(Object.values(layers).flat() as Shape[]).length} currentFileName={currentFileName} onAction={handleAction} />}
-        {activePanel === 'help' && <InfoPanel type="help" onClose={() => setActivePanel('none')} />}
-        {activePanel === 'about' && <InfoPanel type="about" onClose={() => setActivePanel('none')} />}
+        {activePanel === 'help' && <InfoPanel type="help" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
+        {activePanel === 'about' && <InfoPanel type="about" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
+        {activePanel === 'privacy' && <InfoPanel type="privacy" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
         {activePanel === 'new_file' && <NewFileDialog onSelect={(cfg) => { setLayers({ '0': [], 'defpoints': [] }); setSettings(s => ({...s, units: cfg.units, precision: cfg.precision })); setCurrentFileName(cfg.name + '.vox'); setActivePanel('none'); }} onClose={() => setActivePanel('none')} />}
         {mtextEditor && (
           <MTextEditor 
@@ -583,6 +605,7 @@ const App: React.FC = () => {
           onCommand={executeCommand} 
           onAiQuery={async (q, sketch) => { 
             setIsAiThinking(true);
+            setCommandHistory(prev => [...prev, "> AI: " + q]);
             setLogMessage("CONSULTING PRINCIPAL ARCHITECT..."); 
             try {
               const res = await getCommandFromAI(q, `Drawing: ${(Object.values(layers).flat() as Shape[]).length} entities. Settings: ${settings.units}.`, sketch); 
@@ -592,14 +615,15 @@ const App: React.FC = () => {
               }
               if (res.text) {
                 let finalMsg = res.text;
-                // Fix: Mandatory listing of grounding source URLs on the web app
                 if (res.groundingLinks && res.groundingLinks.length > 0) {
                   finalMsg += "\n\nSOURCES FOUND:\n" + res.groundingLinks.map(l => `• ${l.title}: ${l.uri}`).join('\n');
                 }
                 setLogMessage(finalMsg);
+                setCommandHistory(prev => [...prev, finalMsg]);
               }
             } catch (e: any) {
               setLogMessage(`ERR: ${e.message}`);
+              setCommandHistory(prev => [...prev, `ERR: ${e.message}`]);
             } finally {
               setIsAiThinking(false);
             }
@@ -609,7 +633,7 @@ const App: React.FC = () => {
           isLiveActive={isLiveActive} 
           isCommandActive={isCommandActive} 
           prompt={prompt} 
-          message={logMessage} 
+          history={commandHistory}
           value={commandInput} 
           onChange={setCommandInput} 
         />
