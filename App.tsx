@@ -621,7 +621,7 @@ const App: React.FC = () => {
           <VoxIcon size={30} className="shrink-0" />
           <div className="flex flex-col justify-center -space-y-1 mt-[1px]">
             <span className="font-black text-[15px] leading-[1.1] uppercase tracking-wider text-white">VOXCADD</span>
-            <span className="text-[#00BCD4] font-bold text-[9px] leading-[1.1] uppercase tracking-[0.1em] opacity-90">Professional v1.0.0</span>
+            <span className="text-[#00BCD4] font-bold text-[9px] leading-[1.1] uppercase tracking-[0.1em] opacity-90">v-1.0.0</span>
           </div>
         </div>
         <div className="flex items-center gap-2">

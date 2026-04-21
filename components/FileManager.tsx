@@ -98,7 +98,7 @@ const FileManager: React.FC<FileManagerProps> = ({ currentName, onAction, onClos
                   <div>
                     <h3 className="text-lg font-black text-white uppercase tracking-tight">Project Center</h3>
                     <p className="text-[9px] text-neutral-500 font-bold uppercase tracking-[0.2em] mt-1 flex items-center gap-1.5">
-                      <Briefcase size={10} /> Professional File Manager
+                      <Briefcase size={10} /> File Manager
                     </p>
                   </div>
                 </div>
@@ -111,17 +111,17 @@ const FileManager: React.FC<FileManagerProps> = ({ currentName, onAction, onClos
                 <div>
                     <h4 className="text-[10px] font-black text-neutral-600 uppercase tracking-[0.25em] mb-4 px-2">Storage Actions</h4>
                     <div className="grid grid-cols-2 gap-4">
-                        <ProjectActionBtn icon={FilePlus} label="New" sublabel="New Canvas" onClick={() => onAction('new')} />
+                        <ProjectActionBtn icon={FilePlus} label="New" sublabel="New Drawing" onClick={() => onAction('new')} />
                         <ProjectActionBtn icon={FolderOpen} label="Open" sublabel="Import VOX/DXF/DWG" onClick={() => onAction('open')} />
                         <ProjectActionBtn icon={VoxIcon} label="Save Project" sublabel="VOX Format" onClick={() => onAction('save')} />
                         <ProjectActionBtn icon={VoxIcon} label="Save As" sublabel=".VOX Binary" onClick={() => onAction('saveAs', 'vox')} />
                     </div>
                 </div>
 
-                {/* Pro CAD Export Section */}
+                {/* CAD Export Section */}
                 <div>
                     <div className="flex items-center justify-between px-2 mb-4">
-                        <h4 className="text-[10px] font-black text-neutral-600 uppercase tracking-[0.25em]">Pro CAD Export</h4>
+                        <h4 className="text-[10px] font-black text-neutral-600 uppercase tracking-[0.25em]">CAD Export</h4>
                         <div className="bg-neutral-800/50 border border-white/5 px-2 py-0.5 rounded text-[7px] font-black text-neutral-500 uppercase tracking-widest">AutoCAD Compatible</div>
                     </div>
                     <div className="grid grid-cols-1 gap-3">
@@ -160,7 +160,7 @@ const FileManager: React.FC<FileManagerProps> = ({ currentName, onAction, onClos
                 <CheckCircle2 size={12} className="text-emerald-500" />
                 <span className="text-[9px] font-black text-emerald-500/80 uppercase tracking-widest">System Secure & Synced</span>
               </div>
-              <span className="text-[8px] font-bold text-neutral-800 uppercase tracking-[0.2em]">VoxCadd PRD v1.0.0</span>
+              <span className="text-[8px] font-bold text-neutral-800 uppercase tracking-[0.2em]">VoxCadd PRD v-1.0.0</span>
             </div>
         </div>
     );
