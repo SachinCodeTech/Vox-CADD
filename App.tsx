@@ -18,6 +18,7 @@ import { generateId } from './services/cadService';
 import { getCommandFromAI, connectLiveAgent } from './services/geminiService';
 import { shapesToDXF, dxfToShapes } from './services/dxfService';
 import { shapesToVox, voxToShapes } from './services/voxService';
+import { dwgToShapes } from './services/DwgService';
 import { 
   CADCommand, CommandEngine, LineCommand, DoubleLineCommand, CircleCommand, RectCommand, PolyCommand, 
   ArcCommand, MoveCommand, EraseCommand, DistanceCommand, AreaCommand, 
@@ -91,6 +92,7 @@ const App: React.FC = () => {
   const [activeCommandName, setActiveCommandName] = useState<string | undefined>(undefined);
   const [showCircleOptions, setShowCircleOptions] = useState(false);
   const [currentFileName, setCurrentFileName] = useState<string>("Drawing1.vox");
+  const [fileHandle, setFileHandle] = useState<any>(null);
   const [activePanel, setActivePanel] = useState<PanelType>('none');
   const [previewShapes, setPreviewShapes] = useState<Shape[] | null>(null);
   const [mtextEditor, setMtextEditor] = useState<{ initialValue: string, callback: (text: string) => void } | null>(null);
@@ -140,31 +142,100 @@ const App: React.FC = () => {
       }
     }
 
+    // Global Drag and Drop support
+    const handleDragOver = (e: DragEvent) => e.preventDefault();
+    const handleDrop = async (e: DragEvent) => {
+      e.preventDefault();
+      const file = e.dataTransfer?.files[0];
+      if (file) {
+        const isDwg = file.name.toLowerCase().endsWith('.dwg');
+        const content = isDwg ? await file.arrayBuffer() : await file.text();
+        handleOpenFile(file.name, content);
+      }
+    };
+    window.addEventListener('dragover', handleDragOver);
+    window.addEventListener('drop', handleDrop);
+
     // Handle PWA File Launch
     if ('launchQueue' in window) {
       (window as any).launchQueue.setConsumer(async (launchParams: any) => {
         if (launchParams.files.length > 0) {
           const fileHandle = launchParams.files[0];
+          setFileHandle(fileHandle);
           const file = await fileHandle.getFile();
-          const content = await file.text();
+          const isDwg = file.name.toLowerCase().endsWith('.dwg');
+          const content = isDwg ? await file.arrayBuffer() : await file.text();
           handleOpenFile(file.name, content);
         }
       });
     }
+
+    return () => {
+      window.removeEventListener('dragover', handleDragOver);
+      window.removeEventListener('drop', handleDrop);
+    };
   }, []);
 
-  const handleOpenFile = (fileName: string, content: string) => {
+  const handleOpenFile = async (fileName: string, content: string | ArrayBuffer) => {
     const isDxf = fileName.toLowerCase().endsWith('.dxf');
+    const isDwg = fileName.toLowerCase().endsWith('.dwg');
+    const isVox = fileName.toLowerCase().endsWith('.vox');
+    
     try {
-        if (isDxf) {
-            const importedShapes = dxfToShapes(content);
+        if (isDwg) {
+            if (!(content instanceof ArrayBuffer)) {
+                // If we got string (e.g. from file reader mistakenly using readAsText), this shouldn't happen if we use readAsArrayBuffer
+                // But let's handle it gracefully if possible or just assume ArrayBuffer for DWG
+                setLogMessage("LOAD_ERR: BINARY_EXPECTED");
+                return;
+            }
+            setLogMessage("DWG_PARSING...");
+            const result = await dwgToShapes(content);
+            const { shapes: importedShapes, stats } = result;
+            
             if (importedShapes.length > 0) {
-                setLayers({ '0': importedShapes, 'defpoints': [] });
-                setLogMessage(`DXF_IMPORT: ${importedShapes.length} ENTITIES`);
+                setLayers(prev => {
+                    const newLayers = { ...prev };
+                    importedShapes.forEach(s => {
+                        const l = s.layer || '0';
+                        if (!newLayers[l]) newLayers[l] = [];
+                        newLayers[l].push(s);
+                    });
+                    return newLayers;
+                });
+                
+                const statsMsg = `DWG_IMPORT: ${importedShapes.length} ENTITIES | UNSUPPORTED: ${stats.unsupported}`;
+                setLogMessage(statsMsg);
+                console.log("DWG IMPORT STATS:", stats);
             } else {
-                setLogMessage("DXF_ERR: NO_DATA");
+                setLogMessage("DWG_ERR: NO_DATA_OR_FAIL");
+            }
+        } else if (isDxf || isVox) {
+            if (typeof content !== 'string') return;
+            
+            // Try VOX (JSON) first, then fallback to DXF
+            const voxResult = voxToShapes(content);
+            if (voxResult) {
+                setLayers(voxResult.shapes.reduce((acc, s) => {
+                    const l = s.layer || '0';
+                    if (!acc[l]) acc[l] = [];
+                    acc[l].push(s);
+                    return acc;
+                }, {} as Record<string, Shape[]>));
+                setLayerConfig(voxResult.layers);
+                setSettings({ ...INITIAL_SETTINGS, ...voxResult.settings });
+                setLogMessage("VOX_PROJECT_LOADED");
+            } else {
+                const importedShapes = dxfToShapes(content);
+                if (importedShapes.length > 0) {
+                    setLayers({ '0': importedShapes, 'defpoints': [] });
+                    setLogMessage(`${isVox ? 'VOX' : 'DXF'}_IMPORT: ${importedShapes.length} ENTITIES`);
+                } else {
+                    setLogMessage("LOAD_ERR: UNRECOGNIZED_FORMAT");
+                }
             }
         } else {
+            if (typeof content !== 'string') return;
             const result = voxToShapes(content);
             if (result) {
                 setLayers(result.shapes.reduce((acc, s) => {
@@ -241,63 +312,102 @@ const App: React.FC = () => {
       case 'zoomIn': setView(v => ({ ...v, scale: v.scale * 1.5 })); break;
       case 'zoomOut': setView(v => ({ ...v, scale: v.scale / 1.5 })); break;
       case 'setUnits': setSettings(s => ({ ...s, units: payload })); break;
-      case 'new': setActivePanel('new_file'); break;
+      case 'new': 
+        if ('showSaveFilePicker' in window) {
+            try {
+                const handle = await (window as any).showSaveFilePicker({
+                    suggestedName: 'Untitled.vox',
+                    types: [{
+                        description: 'VoxCADD Project',
+                        accept: { 'application/vnd.voxcadd.project': ['.vox'] }
+                    }]
+                });
+                setFileHandle(handle);
+                setCurrentFileName(handle.name);
+                setLayers(INITIAL_LAYERS);
+                setLayerConfig(INITIAL_LAYER_CONFIG);
+                setSettings(INITIAL_SETTINGS);
+                setHistory([]);
+                setRedoStack([]);
+                setLogMessage(`NEW_FILE_CREATED: ${handle.name}`);
+                setActivePanel('none');
+            } catch (e) {
+                console.warn("User cancelled file creation");
+            }
+        } else {
+            setActivePanel('new_file'); 
+        }
+        break;
       case 'rename': setCurrentFileName(payload); commitToHistory(); setLogMessage(`RENAMED_TO: ${payload}`); break;
       case 'open':
         setLogMessage("AWAITING_FILE_SELECTION...");
         const input = document.createElement('input');
         input.type = 'file';
-        input.accept = ".vox,.dxf";
+        input.accept = ".vox,.dxf,.dwg";
         input.onchange = (e: any) => {
             const file = e.target.files[0];
             if (!file) { setLogMessage("OPEN_CANCELLED"); return; }
             const reader = new FileReader();
-            reader.onload = (res: any) => {
-                handleOpenFile(file.name, res.target.result);
-            };
-            reader.readAsText(file);
+            if (file.name.toLowerCase().endsWith('.dwg')) {
+                reader.onload = (res: any) => {
+                    handleOpenFile(file.name, res.target.result);
+                };
+                reader.readAsArrayBuffer(file);
+            } else {
+                reader.onload = (res: any) => {
+                    handleOpenFile(file.name, res.target.result);
+                };
+                reader.readAsText(file);
+            }
         };
         input.click();
         break;
       case 'save':
       case 'saveAs':
-        setLogMessage("PREPARING_BINARY_DATA...");
-        const isDxfMode = payload === 'dxf';
-        const fileExt = isDxfMode ? '.dxf' : '.vox';
+        setLogMessage("PREPARING_DATA...");
+        const isDxfExport = payload === 'dxf';
+        const finalExt = isDxfExport ? '.dxf' : '.vox';
         
-        // Fix extension logic: remove .vox.json or any trailing extension correctly
-        let baseName = currentFileName;
-        if (baseName.toLowerCase().endsWith('.vox.json')) {
-            baseName = baseName.substring(0, baseName.length - 9);
-        } else if (baseName.toLowerCase().endsWith('.vox')) {
-            baseName = baseName.substring(0, baseName.length - 4);
-        } else if (baseName.toLowerCase().endsWith('.dxf')) {
-            baseName = baseName.substring(0, baseName.length - 4);
+        let content: string = "";
+        // For .vox, we now use DXF format internally to ensure "any CAD tool" support as requested
+        content = shapesToDXF(Object.values(layers).flat() as Shape[], layerConfig, settings);
+
+        // Native File System Access
+        if ('showSaveFilePicker' in window) {
+            try {
+                let handle = (act === 'save' && fileHandle) ? fileHandle : null;
+                if (!handle) {
+                    handle = await (window as any).showSaveFilePicker({
+                        suggestedName: currentFileName.replace(/\.[^/.]+$/, "") + finalExt,
+                        types: [{
+                            description: isDxfExport ? 'AutoCAD DXF' : 'VoxCADD Project',
+                            accept: { [isDxfExport ? 'application/dxf' : 'application/vnd.voxcadd.project']: [finalExt] }
+                        }]
+                    });
+                }
+                
+                const writable = await handle.createWritable();
+                await writable.write(content);
+                await writable.close();
+                
+                setFileHandle(handle);
+                setCurrentFileName(handle.name);
+                setLogMessage(`SAVED_TO: ${handle.name}`);
+            } catch (e) {
+                console.warn("Save cancelled or failed", e);
+                setLogMessage("SAVE_ERR: DISK_ACCESS_DENIED");
+            }
         } else {
-            baseName = baseName.replace(/\.[^/.]+$/, "");
+            // Fallback for browsers without File System Access API
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = currentFileName.replace(/\.[^/.]+$/, "") + finalExt;
+            a.click();
+            URL.revokeObjectURL(url);
+            setLogMessage("EXPORTED_VIA_DOWNLOAD");
         }
-        
-        const fileName = baseName + fileExt;
-        let finalBlob: Blob;
-        
-        if (isDxfMode) {
-            const dxfStr = shapesToDXF(Object.values(layers).flat() as Shape[], layerConfig, settings);
-            finalBlob = new Blob([dxfStr], { type: 'application/dxf' });
-        } else {
-            const voxStr = shapesToVox(Object.values(layers).flat() as Shape[], layerConfig, settings);
-            finalBlob = new Blob([voxStr], { type: 'application/octet-stream' });
-        }
-        
-        const url = URL.createObjectURL(finalBlob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = fileName;
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(url), 100);
-        
-        setCurrentFileName(fileName);
-        setLogMessage(`EXPORT_FINISHED: ${fileName}`);
-        if (act === 'save') commitToHistory();
         break;
       case 'saveImage': {
         if (canvasHandleRef.current) {
@@ -507,9 +617,12 @@ const App: React.FC = () => {
     <div className="flex flex-col h-full w-full bg-black text-neutral-300 overflow-hidden select-none">
       {isAppLoading && <LoadingScreen onComplete={() => setIsAppLoading(false)} />}
       <header className="h-10 flex items-center justify-between px-3 shrink-0 bg-black border-b border-white/5 z-[110]">
-        <div className="flex items-center gap-2">
-          <VoxIcon size={24} />
-          <span className="font-black text-[11px] uppercase tracking-[0.2em] text-white">VOXCADD <span className="text-neutral-700">10A</span></span>
+        <div className="flex items-center gap-2.5">
+          <VoxIcon size={32} className="shrink-0" />
+          <div className="flex flex-col justify-center -space-y-0.5">
+            <span className="font-black text-[12px] uppercase tracking-[0.12em] text-white leading-tight">VOXCADD</span>
+            <span className="text-neutral-600 font-bold text-[9px] uppercase tracking-[0.05em] leading-tight">v1.0.0</span>
+          </div>
         </div>
         <div className="flex items-center gap-2">
             <div className="flex bg-[#121214] rounded-lg p-0.5 border border-white/5">

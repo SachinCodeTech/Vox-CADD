@@ -29,7 +29,8 @@
       "action": "/",
       "accept": {
         "application/vnd.voxcadd.project": [".vox"],
-        "application/dxf": [".dxf"]
+        "application/dxf": [".dxf"],
+        "application/acad": [".dwg"]
       }
     }
   ]

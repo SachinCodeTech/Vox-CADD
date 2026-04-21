@@ -112,7 +112,7 @@ const FileManager: React.FC<FileManagerProps> = ({ currentName, onAction, onClos
                     <h4 className="text-[10px] font-black text-neutral-600 uppercase tracking-[0.25em] mb-4 px-2">Storage Actions</h4>
                     <div className="grid grid-cols-2 gap-4">
                         <ProjectActionBtn icon={FilePlus} label="New" sublabel="New Canvas" onClick={() => onAction('new')} />
-                        <ProjectActionBtn icon={FolderOpen} label="Open" sublabel="Import VOX/DXF" onClick={() => onAction('open')} />
+                        <ProjectActionBtn icon={FolderOpen} label="Open" sublabel="Import VOX/DXF/DWG" onClick={() => onAction('open')} />
                         <ProjectActionBtn icon={VoxIcon} label="Save Project" sublabel="VOX Format" onClick={() => onAction('save')} />
                         <ProjectActionBtn icon={VoxIcon} label="Save As" sublabel=".VOX Binary" onClick={() => onAction('saveAs', 'vox')} />
                     </div>
@@ -160,7 +160,7 @@ const FileManager: React.FC<FileManagerProps> = ({ currentName, onAction, onClos
                 <CheckCircle2 size={12} className="text-emerald-500" />
                 <span className="text-[9px] font-black text-emerald-500/80 uppercase tracking-widest">System Secure & Synced</span>
               </div>
-              <span className="text-[8px] font-bold text-neutral-800 uppercase tracking-[0.2em]">VoxCadd PRD V10A</span>
+              <span className="text-[8px] font-bold text-neutral-800 uppercase tracking-[0.2em]">VoxCadd PRD v1.0.0</span>
             </div>
         </div>
     );
