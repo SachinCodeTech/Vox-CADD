@@ -1,7 +1,7 @@
 {
-  "name": "VoxCADD Professional",
+  "name": "VoxCADD Project Manager",
   "short_name": "VoxCADD",
-  "description": "Professional Mobile CAD Engine",
+  "description": "Professional 2D CAD Mobile Engine",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#000000",
@@ -9,25 +9,21 @@
   "icons": [
     {
       "src": "/favicon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/favicon.svg",
       "sizes": "192x192",
-      "type": "image/svg+xml"
+      "type": "image/svg+xml",
+      "purpose": "any"
     },
     {
       "src": "/favicon.svg",
       "sizes": "512x512",
-      "type": "image/svg+xml"
+      "type": "image/svg+xml",
+      "purpose": "any"
     }
   ],
   "file_handlers": [
     {
       "action": "/",
-      "name": "VoxCADD Project",
+      "name": "VoxCADD Drawing",
       "icons": [
         {
           "src": "/favicon.svg",
@@ -38,10 +34,8 @@
       "accept": {
         "application/vnd.voxcadd.project": [".vox"],
         "application/dxf": [".dxf"],
-        "application/acad": [".dwg"],
-        "application/x-autocad": [".dwg", ".dxf"],
-        "image/vnd.dwg": [".dwg"],
-        "image/x-dwg": [".dwg"]
+        "image/vnd.dxf": [".dxf"],
+        "image/vnd.dwg": [".dwg"]
       }
     }
   ]

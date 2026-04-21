@@ -67,7 +67,7 @@ const LoadingScreen: React.FC<{ onComplete: () => void }> = ({ onComplete }) => 
                 className="absolute -bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1"
               >
                 <Zap size={10} className="text-cyan-500 fill-cyan-500" />
-                <span className="text-[8px] font-black text-cyan-400 uppercase tracking-[0.3em]">SYSTEM_v-1.0.0</span>
+                <span className="text-[8px] font-black text-cyan-400 uppercase tracking-[0.3em]">SYSTEM_v1.0.0</span>
               </motion.div>
             </motion.div>
 

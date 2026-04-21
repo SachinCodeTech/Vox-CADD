@@ -160,7 +160,7 @@ const FileManager: React.FC<FileManagerProps> = ({ currentName, onAction, onClos
                 <CheckCircle2 size={12} className="text-emerald-500" />
                 <span className="text-[9px] font-black text-emerald-500/80 uppercase tracking-widest">System Secure & Synced</span>
               </div>
-              <span className="text-[8px] font-bold text-neutral-800 uppercase tracking-[0.2em]">VoxCadd PRD v-1.0.0</span>
+              <span className="text-[8px] font-bold text-neutral-800 uppercase tracking-[0.2em]">VoxCadd PRD v1.0.0</span>
             </div>
         </div>
     );

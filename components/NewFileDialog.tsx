@@ -125,7 +125,7 @@ const NewFileDialog: React.FC<NewFileDialogProps> = ({ onSelect, onClose }) => {
 
         <div className="p-6 bg-[#0a0a0c] text-center border-t border-white/5">
           <p className="text-[8px] text-neutral-700 font-bold uppercase tracking-[0.3em] flex items-center justify-center gap-2">
-            <Target size={10} /> Full Scale 1:1 Kernel Loaded
+            <Target size={10} /> Workspace v1.0.0 | Full Scale 1:1 Kernel Loaded
           </p>
         </div>
       </div>

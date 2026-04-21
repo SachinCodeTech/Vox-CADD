@@ -151,7 +151,7 @@ const MenuBar: React.FC<MenuBarProps> = ({ onAction, currentFileName, units }) =
 
       <div className="mt-12 text-center opacity-30 flex flex-col items-center gap-1">
         <div className="w-10 h-[1px] bg-neutral-500 mb-2"></div>
-        <p className="text-[8px] font-black uppercase tracking-[0.3em]">VoxCADD v-1.0.0</p>
+        <p className="text-[8px] font-black uppercase tracking-[0.3em]">VoxCADD v1.0.0</p>
         <p className="text-[7px] font-medium text-neutral-600 uppercase tracking-widest">Architectural Data Management Engine</p>
       </div>
     </div>

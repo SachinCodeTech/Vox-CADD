@@ -184,36 +184,23 @@ const App: React.FC = () => {
     try {
         if (isDwg) {
             if (!(content instanceof ArrayBuffer)) {
-                // If we got string (e.g. from file reader mistakenly using readAsText), this shouldn't happen if we use readAsArrayBuffer
-                // But let's handle it gracefully if possible or just assume ArrayBuffer for DWG
-                setLogMessage("LOAD_ERR: BINARY_EXPECTED");
+                setLogMessage("LOAD_ERR: BINARY_DATA_REQUIRED");
                 return;
             }
-            setLogMessage("DWG_PARSING...");
+            setLogMessage("PARSING_DWG_BINARY...");
             const result = await dwgToShapes(content);
             const { shapes: importedShapes, stats } = result;
             
             if (importedShapes.length > 0) {
-                setLayers(prev => {
-                    const newLayers = { ...prev };
-                    importedShapes.forEach(s => {
-                        const l = s.layer || '0';
-                        if (!newLayers[l]) newLayers[l] = [];
-                        newLayers[l].push(s);
-                    });
-                    return newLayers;
-                });
-                
-                const statsMsg = `DWG_IMPORT: ${importedShapes.length} ENTITIES | UNSUPPORTED: ${stats.unsupported}`;
-                setLogMessage(statsMsg);
-                console.log("DWG IMPORT STATS:", stats);
+                setLayers({ '0': importedShapes, 'defpoints': [] }); // Overwrite or add? User likely wants to OPEN
+                setLogMessage(`DWG_IMPORT: ${importedShapes.length} ENTITIES`);
             } else {
-                setLogMessage("DWG_ERR: NO_DATA_OR_FAIL");
+                setLogMessage("DWG_EMPTY_OR_UNSUPPORTED");
             }
         } else if (isDxf || isVox) {
             if (typeof content !== 'string') return;
             
-            // Try VOX (JSON) first, then fallback to DXF
+            // Try native VOX format first
             const voxResult = voxToShapes(content);
             if (voxResult) {
                 setLayers(voxResult.shapes.reduce((acc, s) => {
@@ -226,37 +213,26 @@ const App: React.FC = () => {
                 setSettings({ ...INITIAL_SETTINGS, ...voxResult.settings });
                 setLogMessage("VOX_PROJECT_LOADED");
             } else {
+                // If not VOX, try DXF
+                setLogMessage("PARSING_DXF_DATA...");
                 const importedShapes = dxfToShapes(content);
                 if (importedShapes.length > 0) {
                     setLayers({ '0': importedShapes, 'defpoints': [] });
-                    setLogMessage(`${isVox ? 'VOX' : 'DXF'}_IMPORT: ${importedShapes.length} ENTITIES`);
+                    setLogMessage(`DXF_IMPORT: ${importedShapes.length} ENTITIES`);
                 } else {
-                    setLogMessage("LOAD_ERR: UNRECOGNIZED_FORMAT");
-                }
-            }
-        } else {
-            if (typeof content !== 'string') return;
-            const result = voxToShapes(content);
-            if (result) {
-                setLayers(result.shapes.reduce((acc, s) => {
-                    const l = s.layer || '0';
-                    if (!acc[l]) acc[l] = [];
-                    acc[l].push(s);
-                    return acc;
-                }, {} as Record<string, Shape[]>));
-                setLayerConfig(result.layers);
-                setSettings({ ...INITIAL_SETTINGS, ...result.settings });
-                setLogMessage("VOX_PROJECT_LOADED");
-            } else {
-                // Try legacy format
-                try {
-                    const data = JSON.parse(content);
-                    if (data.layers) setLayers(data.layers);
-                    if (data.layerConfig) setLayerConfig(data.layerConfig);
-                    if (data.settings) setSettings({ ...INITIAL_SETTINGS, ...data.settings });
-                    setLogMessage("VOX_WORKSPACE_LOADED");
-                } catch (e) {
-                    setLogMessage("LOAD_ERR: CORRUPT_FORMAT");
+                    // Try legacy JSON format as last resort
+                    try {
+                        const data = JSON.parse(content);
+                        if (data.layers || data.shapes) {
+                            if (data.layers && !Array.isArray(data.layers)) setLayers(data.layers);
+                            else if (data.shapes) setLayers({ '0': data.shapes });
+                            setLogMessage("LEGACY_WORKSPACE_LOADED");
+                        } else {
+                            setLogMessage("LOAD_ERR: NO_RECOGNIZABLE_CAD_DATA");
+                        }
+                    } catch (e) {
+                        setLogMessage("LOAD_ERR: UNRECOGNIZED_FILE_TYPE");
+                    }
                 }
             }
         }
@@ -619,9 +595,9 @@ const App: React.FC = () => {
       <header className="h-10 flex items-center justify-between px-3 shrink-0 bg-black border-b border-white/5 z-[110]">
         <div className="flex items-center gap-2">
           <VoxIcon size={30} className="shrink-0" />
-          <div className="flex flex-col justify-center -space-y-1 mt-[1px]">
-            <span className="font-black text-[15px] leading-[1.1] uppercase tracking-wider text-white">VOXCADD</span>
-            <span className="text-[#00BCD4] font-bold text-[9px] leading-[1.1] uppercase tracking-[0.1em] opacity-90">v-1.0.0</span>
+          <div className="flex items-baseline gap-1.5">
+            <span className="font-black text-[15px] uppercase tracking-wider text-white">VOXCADD</span>
+            <span className="text-neutral-500 font-bold text-[8px] uppercase tracking-widest opacity-70">v1.0.0</span>
           </div>
         </div>
         <div className="flex items-center gap-2">

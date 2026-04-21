@@ -69,7 +69,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ type, onClose, onSwitch }) => {
     <div className="flex flex-col items-center text-center p-4">
       <div className="w-20 h-20 bg-cyan-500 rounded-3xl flex items-center justify-center font-black text-4xl text-black mb-6 shadow-[0_0_30px_rgba(6,182,212,0.4)]">V</div>
       <h2 className="text-2xl font-black text-white mb-1">VoxCADD Mobile</h2>
-      <p className="text-xs text-cyan-400 font-bold uppercase tracking-widest mb-6">v-1.0.0</p>
+      <p className="text-xs text-cyan-400 font-bold uppercase tracking-widest mb-6">v1.0.0</p>
       
       <div className="w-full space-y-4 text-left bg-black/40 p-4 rounded-2xl border border-white/5">
         <div className="flex flex-col gap-3">
@@ -84,7 +84,13 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ type, onClose, onSwitch }) => {
         </div>
         <div>
           <h4 className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mb-1">Engine</h4>
-          <p className="text-xs text-neutral-200">Vox-Core v-1.0.0 High-Precision Drafting Engine</p>
+          <p className="text-xs text-neutral-200">Vox-Core v1.0.0 High-Precision Drafting Engine</p>
+        </div>
+        <div>
+          <h4 className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mb-1">Installation Tip</h4>
+          <p className="text-[10px] text-neutral-400 leading-relaxed">
+            Install VoxCADD as a PWA (Add to Home Screen / Install App) to enable native .VOX icon support and "Open With" functionality on your device.
+          </p>
         </div>
         <div>
           <h4 className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mb-1">Credits</h4>
