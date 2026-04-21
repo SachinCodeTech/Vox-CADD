@@ -1,6 +1,6 @@
 {
-  "name": "Vox Cadd mobile pro v1.0.0",
-  "description": "Professional Mobile CAD Engine with Principal Architect AI. Features native DWG support, DXF interoperability, and intelligent visual drafting via Google Search grounding.",
+  "name": "VoxCADD Professional",
+  "description": "Professional Mobile CAD Engine with Principal Architect AI. Features native DWG support, DXF interoperability, and intelligent visual drafting.",
   "requestFramePermissions": [
     "camera",
     "microphone",

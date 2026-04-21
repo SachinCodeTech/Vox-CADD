@@ -9,7 +9,8 @@ export const initDwgService = async () => {
     if (libredwg) return libredwg;
     
     // LibreDwg.create takes the directory path where wasm files are located
-    libredwg = await LibreDwg.create(''); // Uses public root where we copied the wasm
+    const baseUrl = window.location.origin + '/';
+    libredwg = await LibreDwg.create(baseUrl); 
     return libredwg;
 };
 
@@ -25,11 +26,13 @@ export interface DwgImportResult {
 export const dwgToShapes = async (buffer: ArrayBuffer): Promise<DwgImportResult> => {
     try {
         const instance = await initDwgService();
-        
+        if (!instance) throw new Error("DWG_ENGINE_INIT_FAILED");
+
         // Read DWG binary data
-        const dwgData = instance.dwg_read_data(buffer, Dwg_File_Type.DWG);
+        console.log("DWG Service: Reading buffer", buffer.byteLength);
+        const dwgData = instance.dwg_read_data(new Uint8Array(buffer), Dwg_File_Type.DWG);
         if (!dwgData) {
-            throw new Error("FAILED_TO_READ_DWG_BINARY");
+            throw new Error("FAILED_TO_READ_DWG_BINARY - Check if file is valid DWG");
         }
 
         // Convert to high-level database structure
@@ -150,6 +153,28 @@ export const dwgToShapes = async (buffer: ArrayBuffer): Promise<DwgImportResult>
                                     }
                                 });
                             }
+                        });
+                    }
+                    break;
+                case 'ELLIPSE':
+                    if (ent.center && ent.majorAxis && ent.ratio !== undefined) {
+                        shapes.push({
+                            id, type: 'ellipse', layer, color: '#FFFFFF',
+                            x: ent.center.x, y: ent.center.y,
+                            rx: Math.sqrt(ent.majorAxis.x ** 2 + ent.majorAxis.y ** 2),
+                            ry: Math.sqrt(ent.majorAxis.x ** 2 + ent.majorAxis.y ** 2) * ent.ratio,
+                            rotation: Math.atan2(ent.majorAxis.y, ent.majorAxis.x),
+                            thickness: 0.25
+                        });
+                    }
+                    break;
+                case 'SPLINE':
+                    if (ent.fitPoints && ent.fitPoints.length > 1) {
+                        shapes.push({
+                            id, type: 'pline', layer, color: '#FFFFFF',
+                            points: ent.fitPoints.map((v: any) => ({ x: v.x, y: v.y })),
+                            closed: !!(ent.flag & 1),
+                            thickness: 0.25
                         });
                     }
                     break;

@@ -324,8 +324,8 @@ const App: React.FC = () => {
                 });
                 setFileHandle(handle);
                 setCurrentFileName(handle.name);
-                setLayers(INITIAL_LAYERS);
-                setLayerConfig(INITIAL_LAYER_CONFIG);
+                setLayers({ '0': [], 'defpoints': [] });
+                setLayerConfig(INITIAL_LAYERS_CONFIG);
                 setSettings(INITIAL_SETTINGS);
                 setHistory([]);
                 setRedoStack([]);
@@ -617,11 +617,11 @@ const App: React.FC = () => {
     <div className="flex flex-col h-full w-full bg-black text-neutral-300 overflow-hidden select-none">
       {isAppLoading && <LoadingScreen onComplete={() => setIsAppLoading(false)} />}
       <header className="h-10 flex items-center justify-between px-3 shrink-0 bg-black border-b border-white/5 z-[110]">
-        <div className="flex items-center gap-2.5">
-          <VoxIcon size={32} className="shrink-0" />
-          <div className="flex flex-col justify-center -space-y-0.5">
-            <span className="font-black text-[12px] uppercase tracking-[0.12em] text-white leading-tight">VOXCADD</span>
-            <span className="text-neutral-600 font-bold text-[9px] uppercase tracking-[0.05em] leading-tight">v1.0.0</span>
+        <div className="flex items-center gap-2">
+          <VoxIcon size={30} className="shrink-0" />
+          <div className="flex flex-col justify-center -space-y-1 mt-[1px]">
+            <span className="font-black text-[15px] leading-[1.1] uppercase tracking-wider text-white">VOXCADD</span>
+            <span className="text-[#00BCD4] font-bold text-[9px] leading-[1.1] uppercase tracking-[0.1em] opacity-90">Professional v1.0.0</span>
           </div>
         </div>
         <div className="flex items-center gap-2">

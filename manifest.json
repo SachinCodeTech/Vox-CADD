@@ -1,5 +1,5 @@
 {
-  "name": "VoxCADD Pro",
+  "name": "VoxCADD Professional",
   "short_name": "VoxCADD",
   "description": "Professional Mobile CAD Engine",
   "start_url": "/",
@@ -30,7 +30,10 @@
       "accept": {
         "application/vnd.voxcadd.project": [".vox"],
         "application/dxf": [".dxf"],
-        "application/acad": [".dwg"]
+        "application/acad": [".dwg"],
+        "application/x-autocad": [".dwg", ".dxf"],
+        "image/vnd.dwg": [".dwg"],
+        "image/x-dwg": [".dwg"]
       }
     }
   ]

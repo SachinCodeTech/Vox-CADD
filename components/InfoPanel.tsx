@@ -84,12 +84,12 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ type, onClose, onSwitch }) => {
         </div>
         <div>
           <h4 className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mb-1">Engine</h4>
-          <p className="text-xs text-neutral-200">V-Core 3.0 Web-GL / Canvas2D High-Precision</p>
+          <p className="text-xs text-neutral-200">Vox-Core v1.0.0 High-Precision Drafting Engine</p>
         </div>
         <div>
           <h4 className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mb-1">Credits</h4>
           <p className="text-[10px] text-neutral-400 leading-relaxed">
-            Built with React, TailwindCSS, Lucide Icons, and Gemini 2.5 Pro Vision API for architectural intelligence. Special thanks to the open-source CAD community.
+            Built with React, TailwindCSS, Lucide Icons, and Gemini 2.0 Pro API for architectural intelligence. Special thanks to the open-source CAD community.
           </p>
         </div>
       </div>

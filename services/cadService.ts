@@ -300,6 +300,7 @@ export const getShapeSegments = (s: Shape): { p1: Point, p2: Point }[] => {
             break;
         case 'pline':
         case 'polygon':
+        case 'spline':
             for (let i = 0; i < s.points.length - 1; i++) {
                 segments.push({ p1: s.points[i], p2: s.points[i + 1] });
             }
@@ -307,6 +308,20 @@ export const getShapeSegments = (s: Shape): { p1: Point, p2: Point }[] => {
                 segments.push({ p1: s.points[s.points.length - 1], p2: s.points[0] });
             }
             break;
+        case 'ellipse': {
+            const steps = 36;
+            for (let i = 0; i < steps; i++) {
+                const a1 = (i / steps) * Math.PI * 2;
+                const a2 = ((i + 1) / steps) * Math.PI * 2;
+                const getP = (a: number) => {
+                    const dx = s.rx * Math.cos(a), dy = s.ry * Math.sin(a);
+                    const cos = Math.cos(s.rotation), sin = Math.sin(s.rotation);
+                    return { x: s.x + dx * cos - dy * sin, y: s.y + dx * sin + dy * cos };
+                };
+                segments.push({ p1: getP(a1), p2: getP(a2) });
+            }
+            break;
+        }
         case 'circle':
             const steps = 32;
             for (let i = 0; i < steps; i++) {

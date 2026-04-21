@@ -72,7 +72,7 @@ class DXFWriter {
     }
 
     getOutput(): string {
-        return this.output + "0\r\nEOF\r\n";
+        return "999\r\nVoxCADD-Project-v1.0.0\r\n" + this.output + "0\r\nEOF\r\n";
     }
 }
 
