@@ -1,7 +1,7 @@
 {
-  "name": "VoxCADD Project Manager",
+  "name": "VoxCADD Professional",
   "short_name": "VoxCADD",
-  "description": "Professional 2D CAD Mobile Engine",
+  "description": "Professional Architectural CAD Engine with AI Intelligence. Full DXF/DWG Interoperability.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#000000",
@@ -16,6 +16,12 @@
     {
       "src": "/favicon.svg",
       "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
     }
@@ -32,11 +38,26 @@
         }
       ],
       "accept": {
+        "application/x-vox": [".vox"],
         "application/vnd.voxcadd.project": [".vox"],
         "application/dxf": [".dxf"],
+        "application/dwg": [".dwg"],
+        "application/acad": [".dwg", ".dxf"],
+        "application/x-autocad": [".dwg", ".dxf"],
+        "image/vnd.dwg": [".dwg"],
         "image/vnd.dxf": [".dxf"],
-        "image/vnd.dwg": [".dwg"]
+        "text/plain": [".vox", ".dxf"]
       }
+    }
+  ],
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "shortcuts": [
+    {
+      "name": "New Project",
+      "url": "/?action=new",
+      "icons": [{ "src": "/favicon.svg", "sizes": "192x192" }]
     }
   ]
 }

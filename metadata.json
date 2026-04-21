@@ -1,6 +1,6 @@
 {
   "name": "VoxCADD Professional",
-  "description": "Professional Mobile CAD Engine with Principal Architect AI. Features native DWG support, DXF interoperability, and intelligent visual drafting.",
+  "description": "VoxCADD: Professional High-Precision Architectural CAD Engine. Native DWG/DXF support with AI-assisted drafting. Export to universal CAD formats.",
   "requestFramePermissions": [
     "camera",
     "microphone",

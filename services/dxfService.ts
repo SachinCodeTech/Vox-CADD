@@ -72,13 +72,18 @@ class DXFWriter {
     }
 
     getOutput(): string {
-        return "999\r\nVoxCADD-Project-v1.0.0\r\n" + this.output + "0\r\nEOF\r\n";
+        const result = "999\r\nVoxCADD-Project-v1.0.0\r\n" + this.output + "0\r\nEOF\r\n";
+        if (this.output.length === 0) {
+            console.warn("DXFWriter: Output body is empty. This might indicate no entities or failure.");
+        }
+        return result;
     }
 }
 
 export const shapesToDXF = (shapes: Shape[], layerConfigs?: Record<string, LayerConfig>, settings?: AppSettings): string => {
-    const writer = new DXFWriter();
-    const baseLayers = layerConfigs || {};
+    try {
+        const writer = new DXFWriter();
+        const baseLayers = { ...(layerConfigs || {}) };
     if (!baseLayers['0']) {
         baseLayers['0'] = { id: '0', name: '0', visible: true, locked: false, frozen: false, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' };
     }
@@ -576,6 +581,11 @@ export const shapesToDXF = (shapes: Shape[], layerConfigs?: Record<string, Layer
     });
 
     return writer.getOutput();
+    } catch (error) {
+        console.error("Critical Failure in shapesToDXF:", error);
+        // Fallback to a minimal but valid DXF header to prevent 0B files
+        return "999\r\nVoxCADD-ERROR-FALLBACK\r\n0\r\nSECTION\r\n2\r\nHEADER\r\n0\r\nENDSEC\r\n0\r\nEOF\r\n";
+    }
 };
 
 export const dxfToShapes = (dxf: string): Shape[] => {

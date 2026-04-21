@@ -87,6 +87,23 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ type, onClose, onSwitch }) => {
           <p className="text-xs text-neutral-200">Vox-Core v1.0.0 High-Precision Drafting Engine</p>
         </div>
         <div>
+          <h4 className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mb-1">Android Native Integration</h4>
+          <p className="text-[9px] text-neutral-400 leading-relaxed mb-1">
+            To enable Goal 1 (custom .VOX icons in file explorer) and deeper "Open with" support, use a TWA wrapper (Bubblewrap) with the following manifest intent filter:
+          </p>
+          <pre className="text-[8px] bg-black/60 p-2 rounded border border-white/5 font-mono text-neutral-500 overflow-x-auto whitespace-pre select-all">
+{`<intent-filter>
+  <action android:name="android.intent.action.VIEW" />
+  <category android:name="android.intent.category.DEFAULT" />
+  <category android:name="android.intent.category.BROWSABLE" />
+  <data android:scheme="content" />
+  <data android:host="*" />
+  <data android:mimeType="application/x-vox" />
+  <data android:pathPattern=".*\\.vox" />
+</intent-filter>`}
+          </pre>
+        </div>
+        <div>
           <h4 className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mb-1">Installation Tip</h4>
           <p className="text-[10px] text-neutral-400 leading-relaxed">
             Install VoxCADD as a PWA (Add to Home Screen / Install App) to enable native .VOX icon support and "Open With" functionality on your device.

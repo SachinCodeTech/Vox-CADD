@@ -345,8 +345,17 @@ const App: React.FC = () => {
         const finalExt = isDxfExport ? '.dxf' : '.vox';
         
         let content: string = "";
-        // For .vox, we now use DXF format internally to ensure "any CAD tool" support as requested
-        content = shapesToDXF(Object.values(layers).flat() as Shape[], layerConfig, settings);
+        try {
+            // For .vox, we now use DXF format internally to ensure "any CAD tool" support as requested
+            content = shapesToDXF(Object.values(layers).flat() as Shape[], layerConfig, settings);
+            if (!content || content.length < 10) {
+                // If DXF failed or is too small, fallback to legacy VOX JSON to avoid 0B
+                content = shapesToVox(Object.values(layers).flat() as Shape[], layerConfig, settings);
+            }
+        } catch (err) {
+            console.error("Save content generation failed:", err);
+            content = shapesToVox(Object.values(layers).flat() as Shape[], layerConfig, settings);
+        }
 
         // Native File System Access
         if ('showSaveFilePicker' in window) {
@@ -374,15 +383,19 @@ const App: React.FC = () => {
                 setLogMessage("SAVE_ERR: DISK_ACCESS_DENIED");
             }
         } else {
-            // Fallback for browsers without File System Access API
-            const blob = new Blob([content], { type: 'text/plain' });
+            // Fallback for browsers without File System Access API (like Chrome for Android)
+            // Using application/x-vox for .vox helps Android identify the app as a handler
+            const mimeType = isDxfExport ? 'application/dxf' : 'application/x-vox';
+            const blob = new Blob([content], { type: mimeType });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
             a.download = currentFileName.replace(/\.[^/.]+$/, "") + finalExt;
+            document.body.appendChild(a); // Recommended for mobile
             a.click();
+            document.body.removeChild(a);
             URL.revokeObjectURL(url);
-            setLogMessage("EXPORTED_VIA_DOWNLOAD");
+            setLogMessage(`FILE_DOWNLOADED: ${finalExt.toUpperCase()}`);
         }
         break;
       case 'saveImage': {
