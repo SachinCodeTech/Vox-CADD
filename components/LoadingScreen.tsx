@@ -1,7 +1,8 @@
 
 import React, { useEffect, useState } from 'react';
-import { Target, Zap } from 'lucide-react';
+import { Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import VoxIcon from './VoxIcon';
 
 const LoadingScreen: React.FC<{ onComplete: () => void }> = ({ onComplete }) => {
   const [progress, setProgress] = useState(0);
@@ -58,7 +59,7 @@ const LoadingScreen: React.FC<{ onComplete: () => void }> = ({ onComplete }) => 
                   }}
                   className="absolute inset-0 border-2 border-dashed border-cyan-500/20 rounded-3xl scale-150"
                 />
-                <Target size={40} className="text-cyan-400 relative z-10" />
+                <VoxIcon size={64} className="relative z-10" />
               </div>
               
               <motion.div 

@@ -91,6 +91,8 @@ const App: React.FC = () => {
   const [isCommandActive, setIsCommandActive] = useState(false);
   const [activeCommandName, setActiveCommandName] = useState<string | undefined>(undefined);
   const [showCircleOptions, setShowCircleOptions] = useState(false);
+  const [showArcOptions, setShowArcOptions] = useState(false);
+  const [showEllipseOptions, setShowEllipseOptions] = useState(false);
   const [currentFileName, setCurrentFileName] = useState<string>("Drawing1.vox");
   const [fileHandle, setFileHandle] = useState<any>(null);
   const [activePanel, setActivePanel] = useState<PanelType>('none');
@@ -99,6 +101,7 @@ const App: React.FC = () => {
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [lastAiCommandTime, setLastAiCommandTime] = useState(0);
   const [isAppLoading, setIsAppLoading] = useState(true);
+  const [recentFiles, setRecentFiles] = useState<{name: string, date: number}[]>([]);
 
   const view = tabViews[activeTab];
   const setView = useCallback((updater: ViewState | ((v: ViewState) => ViewState)) => {
@@ -107,6 +110,15 @@ const App: React.FC = () => {
       [activeTab]: typeof updater === 'function' ? (updater as (v: ViewState) => ViewState)(prev[activeTab]) : updater
     }));
   }, [activeTab]);
+
+  const updateRecentFiles = useCallback((name: string) => {
+    setRecentFiles(prev => {
+      const filtered = prev.filter(f => f.name !== name);
+      const updated = [{ name, date: Date.now() }, ...filtered].slice(0, 10);
+      localStorage.setItem('voxcadd_recent_files', JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
 
   const engineRef = useRef<CommandEngine | null>(null);
   const settingsRef = useRef(settings);
@@ -129,20 +141,31 @@ const App: React.FC = () => {
   // Restore session from LocalStorage
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
+    const savedRecent = localStorage.getItem('voxcadd_recent_files');
+    
+    if (savedRecent) {
+      try { setRecentFiles(JSON.parse(savedRecent)); } catch(e) {}
+    }
+
     if (saved) {
       try {
         const data = JSON.parse(saved);
         if (data.layers) setLayers(data.layers);
         if (data.layerConfig) setLayerConfig(data.layerConfig);
         if (data.settings) setSettings({ ...INITIAL_SETTINGS, ...data.settings });
-        if (data.fileName) setCurrentFileName(data.fileName);
+        if (data.fileName) {
+          setCurrentFileName(data.fileName);
+          updateRecentFiles(data.fileName);
+        }
         setLogMessage("SESSION_RESTORED_SUCCESS");
       } catch (e) {
         console.error("Failed to restore session", e);
       }
+    } else {
+      // Default open with Drawing 1.vox
+      setCurrentFileName("Drawing 1.vox");
+      updateRecentFiles("Drawing 1.vox");
     }
-
-    // Global Drag and Drop support
     const handleDragOver = (e: DragEvent) => e.preventDefault();
     const handleDrop = async (e: DragEvent) => {
       e.preventDefault();
@@ -237,6 +260,7 @@ const App: React.FC = () => {
             }
         }
         setCurrentFileName(fileName);
+        updateRecentFiles(fileName);
         setActivePanel('none');
     } catch(err) { 
         console.error(err);
@@ -274,6 +298,8 @@ const App: React.FC = () => {
         setIsCommandActive(false); 
         setActiveCommandName(undefined);
         setShowCircleOptions(false);
+        setShowArcOptions(false);
+        setShowEllipseOptions(false);
         break;
       case 'toggleLayers': setActivePanel(activePanel === 'layers' ? 'none' : 'layers'); break;
       case 'toggleProperties': setActivePanel(activePanel === 'properties' ? 'none' : 'properties'); break;
@@ -377,6 +403,7 @@ const App: React.FC = () => {
                 
                 setFileHandle(handle);
                 setCurrentFileName(handle.name);
+                updateRecentFiles(handle.name);
                 setLogMessage(`SAVED_TO: ${handle.name}`);
             } catch (e) {
                 console.warn("Save cancelled or failed", e);
@@ -395,6 +422,7 @@ const App: React.FC = () => {
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
+            updateRecentFiles(currentFileName);
             setLogMessage(`FILE_DOWNLOADED: ${finalExt.toUpperCase()}`);
         }
         break;
@@ -421,7 +449,6 @@ const App: React.FC = () => {
         }
         break;
       case 'openFileManager': setActivePanel('file'); break;
-      case 'rename': setCurrentFileName(payload + '.vox'); break;
     }
   };
 
@@ -452,16 +479,30 @@ const App: React.FC = () => {
         handleAction('cancel'); 
         setCommandInput(''); 
         setShowCircleOptions(false);
+        setShowArcOptions(false);
+        setShowEllipseOptions(false);
         return; 
     }
 
-    // Handle sub-commands for Circle
-    const subCommands = ['2p', '3p', 'ttr', 'center'];
+    // Handle sub-commands for Circle, Arc, Ellipse
+    const subCommands = ['2p', '3p', 'ttr', 'center', 'tan'];
     if (subCommands.includes(cmdKey)) {
-        if (engineRef.current && isCommandActive && activeCommandName === 'CIRCLE') {
-            engineRef.current.input(cmdKey);
-            setShowCircleOptions(false);
-            return;
+        if (engineRef.current && isCommandActive) {
+            if (activeCommandName === 'CIRCLE') {
+                engineRef.current.input(cmdKey);
+                setShowCircleOptions(false);
+                return;
+            }
+            if (activeCommandName === 'ARC') {
+                engineRef.current.input(cmdKey);
+                setShowArcOptions(false);
+                return;
+            }
+            if (activeCommandName === 'ELLIPSE') {
+                engineRef.current.input(cmdKey);
+                setShowEllipseOptions(false);
+                return;
+            }
         }
     }
 
@@ -483,17 +524,35 @@ const App: React.FC = () => {
     
     const CommandClass = commandMap[cmdKey];
     if (CommandClass) {
-      // Requirement: Toggle circle options if clicking circle again
+      // Toggle options for specific commands
       if (cmdKey === 'c' || cmdKey === 'circle') {
           if (activeCommandName === 'CIRCLE') {
-              // If already in circle command, just toggle the options visibility
               setShowCircleOptions(!showCircleOptions);
               return;
           }
           setShowCircleOptions(true);
-      } else {
-          // Requirement: Close circle options if another tool is selected
+          setShowArcOptions(false);
+          setShowEllipseOptions(false);
+      } else if (cmdKey === 'a' || cmdKey === 'arc') {
+          if (activeCommandName === 'ARC') {
+              setShowArcOptions(!showArcOptions);
+              return;
+          }
+          setShowArcOptions(true);
           setShowCircleOptions(false);
+          setShowEllipseOptions(false);
+      } else if (cmdKey === 'el' || cmdKey === 'ellipse') {
+          if (activeCommandName === 'ELLIPSE') {
+              setShowEllipseOptions(!showEllipseOptions);
+              return;
+          }
+          setShowEllipseOptions(true);
+          setShowCircleOptions(false);
+          setShowArcOptions(false);
+      } else {
+          setShowCircleOptions(false);
+          setShowArcOptions(false);
+          setShowEllipseOptions(false);
       }
 
       if (engineRef.current) engineRef.current.cancel();
@@ -539,6 +598,8 @@ const App: React.FC = () => {
           setPrompt("COMMAND:"); 
           setIsCommandActive(false); 
           setShowCircleOptions(false);
+          setShowArcOptions(false);
+          setShowEllipseOptions(false);
           setActiveCommandName(undefined);
           commitToHistory(); 
         },
@@ -607,10 +668,10 @@ const App: React.FC = () => {
       {isAppLoading && <LoadingScreen onComplete={() => setIsAppLoading(false)} />}
       <header className="h-10 flex items-center justify-between px-3 shrink-0 bg-black border-b border-white/5 z-[110]">
         <div className="flex items-center gap-2">
-          <VoxIcon size={30} className="shrink-0" />
-          <div className="flex items-baseline gap-1.5">
-            <span className="font-black text-[15px] uppercase tracking-wider text-white">VOXCADD</span>
-            <span className="text-neutral-500 font-bold text-[8px] uppercase tracking-widest opacity-70">v1.0.0</span>
+          <VoxIcon size={28} className="shrink-0" />
+          <div className="flex items-baseline gap-1">
+            <span className="font-black text-[16px] uppercase tracking-wider text-white">VOX<span className="text-cyan-500">CADD</span></span>
+            <span className="text-neutral-500 font-bold text-[8px] uppercase tracking-widest opacity-70 ml-1">v1.0.0</span>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -671,7 +732,7 @@ const App: React.FC = () => {
         {activePanel === 'properties' && <PropertiesPanel selectedShapes={(Object.values(layers).flat() as Shape[]).filter(s => selectedIds.includes(s.id))} onUpdateShape={(id, upd) => setLayers(prev => { const n = {...prev}; Object.keys(n).forEach(l => n[l] = n[l].map(s => s.id === id ? {...s, ...upd} : s)); return n; })} layers={layerConfig} settings={settings} onUpdateSettings={(upd) => setSettings(s => ({...s, ...upd}))} onClose={() => setActivePanel('none')} />}
         {activePanel === 'calculator' && <CalculatorPanel onClose={() => setActivePanel('none')} />}
         {activePanel === 'drafting' && <DraftingSettings options={settings.snapOptions} settings={settings} onSettingsChange={(upd) => setSettings(s => ({...s, ...upd}))} onChange={(upd) => setSettings(s => ({...s, snapOptions: { ...s.snapOptions, ...upd }}))} onClose={() => setActivePanel('none')} />}
-        {activePanel === 'file' && <FileManager currentName={currentFileName} onAction={handleAction} onClose={() => setActivePanel('none')} />}
+        {activePanel === 'file' && <FileManager currentName={currentFileName} recentFiles={recentFiles} onAction={handleAction} onClose={() => setActivePanel('none')} />}
         {activePanel === 'drawing_props' && <DrawingProperties settings={settings} onUpdateSettings={(upd) => setSettings(s => ({...s, ...upd}))} onClose={() => setActivePanel('none')} entityCount={(Object.values(layers).flat() as Shape[]).length} currentFileName={currentFileName} onAction={handleAction} />}
         {activePanel === 'help' && <InfoPanel type="help" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
         {activePanel === 'about' && <InfoPanel type="about" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
@@ -702,7 +763,19 @@ const App: React.FC = () => {
       </main>
 
       <footer className="bg-black shrink-0 pb-[env(safe-area-inset-bottom)]">
-        <Toolbar category={activeCategory} settings={settings} onSettingChange={setSettings} onAction={handleAction} onCommand={executeCommand} activeCommandName={activeCommandName} showCircleOptions={showCircleOptions} canUndo={history.length > 0} canRedo={redoStack.length > 0} />
+        <Toolbar 
+            category={activeCategory} 
+            settings={settings} 
+            onSettingChange={setSettings} 
+            onAction={handleAction} 
+            onCommand={executeCommand} 
+            activeCommandName={activeCommandName} 
+            showCircleOptions={showCircleOptions} 
+            showArcOptions={showArcOptions}
+            showEllipseOptions={showEllipseOptions}
+            canUndo={history.length > 0} 
+            canRedo={redoStack.length > 0} 
+        />
         <CommandBar 
           onCommand={executeCommand} 
           onAiQuery={async (q, sketch) => { 

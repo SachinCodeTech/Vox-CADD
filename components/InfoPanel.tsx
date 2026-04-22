@@ -1,6 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { X, HelpCircle, Info, ChevronRight, Cpu, MousePointer2, Zap, Settings, Command } from 'lucide-react';
+import VoxIcon from './VoxIcon';
 
 interface InfoPanelProps {
   type: 'about' | 'help' | 'privacy';
@@ -67,8 +68,8 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ type, onClose, onSwitch }) => {
 
   const renderAbout = () => (
     <div className="flex flex-col items-center text-center p-4">
-      <div className="w-20 h-20 bg-cyan-500 rounded-3xl flex items-center justify-center font-black text-4xl text-black mb-6 shadow-[0_0_30px_rgba(6,182,212,0.4)]">V</div>
-      <h2 className="text-2xl font-black text-white mb-1">VoxCADD Mobile</h2>
+      <VoxIcon size={80} className="mb-6 shadow-[0_0_40px_rgba(6,182,212,0.3)]" />
+      <h2 className="text-2xl font-black text-white mb-1 uppercase tracking-tight">VOX<span className="text-cyan-500">CADD</span> Mobile</h2>
       <p className="text-xs text-cyan-400 font-bold uppercase tracking-widest mb-6">v1.0.0</p>
       
       <div className="w-full space-y-4 text-left bg-black/40 p-4 rounded-2xl border border-white/5">

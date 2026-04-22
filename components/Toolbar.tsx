@@ -20,6 +20,8 @@ interface ToolbarProps {
   onCommand: (cmd: string) => void;
   activeCommandName?: string;
   showCircleOptions?: boolean;
+  showArcOptions?: boolean;
+  showEllipseOptions?: boolean;
   canUndo?: boolean;
   canRedo?: boolean;
 }
@@ -48,7 +50,7 @@ const ToolCircleBtn: React.FC<{
     </button>
 );
 
-const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settings, onSettingChange, canUndo, canRedo, activeCommandName, showCircleOptions }) => {
+const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settings, onSettingChange, canUndo, canRedo, activeCommandName, showCircleOptions, showArcOptions, showEllipseOptions }) => {
   const renderContent = () => {
     switch (category) {
       case 'Draw':
@@ -126,6 +128,28 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
            <button onClick={() => onCommand('2p')} className="shrink-0 px-3 py-1 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all">2P</button>
            <button onClick={() => onCommand('3p')} className="shrink-0 px-3 py-1 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all">3P</button>
            <button onClick={() => onCommand('ttr')} className="shrink-0 px-3 py-1 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all">TTR</button>
+           <div className="w-[1px] h-4 bg-white/10 mx-2 shrink-0" />
+           <button onClick={() => onAction('cancel')} className="shrink-0 px-3 py-1 rounded-md bg-red-500/10 border border-red-500/30 text-red-500 text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all">Cancel</button>
+        </div>
+      )}
+      {showArcOptions && activeCommandName === 'ARC' && (
+        <div className="flex items-center gap-2 px-4 h-10 border-b border-white/5 bg-[#0a0a0c] animate-in slide-in-from-bottom-2 duration-200 overflow-x-auto scrollbar-none">
+           <span className="text-[8px] font-black text-cyan-500 uppercase tracking-widest mr-2 border-r border-white/10 pr-2 shrink-0">ARC MODES</span>
+           <button onClick={() => onCommand('center')} className="shrink-0 px-3 py-1 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all">Center</button>
+           <button onClick={() => onCommand('2p')} className="shrink-0 px-3 py-1 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all">2P</button>
+           <button onClick={() => onCommand('3p')} className="shrink-0 px-3 py-1 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all">3P</button>
+           <button onClick={() => onCommand('tan')} className="shrink-0 px-3 py-1 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all">Tan</button>
+           <div className="w-[1px] h-4 bg-white/10 mx-2 shrink-0" />
+           <button onClick={() => onAction('cancel')} className="shrink-0 px-3 py-1 rounded-md bg-red-500/10 border border-red-500/30 text-red-500 text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all">Cancel</button>
+        </div>
+      )}
+      {showEllipseOptions && activeCommandName === 'ELLIPSE' && (
+        <div className="flex items-center gap-2 px-4 h-10 border-b border-white/5 bg-[#0a0a0c] animate-in slide-in-from-bottom-2 duration-200 overflow-x-auto scrollbar-none">
+           <span className="text-[8px] font-black text-cyan-500 uppercase tracking-widest mr-2 border-r border-white/10 pr-2 shrink-0">ELLIPSE MODES</span>
+           <button onClick={() => onCommand('center')} className="shrink-0 px-3 py-1 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all">Center</button>
+           <button onClick={() => onCommand('2p')} className="shrink-0 px-3 py-1 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all">2P</button>
+           <button onClick={() => onCommand('3p')} className="shrink-0 px-3 py-1 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all">3P</button>
+           <button onClick={() => onCommand('tan')} className="shrink-0 px-3 py-1 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all">Tan</button>
            <div className="w-[1px] h-4 bg-white/10 mx-2 shrink-0" />
            <button onClick={() => onAction('cancel')} className="shrink-0 px-3 py-1 rounded-md bg-red-500/10 border border-red-500/30 text-red-500 text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all">Cancel</button>
         </div>

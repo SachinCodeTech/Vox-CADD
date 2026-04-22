@@ -118,7 +118,7 @@ export class LineCommand implements CADCommand {
     }
     onInput(text: string): boolean {
         const last = this.pts.length > 0 ? this.pts[this.pts.length - 1] : null;
-        const p = resolvePointInput(text, last, this.ctx.getSettings().units === 'imperial', this.ctx.lastMousePoint);
+        const p = resolvePointInput(text, last, this.ctx.getSettings().units === 'imperial', this.ctx.lastMousePoint, this.ctx.getSettings().ortho);
         if (p) { this.onClick(p, false); return true; }
         return false;
     }
@@ -143,14 +143,22 @@ export class DoubleLineCommand implements CADCommand {
     name = "DLINE"; public pts: Point[] = [];
     constructor(public ctx: CommandContext) {}
     onStart() { this.ctx.setMessage("DLINE Specify start point:"); }
-    onClick(p: Point) {
-        this.pts.push(p);
+    onClick(p: Point, snapped: boolean) {
+        if (this.pts.length > 0) {
+            const anchor = this.pts[this.pts.length - 1];
+            const finalP = applyOrthoConstraint(p, anchor, this.ctx.getSettings().ortho, snapped);
+            this.pts.push(finalP);
+        } else {
+            this.pts.push(p);
+        }
         this.ctx.setMessage("DLINE Next point or <Enter to finish>");
     }
-    onMove(p: Point) {
+    onMove(p: Point, snapped: boolean) {
         if (this.pts.length > 0) {
+            const anchor = this.pts[this.pts.length - 1];
+            const finalP = applyOrthoConstraint(p, anchor, this.ctx.getSettings().ortho, snapped);
             const style = getStyleSettings(this.ctx);
-            this.ctx.setPreview([{id:'p', type:'dline', isPreview:true, layer: style.layer, color: style.color, points: [...this.pts, p], thickness: 300, justification: 'zero'} as any]);
+            this.ctx.setPreview([{id:'p', type:'dline', isPreview:true, layer: style.layer, color: style.color, points: [...this.pts, finalP], thickness: 300, justification: 'zero'} as any]);
         }
     }
     onEnter() {
@@ -168,14 +176,28 @@ export class PolyCommand implements CADCommand {
     name = "PLINE"; public pts: Point[] = [];
     constructor(public ctx: CommandContext) {}
     onStart() { this.ctx.setMessage("PLINE Specify start point:"); }
-    onClick(p: Point) {
-        this.pts.push(p);
+    onClick(p: Point, snapped: boolean) {
+        if (this.pts.length > 0) {
+            const anchor = this.pts[this.pts.length - 1];
+            const finalP = applyOrthoConstraint(p, anchor, this.ctx.getSettings().ortho, snapped);
+            this.pts.push(finalP);
+        } else {
+            this.pts.push(p);
+        }
         this.ctx.setMessage("PLINE Next point or <Enter to finish>");
     }
-    onMove(p: Point) {
+    onInput(text: string): boolean {
+        const last = this.pts.length > 0 ? this.pts[this.pts.length - 1] : null;
+        const p = resolvePointInput(text, last, this.ctx.getSettings().units === 'imperial', this.ctx.lastMousePoint, this.ctx.getSettings().ortho);
+        if (p) { this.onClick(p, false); return true; }
+        return false;
+    }
+    onMove(p: Point, snapped: boolean) {
         if (this.pts.length > 0) {
+            const anchor = this.pts[this.pts.length - 1];
+            const finalP = applyOrthoConstraint(p, anchor, this.ctx.getSettings().ortho, snapped);
             const style = getStyleSettings(this.ctx);
-            this.ctx.setPreview([{id:'p', type:'pline', isPreview:true, layer: style.layer, color: style.color, points: [...this.pts, p]} as any]);
+            this.ctx.setPreview([{id:'p', type:'pline', isPreview:true, layer: style.layer, color: style.color, points: [...this.pts, finalP]} as any]);
         }
     }
     onEnter() {
@@ -349,7 +371,7 @@ export class CircleCommand implements CADCommand {
         }
 
         const last = this.pts.length > 0 ? this.pts[this.pts.length - 1] : null;
-        const p = resolvePointInput(text, last, this.ctx.getSettings().units === 'imperial', this.ctx.lastMousePoint);
+        const p = resolvePointInput(text, last, this.ctx.getSettings().units === 'imperial', this.ctx.lastMousePoint, this.ctx.getSettings().ortho);
         if (p) { 
             this.onClick(p, false); 
             return true; 
@@ -384,7 +406,13 @@ export class CircleCommand implements CADCommand {
             return;
         }
 
-        this.pts.push(p);
+        if (this.mode === 'default' && this.pts.length === 1) {
+            const finalP = applyOrthoConstraint(p, this.pts[0], this.ctx.getSettings().ortho, snapped);
+            this.pts.push(finalP);
+        } else {
+            this.pts.push(p);
+        }
+        
         if (this.mode === 'default') {
             if (this.pts.length === 1) {
                 this.ctx.setMessage("CIRCLE Specify radius point:");
@@ -502,10 +530,11 @@ export class CircleCommand implements CADCommand {
         this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
     }
 
-    onMove(p: Point) {
+    onMove(p: Point, snapped: boolean) {
         const style = getStyleSettings(this.ctx);
         if (this.mode === 'default' && this.pts.length === 1) {
-            this.ctx.setPreview([{id:'p', type:'circle', isPreview:true, layer: style.layer, color: style.color, x: this.pts[0].x, y: this.pts[0].y, radius: distance(this.pts[0], p)} as any]);
+            const finalP = applyOrthoConstraint(p, this.pts[0], this.ctx.getSettings().ortho, snapped);
+            this.ctx.setPreview([{id:'p', type:'circle', isPreview:true, layer: style.layer, color: style.color, x: this.pts[0].x, y: this.pts[0].y, radius: distance(this.pts[0], finalP)} as any]);
         } else if (this.mode === '2p' && this.pts.length === 1) {
             const cen = { x: (this.pts[0].x + p.x)/2, y: (this.pts[0].y + p.y)/2 };
             this.ctx.setPreview([{id:'p', type:'circle', isPreview:true, layer: style.layer, color: style.color, x: cen.x, y: cen.y, radius: distance(this.pts[0], p) / 2} as any]);
@@ -530,62 +559,58 @@ export class CircleCommand implements CADCommand {
 export class ArcCommand implements CADCommand {
     name = "ARC"; 
     public pts: Point[] = [];
-    public mode: '3p' | 'sce' | 'ser' = '3p';
+    public mode: '3p' | 'center' | '2p' | 'tan' = '3p';
     
     constructor(public ctx: CommandContext) {}
     
     onStart() { 
-        this.ctx.setMessage("ARC Specify start point or [Center/End]:"); 
+        this.ctx.setMessage("ARC Specify start point or [Center/2P/3P/Tan]:"); 
     }
     
     onInput(text: string): boolean {
         const t = text.trim().toLowerCase();
-        if (this.pts.length === 0) {
-            if (t === 'c' || t === 'center') {
-                this.mode = 'sce';
-                this.ctx.setMessage("ARC Specify center point:");
-                return true;
-            }
-        } else if (this.pts.length === 1) {
-            if (t === 'c' || t === 'center') {
-                this.mode = 'sce';
-                this.ctx.setMessage("ARC Specify center point:");
-                return true;
-            }
-            if (t === 'e' || t === 'end') {
-                this.mode = 'ser';
-                this.ctx.setMessage("ARC Specify end point:");
-                return true;
-            }
-            if (t === '3p') {
-                this.mode = '3p';
-                this.ctx.setMessage("ARC Specify second point (on arc):");
-                return true;
-            }
-        } else if (this.pts.length === 2 && this.mode === 'ser') {
-            const r = parseFloat(text);
-            if (!isNaN(r) && r > 0) {
-                this.createSerArc(this.pts[0], this.pts[1], r);
-                // Continuous logic for SER mode
-                const lastPoint = this.pts[1];
-                this.pts = [lastPoint];
-                this.ctx.setMessage("ARC Specify end point:");
-                return true;
-            }
+        if (t === '3p') {
+            this.mode = '3p'; this.pts = [];
+            this.ctx.setMessage("ARC 3P Specify start point:");
+            return true;
         }
+        if (t === 'center' || t === 'c') {
+            this.mode = 'center'; this.pts = [];
+            this.ctx.setMessage("ARC CENTER Specify center point:");
+            return true;
+        }
+        if (t === '2p') {
+            this.mode = '2p'; this.pts = [];
+            this.ctx.setMessage("ARC 2P Specify start point:");
+            return true;
+        }
+        if (t === 'tan') {
+            this.mode = 'tan'; this.pts = [];
+            this.ctx.setMessage("ARC TAN Specify start point (tangent to object):");
+            return true;
+        }
+
+        const last = this.pts.length > 0 ? this.pts[this.pts.length - 1] : null;
+        const p = resolvePointInput(text, last, this.ctx.getSettings().units === 'imperial', this.ctx.lastMousePoint, this.ctx.getSettings().ortho);
+        if (p) { this.onClick(p, false); return true; }
         return false;
     }
 
-    onClick(p: Point) {
-        this.pts.push(p);
+    onClick(p: Point, snapped: boolean) {
+        const ortho = this.ctx.getSettings().ortho;
+        let finalP = p;
+        if (this.pts.length > 0) {
+            const anchor = (this.mode === 'center') ? this.pts[0] : this.pts[this.pts.length - 1];
+            finalP = applyOrthoConstraint(p, anchor, ortho, snapped);
+        }
+
+        this.pts.push(finalP);
         const style = getStyleSettings(this.ctx);
 
         if (this.mode === '3p') {
-            if (this.pts.length === 1) {
-                this.ctx.setMessage("ARC Specify second point (on arc) or [Center/End]:");
-            } else if (this.pts.length === 2) {
-                this.ctx.setMessage("ARC Specify end point:");
-            } else {
+            if (this.pts.length === 1) this.ctx.setMessage("ARC 3P Specify second point:");
+            else if (this.pts.length === 2) this.ctx.setMessage("ARC 3P Specify end point:");
+            else {
                 const res = getCircleFrom3Points(this.pts[0], this.pts[1], this.pts[2]);
                 if (res) {
                     const s: ArcShape = { 
@@ -597,141 +622,103 @@ export class ArcCommand implements CADCommand {
                     };
                     this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
                 }
-                // Continuous logic: last point becomes the new start point
-                const lastPoint = this.pts[2];
-                this.pts = [lastPoint];
-                this.ctx.setMessage("ARC Specify second point (on arc) or [Center/End]:");
+                this.ctx.onFinish();
             }
-        } else if (this.mode === 'sce') {
-            if (this.pts.length === 1) {
-                this.ctx.setMessage("ARC Specify center point:");
-            } else if (this.pts.length === 2) {
-                this.ctx.setMessage("ARC Specify end point:");
-            } else {
-                const start = this.pts[0];
-                const center = this.pts[1];
-                const end = this.pts[2];
-                const radius = distance(center, start);
-                const startAngle = Math.atan2(start.y - center.y, start.x - center.x);
-                const endAngle = Math.atan2(end.y - center.y, end.x - center.x);
-                
-                const cp = (start.x - center.x) * (end.y - center.y) - (start.y - center.y) * (end.x - center.x);
-                const counterClockwise = cp > 0;
-                
+        } else if (this.mode === 'center') {
+            if (this.pts.length === 1) this.ctx.setMessage("ARC CENTER Specify start point:");
+            else if (this.pts.length === 2) this.ctx.setMessage("ARC CENTER Specify end point:");
+            else {
+                const cen = this.pts[0], start = this.pts[1], end = this.pts[2];
+                const r = distance(cen, start);
+                const sa = Math.atan2(start.y - cen.y, start.x - cen.x);
+                const ea = Math.atan2(end.y - cen.y, end.x - cen.x);
                 const s: ArcShape = { 
                     id: generateId(), type: 'arc', layer: style.layer, color: style.color, 
-                    x: center.x, y: center.y, radius, 
-                    startAngle, endAngle, 
-                    counterClockwise,
-                    thickness: style.thickness, lineType: style.lineType 
+                    x: cen.x, y: cen.y, radius: r, startAngle: sa, endAngle: ea, 
+                    counterClockwise: true, thickness: style.thickness, lineType: style.lineType 
                 };
                 this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
-                
-                // Continuous logic: last point becomes the new start point
-                const lastPoint = this.pts[2];
-                this.pts = [lastPoint];
-                this.ctx.setMessage("ARC Specify center point:");
+                this.ctx.onFinish();
             }
-        } else if (this.mode === 'ser') {
-            if (this.pts.length === 1) {
-                this.ctx.setMessage("ARC Specify end point:");
-            } else if (this.pts.length === 2) {
-                this.ctx.setMessage("ARC Specify radius point or enter radius:");
-            } else {
-                const r = distance(this.pts[0], this.pts[2]);
-                this.createSerArc(this.pts[0], this.pts[1], r);
-                
-                // Continuous logic: end point becomes the new start point
-                const lastPoint = this.pts[1];
-                this.pts = [lastPoint];
-                this.ctx.setMessage("ARC Specify end point:");
+        } else if (this.mode === '2p') {
+            if (this.pts.length === 1) this.ctx.setMessage("ARC 2P Specify end point:");
+            else if (this.pts.length === 2) this.ctx.setMessage("ARC 2P Specify radius point (drag for bulge):");
+            else {
+                const start = this.pts[0], end = this.pts[1], mid = this.pts[2];
+                const res = getCircleFrom3Points(start, mid, end);
+                if (res) {
+                    const s: ArcShape = { 
+                        id: generateId(), type: 'arc', layer: style.layer, color: style.color, 
+                        x: res.x, y: res.y, radius: res.radius, startAngle: res.startAngle, endAngle: res.endAngle, 
+                        counterClockwise: res.counterClockwise, thickness: style.thickness, lineType: style.lineType 
+                    };
+                    this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
+                }
+                this.ctx.onFinish();
+            }
+        } else if (this.mode === 'tan') {
+            if (this.pts.length === 1) this.ctx.setMessage("ARC TAN Specify endpoint:");
+            else {
+                const start = this.pts[0], end = this.pts[1];
+                const mid = { x: (start.x + end.x)/2 + (end.y - start.y)*0.2, y: (start.y + end.y)/2 - (end.x - start.x)*0.2 };
+                const res = getCircleFrom3Points(start, mid, end);
+                if (res) {
+                    const s: ArcShape = { 
+                        id: generateId(), type: 'arc', layer: style.layer, color: style.color, 
+                        x: res.x, y: res.y, radius: res.radius, startAngle: res.startAngle, endAngle: res.endAngle, 
+                        counterClockwise: res.counterClockwise, thickness: style.thickness, lineType: style.lineType 
+                    };
+                    this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
+                }
+                this.ctx.onFinish();
             }
         }
     }
 
-    private createSerArc(start: Point, end: Point, radius: number) {
-        const d = distance(start, end);
-        if (radius < d/2) {
-            this.ctx.addLog("Radius too small for start/end points.");
-            return;
-        }
+    onMove(p: Point, snapped: boolean) {
         const style = getStyleSettings(this.ctx);
-        const mid = { x: (start.x + end.x)/2, y: (start.y + end.y)/2 };
-        const h = Math.sqrt(radius*radius - (d/2)*(d/2));
-        const angle = Math.atan2(end.y - start.y, end.x - start.x);
-        
-        // AutoCAD draws CCW. There are two possible centers. 
-        // We pick the one that makes the arc CCW.
-        const center = {
-            x: mid.x - h * Math.sin(angle),
-            y: mid.y + h * Math.cos(angle)
-        };
-        
-        const startAngle = Math.atan2(start.y - center.y, start.x - center.x);
-        const endAngle = Math.atan2(end.y - center.y, end.x - center.x);
+        const ortho = this.ctx.getSettings().ortho;
 
-        // Determine direction dynamically
-        const cp = (start.x - center.x) * (end.y - center.y) - (start.y - center.y) * (end.x - center.x);
-        const counterClockwise = cp > 0;
-
-        const s: ArcShape = { 
-            id: generateId(), type: 'arc', layer: style.layer, color: style.color, 
-            x: center.x, y: center.y, radius, 
-            startAngle, endAngle, 
-            counterClockwise,
-            thickness: style.thickness, lineType: style.lineType 
-        };
-        this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
-    }
-
-    onMove(p: Point) {
-        const style = getStyleSettings(this.ctx);
         if (this.mode === '3p') {
             if (this.pts.length === 1) {
-                this.ctx.setPreview([{id:'p', type:'line', isPreview:true, layer: style.layer, color: style.color, x1:this.pts[0].x, y1:this.pts[0].y, x2:p.x, y2:p.y} as any]);
+                const cp = applyOrthoConstraint(p, this.pts[0], ortho, snapped);
+                this.ctx.setPreview([{id:'p', type:'line', isPreview:true, layer: style.layer, color: style.color, x1:this.pts[0].x, y1:this.pts[0].y, x2:cp.x, y2:cp.y} as any]);
             } else if (this.pts.length === 2) {
-                const res = getCircleFrom3Points(this.pts[0], this.pts[1], p);
-                if (res) this.ctx.setPreview([{id:'p', type:'arc', isPreview:true, layer: style.layer, color: style.color, x: res.x, y: res.y, radius: res.radius, startAngle: res.startAngle, endAngle: res.endAngle, counterClockwise: res.counterClockwise} as any]);
+                const cp = applyOrthoConstraint(p, this.pts[1], ortho, snapped);
+                const res = getCircleFrom3Points(this.pts[0], this.pts[1], cp);
+                if (res) this.ctx.setPreview([{id:'p', type:'arc', isPreview:true, layer: style.layer, color: style.color, x:res.x, y:res.y, radius:res.radius, startAngle:res.startAngle, endAngle:res.endAngle, counterClockwise:res.counterClockwise} as any]);
             }
-        } else if (this.mode === 'sce') {
+        } else if (this.mode === 'center' && this.pts.length > 0) {
             if (this.pts.length === 1) {
-                this.ctx.setPreview([{id:'p', type:'line', isPreview:true, layer: style.layer, color: style.color, x1:this.pts[0].x, y1:this.pts[0].y, x2:p.x, y2:p.y} as any]);
+                const cp = applyOrthoConstraint(p, this.pts[0], ortho, snapped);
+                this.ctx.setPreview([{id:'p', type:'line', isPreview:true, layer: style.layer, color: style.color, x1:this.pts[0].x, y1:this.pts[0].y, x2:cp.x, y2:cp.y} as any]);
             } else if (this.pts.length === 2) {
-                const start = this.pts[0];
-                const center = this.pts[1];
-                const radius = distance(center, start);
-                const startAngle = Math.atan2(start.y - center.y, start.x - center.x);
-                const endAngle = Math.atan2(p.y - center.y, p.x - center.x);
-                const cp = (start.x - center.x) * (p.y - center.y) - (start.y - center.y) * (p.x - center.x);
-                const counterClockwise = cp > 0;
-                this.ctx.setPreview([{id:'p', type:'arc', isPreview:true, layer: style.layer, color: style.color, x: center.x, y: center.y, radius, startAngle, endAngle, counterClockwise} as any]);
+                const cen = this.pts[0], start = this.pts[1];
+                const cp = applyOrthoConstraint(p, cen, ortho, snapped);
+                const r = distance(cen, start);
+                const sa = Math.atan2(start.y - cen.y, start.x - cen.x);
+                const ea = Math.atan2(cp.y - cen.y, cp.x - cen.x);
+                this.ctx.setPreview([{id:'p', type:'arc', isPreview:true, layer: style.layer, color: style.color, x:cen.x, y:cen.y, radius:r, startAngle:sa, endAngle:ea, counterClockwise:true} as any]);
             }
-        } else if (this.mode === 'ser') {
+        } else if (this.mode === '2p' && this.pts.length > 0) {
             if (this.pts.length === 1) {
-                this.ctx.setPreview([{id:'p', type:'line', isPreview:true, layer: style.layer, color: style.color, x1:this.pts[0].x, y1:this.pts[0].y, x2:p.x, y2:p.y} as any]);
+                const cp = applyOrthoConstraint(p, this.pts[0], ortho, snapped);
+                this.ctx.setPreview([{id:'p', type:'line', isPreview:true, layer: style.layer, color: style.color, x1:this.pts[0].x, y1:this.pts[0].y, x2:cp.x, y2:cp.y} as any]);
             } else if (this.pts.length === 2) {
-                const start = this.pts[0];
-                const end = this.pts[1];
-                const radius = distance(start, p);
-                const d = distance(start, end);
-                if (radius >= d/2) {
-                    const mid = { x: (start.x + end.x)/2, y: (start.y + end.y)/2 };
-                    const h = Math.sqrt(radius*radius - (d/2)*(d/2));
-                    const angle = Math.atan2(end.y - start.y, end.x - start.x);
-                    const center = {
-                        x: mid.x - h * Math.sin(angle),
-                        y: mid.y + h * Math.cos(angle)
-                    };
-                    const startAngle = Math.atan2(start.y - center.y, start.x - center.x);
-                    const endAngle = Math.atan2(end.y - center.y, end.x - center.x);
-                    const cp = (start.x - center.x) * (end.y - center.y) - (start.y - center.y) * (end.x - center.x);
-                    const counterClockwise = cp > 0;
-                    this.ctx.setPreview([{id:'p', type:'arc', isPreview:true, layer: style.layer, color: style.color, x: center.x, y: center.y, radius, startAngle, endAngle, counterClockwise} as any]);
-                }
+                const cp = applyOrthoConstraint(p, this.pts[1], ortho, snapped);
+                const res = getCircleFrom3Points(this.pts[0], cp, this.pts[1]);
+                if (res) this.ctx.setPreview([{id:'p', type:'arc', isPreview:true, layer: style.layer, color: style.color, x:res.x, y:res.y, radius:res.radius, startAngle:res.startAngle, endAngle:res.endAngle, counterClockwise:res.counterClockwise} as any]);
             }
+        } else if (this.mode === 'tan' && this.pts.length === 1) {
+             const start = this.pts[0];
+             const end = applyOrthoConstraint(p, start, ortho, snapped);
+             const mid = { x: (start.x + end.x)/2 + (end.y - start.y)*0.2, y: (start.y + end.y)/2 - (end.x - start.x)*0.2 };
+             const res = getCircleFrom3Points(start, mid, end);
+             if (res) this.ctx.setPreview([{id:'p', type:'arc', isPreview:true, layer: style.layer, color: style.color, x:res.x, y:res.y, radius:res.radius, startAngle:res.startAngle, endAngle:res.endAngle, counterClockwise:res.counterClockwise} as any]);
         }
     }
-    onEnter() { this.ctx.onFinish(); } 
+    
+    onEnter() { this.ctx.onFinish(); }
     onCancel() { this.ctx.onFinish(); }
 }
 
@@ -749,9 +736,13 @@ export class PolygonCommand implements CADCommand {
         }
         return false;
     }
-    onClick(p: Point) {
+    onClick(p: Point, snapped: boolean) {
         if (!this.center) { this.center = p; this.ctx.setMessage("POLYGON Specify radius point:"); }
-        else { this.addPolygon(distance(this.center, p)); this.ctx.onFinish(); }
+        else { 
+            const finalP = applyOrthoConstraint(p, this.center, this.ctx.getSettings().ortho, snapped);
+            this.addPolygon(distance(this.center, finalP)); 
+            this.ctx.onFinish(); 
+        }
     }
     private addPolygon(r: number) {
         if (!this.center) return;
@@ -760,9 +751,10 @@ export class PolygonCommand implements CADCommand {
         const s: PolyShape = { id: generateId(), type: 'polygon', layer: style.layer, color: style.color, points: pts, closed: true, thickness: style.thickness, lineType: style.lineType };
         this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
     }
-    onMove(p: Point) {
+    onMove(p: Point, snapped: boolean) {
         if (this.center) {
-            const pts = getPolygonPoints(this.center, this.sides, distance(this.center, p), true);
+            const finalP = applyOrthoConstraint(p, this.center, this.ctx.getSettings().ortho, snapped);
+            const pts = getPolygonPoints(this.center, this.sides, distance(this.center, finalP), true);
             const style = getStyleSettings(this.ctx);
             this.ctx.setPreview([{id:'p', type:'polygon', isPreview:true, layer: style.layer, color: style.color, points: pts, closed: true} as any]);
         }
@@ -771,34 +763,144 @@ export class PolygonCommand implements CADCommand {
 }
 
 export class EllipseCommand implements CADCommand {
-    name = "ELLIPSE"; public center: Point | null = null; public major: Point | null = null;
+    name = "ELLIPSE"; 
+    public pts: Point[] = [];
+    public mode: 'center' | '2p' | '3p' | 'tan' = 'center';
+
     constructor(public ctx: CommandContext) {}
-    onStart() { this.ctx.setMessage("ELLIPSE Specify center point:"); }
-    onClick(p: Point) {
-        if (!this.center) { this.center = p; this.ctx.setMessage("ELLIPSE Specify endpoint of axis:"); }
-        else if (!this.major) { this.major = p; this.ctx.setMessage("ELLIPSE Specify distance to other axis (minor radius):"); }
-        else {
-            const rx = distance(this.center, this.major);
-            const ry = distance(this.center, p);
-            const rot = Math.atan2(this.major.y - this.center.y, this.major.x - this.center.x);
-            const style = getStyleSettings(this.ctx);
-            const s: EllipseShape = { id: generateId(), type: 'ellipse', layer: style.layer, color: style.color, x: this.center.x, y: this.center.y, rx, ry, rotation: rot, thickness: style.thickness };
-            this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
-            this.ctx.onFinish();
-        }
+
+    onStart() { 
+        this.ctx.setMessage("ELLIPSE Specify center point or [2P/3P/Tan]:"); 
     }
-    onMove(p: Point) {
+
+    onInput(text: string): boolean {
+        const t = text.trim().toLowerCase();
+        if (t === 'center' || t === 'c') {
+            this.mode = 'center'; this.pts = [];
+            this.ctx.setMessage("ELLIPSE CENTER Specify center point:");
+            return true;
+        }
+        if (t === '2p') {
+            this.mode = '2p'; this.pts = [];
+            this.ctx.setMessage("ELLIPSE 2P Specify first endpoint of axis:");
+            return true;
+        }
+        if (t === '3p') {
+            this.mode = '3p'; this.pts = [];
+            this.ctx.setMessage("ELLIPSE 3P Specify first endpoint of axis:");
+            return true;
+        }
+        if (t === 'tan') {
+            this.mode = 'tan'; this.pts = [];
+            this.ctx.setMessage("ELLIPSE TAN Specify point on tangent line:");
+            return true;
+        }
+
+        const last = this.pts.length > 0 ? this.pts[this.pts.length - 1] : null;
+        const p = resolvePointInput(text, last, this.ctx.getSettings().units === 'imperial', this.ctx.lastMousePoint, this.ctx.getSettings().ortho);
+        if (p) { this.onClick(p, false); return true; }
+        return false;
+    }
+
+    onClick(p: Point, snapped: boolean) {
+        const ortho = this.ctx.getSettings().ortho;
+        let finalP = p;
+        if (this.pts.length > 0) {
+            const anchor = (this.mode === 'center' || this.mode === 'tan') ? this.pts[0] : this.pts[this.pts.length - 1];
+            finalP = applyOrthoConstraint(p, anchor, ortho, snapped);
+        }
+
+        this.pts.push(finalP);
         const style = getStyleSettings(this.ctx);
-        if (this.center && !this.major) {
-            this.ctx.setPreview([{id:'p', type:'line', isPreview:true, layer: style.layer, color: style.color, x1:this.center.x, y1:this.center.y, x2:p.x, y2:p.y} as any]);
-        } else if (this.center && this.major) {
-            const rx = distance(this.center, this.major);
-            const ry = distance(this.center, p);
-            const rot = Math.atan2(this.major.y - this.center.y, this.major.x - this.center.x);
-            this.ctx.setPreview([{id:'p', type:'ellipse', isPreview:true, layer: style.layer, color: style.color, x:this.center.x, y:this.center.y, rx, ry, rotation: rot} as any]);
+
+        if (this.mode === 'center') {
+            if (this.pts.length === 1) this.ctx.setMessage("ELLIPSE CENTER Specify endpoint of axis:");
+            else if (this.pts.length === 2) this.ctx.setMessage("ELLIPSE CENTER Specify distance to other axis (minor radius):");
+            else {
+                const cen = this.pts[0], major = this.pts[1], minorP = this.pts[2];
+                const rx = distance(cen, major);
+                const ry = distance(cen, minorP);
+                const rot = Math.atan2(major.y - cen.y, major.x - cen.x);
+                const s: EllipseShape = { id: generateId(), type: 'ellipse', layer: style.layer, color: style.color, x: cen.x, y: cen.y, rx, ry, rotation: rot, thickness: style.thickness };
+                this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
+                this.ctx.onFinish();
+            }
+        } else if (this.mode === '2p' || this.mode === '3p') {
+            if (this.pts.length === 1) {
+                this.ctx.setMessage(`ELLIPSE ${this.mode === '2p' ? '2P' : '3P'} Specify second endpoint of axis:`);
+            } else if (this.pts.length === 2) {
+                this.ctx.setMessage(`ELLIPSE ${this.mode === '2p' ? '2P' : '3P'} Specify distance to other axis:`);
+            } else {
+                const p1 = this.pts[0], p2 = this.pts[1], p3 = this.pts[2];
+                const cen = { x: (p1.x + p2.x)/2, y: (p1.y + p2.y)/2 };
+                const rx = distance(cen, p1);
+                const ry = distance(cen, p3);
+                const rot = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+                const s: EllipseShape = { id: generateId(), type: 'ellipse', layer: style.layer, color: style.color, x: cen.x, y: cen.y, rx, ry, rotation: rot, thickness: style.thickness };
+                this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
+                this.ctx.onFinish();
+            }
+        } else if (this.mode === 'tan') {
+            if (this.pts.length === 1) this.ctx.setMessage("ELLIPSE TAN Specify major axis endpoint:");
+            else if (this.pts.length === 2) this.ctx.setMessage("ELLIPSE TAN Specify minor axis endpoint:");
+            else {
+                const cen = this.pts[0], major = this.pts[1], minor = this.pts[2];
+                const rx = distance(cen, major);
+                const ry = distance(cen, minor);
+                const rot = Math.atan2(major.y - cen.y, major.x - cen.x);
+                const s: EllipseShape = { id: generateId(), type: 'ellipse', layer: style.layer, color: style.color, x: cen.x, y: cen.y, rx, ry, rotation: rot, thickness: style.thickness };
+                this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
+                this.ctx.onFinish();
+            }
         }
     }
-    onEnter() { this.ctx.onFinish(); } onCancel() { this.ctx.onFinish(); }
+
+    onMove(p: Point, snapped: boolean) {
+        const style = getStyleSettings(this.ctx);
+        const ortho = this.ctx.getSettings().ortho;
+
+        if (this.mode === 'center' && this.pts.length > 0) {
+            if (this.pts.length === 1) {
+                const cp = applyOrthoConstraint(p, this.pts[0], ortho, snapped);
+                this.ctx.setPreview([{id:'p', type:'line', isPreview:true, layer: style.layer, color: style.color, x1:this.pts[0].x, y1:this.pts[0].y, x2:cp.x, y2:cp.y} as any]);
+            } else if (this.pts.length === 2) {
+                const cen = this.pts[0], major = this.pts[1];
+                const cp = applyOrthoConstraint(p, cen, ortho, snapped);
+                const rx = distance(cen, major);
+                const ry = distance(cen, cp);
+                const rot = Math.atan2(major.y - cen.y, major.x - cen.x);
+                this.ctx.setPreview([{id:'p', type:'ellipse', isPreview:true, layer: style.layer, color: style.color, x:cen.x, y:cen.y, rx, ry, rotation:rot} as any]);
+            }
+        } else if ((this.mode === '2p' || this.mode === '3p') && this.pts.length > 0) {
+            if (this.pts.length === 1) {
+                const cp = applyOrthoConstraint(p, this.pts[0], ortho, snapped);
+                this.ctx.setPreview([{id:'p', type:'line', isPreview:true, layer: style.layer, color: style.color, x1:this.pts[0].x, y1:this.pts[0].y, x2:cp.x, y2:cp.y} as any]);
+            } else if (this.pts.length === 2) {
+                const p1 = this.pts[0], p2 = this.pts[1];
+                const cen = { x: (p1.x + p2.x)/2, y: (p1.y + p2.y)/2 };
+                const cp = applyOrthoConstraint(p, cen, ortho, snapped);
+                const rx = distance(cen, p1);
+                const ry = distance(cen, cp);
+                const rot = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+                this.ctx.setPreview([{id:'p', type:'ellipse', isPreview:true, layer: style.layer, color: style.color, x:cen.x, y:cen.y, rx, ry, rotation:rot} as any]);
+            }
+        } else if (this.mode === 'tan' && this.pts.length > 0) {
+            if (this.pts.length === 1) {
+                const cp = applyOrthoConstraint(p, this.pts[0], ortho, snapped);
+                this.ctx.setPreview([{id:'p', type:'line', isPreview:true, layer: style.layer, color: style.color, x1:this.pts[0].x, y1:this.pts[0].y, x2:cp.x, y2:cp.y} as any]);
+            } else if (this.pts.length === 2) {
+                const cen = this.pts[0], major = this.pts[1];
+                const cp = applyOrthoConstraint(p, cen, ortho, snapped);
+                const rx = distance(cen, major);
+                const ry = distance(cen, cp);
+                const rot = Math.atan2(major.y - cen.y, major.x - cen.x);
+                this.ctx.setPreview([{id:'p', type:'ellipse', isPreview:true, layer: style.layer, color: style.color, x:cen.x, y:cen.y, rx, ry, rotation:rot} as any]);
+            }
+        }
+    }
+
+    onEnter() { this.ctx.onFinish(); }
+    onCancel() { this.ctx.onFinish(); }
 }
 
 export class RectCommand implements CADCommand {
@@ -827,10 +929,11 @@ export class MoveCommand implements CADCommand {
     name = "MOVE"; base: Point | null = null;
     constructor(public ctx: CommandContext) {}
     onStart() { this.ctx.setMessage("MOVE Select items and pick base point:"); }
-    onClick(p: Point) {
+    onClick(p: Point, snapped: boolean) {
         if (!this.base) { this.base = p; this.ctx.setMessage("MOVE Specify second point:"); }
         else {
-            const dx = p.x - this.base.x, dy = p.y - this.base.y;
+            const finalP = applyOrthoConstraint(p, this.base, this.ctx.getSettings().ortho, snapped);
+            const dx = finalP.x - this.base.x, dy = finalP.y - this.base.y;
             const ids = this.ctx.getSelectedIds();
             this.ctx.setLayers(prev => {
                 const next = { ...prev };
@@ -840,9 +943,10 @@ export class MoveCommand implements CADCommand {
             this.ctx.onFinish();
         }
     }
-    onMove(p: Point) {
+    onMove(p: Point, snapped: boolean) {
         if (this.base) {
-            const dx = p.x - this.base.x, dy = p.y - this.base.y;
+            const finalP = applyOrthoConstraint(p, this.base, this.ctx.getSettings().ortho, snapped);
+            const dx = finalP.x - this.base.x, dy = finalP.y - this.base.y;
             const ids = this.ctx.getSelectedIds();
             const all = Object.values(this.ctx.getLayers()).flat();
             this.ctx.setPreview(all.filter(s => ids.includes(s.id)).map(s => ({...moveShape(s, dx, dy), isPreview: true} as any)));
@@ -889,18 +993,20 @@ export class DistanceCommand implements CADCommand {
     name = "DIST"; public p1: Point | null = null;
     constructor(public ctx: CommandContext) {}
     onStart() { this.ctx.setMessage("DIST Specify first point:"); }
-    onClick(p: Point) {
+    onClick(p: Point, snapped: boolean) {
         if (!this.p1) { this.p1 = p; this.ctx.setMessage("DIST Specify second point:"); }
         else {
-            const d = distance(this.p1, p);
+            const finalP = applyOrthoConstraint(p, this.p1, this.ctx.getSettings().ortho, snapped);
+            const d = distance(this.p1, finalP);
             this.ctx.addLog(`DISTANCE: ${formatLength(d, this.ctx.getSettings().units === 'imperial')}`);
             this.ctx.onFinish();
         }
     }
-    onMove(p: Point) {
+    onMove(p: Point, snapped: boolean) {
         if (this.p1) {
+            const finalP = applyOrthoConstraint(p, this.p1, this.ctx.getSettings().ortho, snapped);
             const style = getStyleSettings(this.ctx);
-            this.ctx.setPreview([{id:'p', type:'line', isPreview:true, layer: style.layer, color: style.color, x1:this.p1.x, y1:this.p1.y, x2:p.x, y2:p.y} as any]);
+            this.ctx.setPreview([{id:'p', type:'line', isPreview:true, layer: style.layer, color: style.color, x1:this.p1.x, y1:this.p1.y, x2:finalP.x, y2:finalP.y} as any]);
         }
     }
     onEnter() {} onCancel() {}
@@ -934,9 +1040,13 @@ export class DimensionCommand implements CADCommand {
     name = "DIM"; public p1: Point | null = null; public p2: Point | null = null;
     constructor(public ctx: CommandContext) {}
     onStart() { this.ctx.setMessage("DIM Specify first extension line origin:"); }
-    onClick(p: Point) {
+    onClick(p: Point, snapped: boolean) {
         if (!this.p1) { this.p1 = p; this.ctx.setMessage("DIM Specify second extension line origin:"); }
-        else if (!this.p2) { this.p2 = p; this.ctx.setMessage("DIM Specify dimension line location:"); }
+        else if (!this.p2) { 
+            const finalP = applyOrthoConstraint(p, this.p1, this.ctx.getSettings().ortho, snapped);
+            this.p2 = finalP; 
+            this.ctx.setMessage("DIM Specify dimension line location:"); 
+        }
         else {
             const style = getStyleSettings(this.ctx);
             const d = distance(this.p1, this.p2);
@@ -945,8 +1055,12 @@ export class DimensionCommand implements CADCommand {
             this.ctx.onFinish();
         }
     }
-    onMove(p: Point) {
-        if (this.p1 && this.p2) {
+    onMove(p: Point, snapped: boolean) {
+        if (this.p1 && !this.p2) {
+            const finalP = applyOrthoConstraint(p, this.p1, this.ctx.getSettings().ortho, snapped);
+            const style = getStyleSettings(this.ctx);
+            this.ctx.setPreview([{id:'p', type:'line', isPreview:true, layer: style.layer, color: style.color, x1:this.p1.x, y1:this.p1.y, x2:finalP.x, y2:finalP.y} as any]);
+        } else if (this.p1 && this.p2) {
             const style = getStyleSettings(this.ctx);
             this.ctx.setPreview([{id:'p', type:'line', isPreview:true, layer: style.layer, color: style.color, x1:p.x, y1:p.y, x2:this.p1.x, y2:this.p1.y} as any]);
         }

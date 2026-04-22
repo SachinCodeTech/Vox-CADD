@@ -13,40 +13,56 @@ const VoxIcon: React.FC<VoxIconProps> = ({ size = 24, className = "" }) => {
       viewBox="0 0 100 100" 
       fill="none" 
       xmlns="http://www.w3.org/2000/svg"
-      className={`drop-shadow-md ${className}`}
+      className={`drop-shadow-xl ${className}`}
     >
-      {/* Main Square Body with Precise Corners */}
+      <defs>
+        <linearGradient id="iconGradient" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#0891b2" />
+          <stop offset="1" stopColor="#06b6d4" />
+        </linearGradient>
+        <pattern id="gridPattern" width="20" height="20" patternUnits="userSpaceOnUse">
+          <path d="M 20 0 L 0 0 0 20" fill="none" stroke="white" strokeWidth="0.5" strokeOpacity="0.15"/>
+        </pattern>
+        <filter id="glow">
+          <feGaussianBlur stdDeviation="2" result="blur" />
+          <feComposite in="SourceGraphic" in2="blur" operator="over" />
+        </filter>
+      </defs>
+
+      {/* Background with rounded corners and subtle shadow */}
       <rect 
-        x="5" 
-        y="5" 
-        width="90" 
-        height="90" 
-        rx="12" 
-        fill="#00bcd4" 
+        x="2" 
+        y="2" 
+        width="96" 
+        height="96" 
+        rx="24" 
+        fill="url(#iconGradient)" 
       />
       
-      {/* Grid Pattern Overlay */}
-      <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse">
-        <path d="M 10 0 L 0 0 0 10" fill="none" stroke="white" strokeWidth="0.5" opacity="0.3"/>
-      </pattern>
-      <rect x="5" y="5" width="90" height="90" rx="12" fill="url(#grid)" />
+      {/* Grid Overlay */}
+      <rect x="2" y="2" width="96" height="96" rx="24" fill="url(#gridPattern)" />
 
-      {/* The "V" as a drafting divider/caliper style */}
+      {/* Technical "V" formed by drafting dividers */}
       <path 
-        d="M25 30L50 75L75 30" 
-        stroke="black" 
-        strokeWidth="14" 
+        d="M25 35 L50 75 L75 35" 
+        stroke="white" 
+        strokeWidth="10" 
         strokeLinecap="round" 
         strokeLinejoin="round" 
+        filter="url(#glow)"
       />
-      <circle cx="50" cy="75" r="5" fill="black" />
-
-      <defs>
-        <linearGradient id="voxGradient" x1="10" y1="10" x2="90" y2="90" gradientUnits="userSpaceOnUse">
-          <stop stopColor="white" />
-          <stop offset="1" stopColor="black" />
-        </linearGradient>
-      </defs>
+      
+      {/* Precision Point */}
+      <circle cx="50" cy="75" r="4" fill="white" />
+      
+      {/* Accent Detail */}
+      <path 
+        d="M35 35 H65" 
+        stroke="white" 
+        strokeWidth="2" 
+        strokeOpacity="0.5"
+        strokeDasharray="4 4"
+      />
     </svg>
   );
 };

@@ -352,15 +352,21 @@ export const getShapeSegments = (s: Shape): { p1: Point, p2: Point }[] => {
     return segments;
 };
 
-export const resolvePointInput = (input: string, lastPoint: Point | null, isImperial: boolean, currentCursor?: Point): Point | null => {
+export const resolvePointInput = (input: string, lastPoint: Point | null, isImperial: boolean, currentCursor?: Point, orthoEnabled?: boolean): Point | null => {
     const text = input.trim().toLowerCase();
     if (text === "") return null;
 
     if (!text.includes(',') && !text.includes('<') && !text.startsWith('@')) {
         const distValue = parseLength(text, isImperial);
         if (!isNaN(distValue) && lastPoint && currentCursor) {
-            const dx = currentCursor.x - lastPoint.x;
-            const dy = currentCursor.y - lastPoint.y;
+            let dx = currentCursor.x - lastPoint.x;
+            let dy = currentCursor.y - lastPoint.y;
+            
+            if (orthoEnabled) {
+                if (Math.abs(dx) > Math.abs(dy)) dy = 0;
+                else dx = 0;
+            }
+            
             const angle = Math.atan2(dy, dx);
             return {
                 x: lastPoint.x + distValue * Math.cos(angle),
