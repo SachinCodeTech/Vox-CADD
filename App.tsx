@@ -666,20 +666,36 @@ const App: React.FC = () => {
   return (
     <div className="flex flex-col h-full w-full bg-black text-neutral-300 overflow-hidden select-none">
       {isAppLoading && <LoadingScreen onComplete={() => setIsAppLoading(false)} />}
-      <header className="h-10 flex items-center justify-between px-3 shrink-0 bg-black border-b border-white/5 z-[110]">
-        <div className="flex items-center gap-2">
-          <VoxIcon size={28} className="shrink-0" />
-          <div className="flex items-baseline gap-1">
-            <span className="font-black text-[16px] uppercase tracking-wider text-white">VOX<span className="text-cyan-500">CADD</span></span>
-            <span className="text-neutral-500 font-bold text-[8px] uppercase tracking-widest opacity-70 ml-1">v1.0.0</span>
+      <header className="h-14 flex items-center justify-between px-4 shrink-0 bg-black border-b border-white/5 z-[110]">
+        <div className="flex items-center gap-3">
+          <VoxIcon size={32} className="shrink-0" />
+          <div className="flex flex-col justify-center translate-y-[1px]">
+            <div className="flex items-center leading-none">
+              <span className="font-black text-[16.5px] uppercase tracking-tighter text-white">VOX</span>
+              <span className="font-bold text-[16.5px] uppercase tracking-tighter text-cyan-500 ml-1.5">CADD</span>
+            </div>
+            <span className="text-neutral-700 font-bold text-[7px] uppercase tracking-[0.35em] leading-none mt-1.5 ml-0.5">V-1.0.0</span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-            <div className="flex bg-[#121214] rounded-lg p-0.5 border border-white/5">
-                <button onClick={() => setActiveTab('model')} className={`px-4 py-1.5 rounded-md text-[9px] font-black uppercase transition-all ${activeTab === 'model' ? 'bg-[#00bcd4] text-black' : 'text-neutral-500'}`}>Model</button>
-                <button onClick={() => setActiveTab('layout')} className={`px-4 py-1.5 rounded-md text-[9px] font-black uppercase transition-all ${activeTab === 'layout' ? 'bg-[#00bcd4] text-black' : 'text-neutral-500'}`}>Layout</button>
-            </div>
-            <button onClick={() => handleAction('toggleMainMenu')} className="p-1.5 transition-colors text-neutral-400 hover:text-white no-tap"><Menu size={20} /></button>
+
+        <div className="flex items-center gap-3">
+          <div className="flex bg-[#121214] rounded-md p-0.5 border border-white/5 items-center h-7">
+            <button 
+                onClick={() => setActiveTab('model')} 
+                className={`h-6 px-3.5 rounded-[4px] font-black uppercase transition-all flex items-center justify-center text-[9px] ${activeTab === 'model' ? 'bg-cyan-500 text-black' : 'text-neutral-500 hover:text-neutral-400'}`}
+            >
+                Model
+            </button>
+            <button 
+                onClick={() => setActiveTab('layout')} 
+                className={`h-6 px-3.5 rounded-[4px] font-black uppercase transition-all flex items-center justify-center text-[9px] ${activeTab === 'layout' ? 'bg-cyan-500 text-black' : 'text-neutral-500 hover:text-neutral-400'}`}
+            >
+                Layout
+            </button>
+          </div>
+          <button onClick={() => handleAction('toggleMainMenu')} className="p-1 transition-all text-neutral-500 hover:text-white no-tap">
+            <Menu size={24} />
+          </button>
         </div>
       </header>
 

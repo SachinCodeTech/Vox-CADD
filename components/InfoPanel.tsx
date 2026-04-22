@@ -69,8 +69,12 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ type, onClose, onSwitch }) => {
   const renderAbout = () => (
     <div className="flex flex-col items-center text-center p-4">
       <VoxIcon size={80} className="mb-6 shadow-[0_0_40px_rgba(6,182,212,0.3)]" />
-      <h2 className="text-2xl font-black text-white mb-1 uppercase tracking-tight">VOX<span className="text-cyan-500">CADD</span> Mobile</h2>
-      <p className="text-xs text-cyan-400 font-bold uppercase tracking-widest mb-6">v1.0.0</p>
+      <h2 className="text-2xl uppercase tracking-tight mb-1">
+        <span className="text-white font-black">VOX</span>
+        <span className="text-cyan-500 font-bold ml-1">CADD</span>
+        <span className="text-white font-black ml-2">Mobile</span>
+      </h2>
+      <p className="text-xs text-neutral-500 font-bold uppercase tracking-widest mb-6">V-1.0.0</p>
       
       <div className="w-full space-y-4 text-left bg-black/40 p-4 rounded-2xl border border-white/5">
         <div className="flex flex-col gap-3">

@@ -79,9 +79,10 @@ const LoadingScreen: React.FC<{ onComplete: () => void }> = ({ onComplete }) => 
                   initial={{ y: 20, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   transition={{ delay: 0.3 }}
-                  className="text-white text-2xl font-black uppercase tracking-[0.2em] italic"
+                  className="text-2xl uppercase tracking-[0.2em] italic"
                 >
-                  VOX<span className="text-cyan-500">CADD</span>
+                  <span className="text-white font-black">VOX</span>
+                  <span className="text-cyan-500 font-bold ml-1">CADD</span>
                 </motion.h1>
                 <span className="text-cyan-500 font-mono text-sm self-end mb-1 font-bold">{Math.floor(progress)}%</span>
               </div>

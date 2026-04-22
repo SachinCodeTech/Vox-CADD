@@ -57,7 +57,14 @@ const ExportActionBtn = ({ icon: Icon, label, sublabel, onClick, badge }: { icon
     </button>
 );
 
-const RecentFileItem = ({ name, date, onClick, current }: { name: string, date: number, onClick: () => void, current?: boolean }) => (
+interface RecentFileItemProps {
+    name: string;
+    date: number;
+    onClick: () => void;
+    current?: boolean;
+}
+
+const RecentFileItem: React.FC<RecentFileItemProps> = ({ name, date, onClick, current }) => (
     <button 
         onClick={onClick}
         className={`w-full flex items-center gap-4 p-4 rounded-[1.2rem] transition-all group no-tap border ${current ? 'bg-cyan-500/10 border-cyan-500/30' : 'bg-[#121214] border-white/5 hover:bg-neutral-800/50'}`}

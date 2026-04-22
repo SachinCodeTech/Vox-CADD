@@ -13,56 +13,46 @@ const VoxIcon: React.FC<VoxIconProps> = ({ size = 24, className = "" }) => {
       viewBox="0 0 100 100" 
       fill="none" 
       xmlns="http://www.w3.org/2000/svg"
-      className={`drop-shadow-xl ${className}`}
+      className={`drop-shadow-2xl ${className}`}
     >
       <defs>
-        <linearGradient id="iconGradient" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#0891b2" />
-          <stop offset="1" stopColor="#06b6d4" />
-        </linearGradient>
-        <pattern id="gridPattern" width="20" height="20" patternUnits="userSpaceOnUse">
-          <path d="M 20 0 L 0 0 0 20" fill="none" stroke="white" strokeWidth="0.5" strokeOpacity="0.15"/>
-        </pattern>
-        <filter id="glow">
-          <feGaussianBlur stdDeviation="2" result="blur" />
-          <feComposite in="SourceGraphic" in2="blur" operator="over" />
+        <filter id="shadow">
+          <feDropShadow dx="0" dy="4" stdDeviation="4" floodOpacity="0.5"/>
         </filter>
+        <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse">
+          <path d="M 10 0 L 0 0 0 10" fill="none" stroke="white" strokeWidth="0.5" strokeOpacity="0.1"/>
+        </pattern>
       </defs>
 
-      {/* Background with rounded corners and subtle shadow */}
-      <rect 
-        x="2" 
-        y="2" 
-        width="96" 
-        height="96" 
-        rx="24" 
-        fill="url(#iconGradient)" 
-      />
+      {/* Outer rounded container - Dark with Cyan border */}
+      <rect x="5" y="5" width="90" height="90" rx="20" fill="#0D1117" stroke="#00BCD4" strokeWidth="1.5"/>
       
-      {/* Grid Overlay */}
-      <rect x="2" y="2" width="96" height="96" rx="24" fill="url(#gridPattern)" />
+      {/* Grid Pattern Overlay */}
+      <rect x="5" y="5" width="90" height="90" rx="20" fill="url(#grid)" />
 
-      {/* Technical "V" formed by drafting dividers */}
+      {/* Primary Logo Square - Bright Cyan */}
+      <rect x="25" y="25" width="50" height="50" rx="14" fill="#00BCD4" filter="url(#shadow)" />
+
+      {/* Stylized 'V' / Drafting Tool - ENLARGED */}
       <path 
-        d="M25 35 L50 75 L75 35" 
+        d="M36 44 L50 64 L64 44" 
         stroke="white" 
-        strokeWidth="10" 
+        strokeWidth="7" 
         strokeLinecap="round" 
         strokeLinejoin="round" 
-        filter="url(#glow)"
       />
       
-      {/* Precision Point */}
-      <circle cx="50" cy="75" r="4" fill="white" />
-      
-      {/* Accent Detail */}
+      {/* Top Drafting Line */}
       <path 
-        d="M35 35 H65" 
+        d="M38 44 L62 44" 
         stroke="white" 
-        strokeWidth="2" 
-        strokeOpacity="0.5"
-        strokeDasharray="4 4"
+        strokeWidth="1.8" 
+        strokeDasharray="2 2"
+        strokeOpacity="0.9"
       />
+      
+      {/* Pivot Point */}
+      <circle cx="50" cy="64" r="2" fill="#00BCD4" />
     </svg>
   );
 };
