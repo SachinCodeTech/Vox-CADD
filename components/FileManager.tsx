@@ -61,27 +61,49 @@ interface RecentFileItemProps {
     name: string;
     date: number;
     onClick: () => void;
+    onDelete: (e: React.MouseEvent) => void;
+    onDownload: (e: React.MouseEvent) => void;
     current?: boolean;
 }
 
-const RecentFileItem: React.FC<RecentFileItemProps> = ({ name, date, onClick, current }) => (
-    <button 
-        onClick={onClick}
-        className={`w-full flex items-center gap-4 p-4 rounded-[1.2rem] transition-all group no-tap border ${current ? 'bg-cyan-500/10 border-cyan-500/30' : 'bg-[#121214] border-white/5 hover:bg-neutral-800/50'}`}
-    >
-        <div className={`w-10 h-10 rounded-[0.8rem] flex items-center justify-center transition-all ${current ? 'bg-cyan-400 text-black' : 'bg-neutral-800 text-neutral-500 group-hover:text-white'}`}>
-            <File size={18} />
-        </div>
-        <div className="flex-1 text-left">
-            <div className={`text-[11px] font-black uppercase tracking-tight ${current ? 'text-cyan-400' : 'text-white'}`}>{name}</div>
-            <div className="text-[8px] text-neutral-600 font-bold uppercase tracking-widest mt-0.5">
-                Last modified: {new Date(date).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+const RecentFileItem: React.FC<RecentFileItemProps> = ({ name, date, onClick, onDelete, onDownload, current }) => (
+    <div className="relative group/item">
+        <button 
+            onClick={onClick}
+            className={`w-full flex items-center gap-4 p-4 rounded-[1.2rem] transition-all group no-tap border ${current ? 'bg-cyan-500/10 border-cyan-500/30' : 'bg-[#121214] border-white/5 hover:bg-neutral-800/50'}`}
+        >
+            <div className={`w-10 h-10 rounded-[0.8rem] flex items-center justify-center transition-all ${current ? 'bg-cyan-400 text-black' : 'bg-neutral-800 text-neutral-500 group-hover:text-white'}`}>
+                <File size={18} />
             </div>
+            <div className="flex-1 text-left overflow-hidden">
+                <div className={`text-[11px] font-black uppercase tracking-tight truncate ${current ? 'text-cyan-400' : 'text-white'}`}>{name}</div>
+                <div className="text-[8px] text-neutral-600 font-bold uppercase tracking-widest mt-0.5">
+                    {new Date(date).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                </div>
+            </div>
+            {current && (
+                <div className="px-2 py-1 bg-cyan-400 rounded text-[7px] font-black text-black uppercase tracking-tight shrink-0">Active</div>
+            )}
+        </button>
+        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover/item:opacity-100 transition-opacity">
+            <button 
+                onClick={onDownload}
+                title="Download"
+                className="w-7 h-7 flex items-center justify-center rounded-full bg-neutral-800 text-neutral-400 hover:bg-cyan-500 hover:text-black transition-all"
+            >
+                <Download size={14} />
+            </button>
+            {!current && (
+                <button 
+                    onClick={onDelete}
+                    title="Delete"
+                    className="w-7 h-7 flex items-center justify-center rounded-full bg-neutral-800 text-neutral-400 hover:bg-red-500 hover:text-white transition-all"
+                >
+                    <X size={14} />
+                </button>
+            )}
         </div>
-        {current && (
-            <div className="px-2 py-1 bg-cyan-400 rounded text-[7px] font-black text-black uppercase tracking-tight">Active</div>
-        )}
-    </button>
+    </div>
 );
 
 const FileManager: React.FC<FileManagerProps> = ({ currentName, recentFiles = [], onAction, onClose }) => {
@@ -153,7 +175,7 @@ const FileManager: React.FC<FileManagerProps> = ({ currentName, recentFiles = []
                     <div className="grid grid-cols-2 gap-4">
                         <ProjectActionBtn icon={FilePlus} label="New" sublabel="New Workspace" onClick={() => onAction('new')} />
                         <ProjectActionBtn icon={FolderOpen} label="Open" sublabel="Existing File" onClick={() => onAction('open')} />
-                        <ProjectActionBtn icon={VoxIcon} label="Save" sublabel={currentName} onClick={() => onAction('save')} active />
+                        <ProjectActionBtn icon={VoxIcon} label="Save" sublabel={currentName} onClick={() => onAction('save')} />
                         <ProjectActionBtn icon={Database} label="Save As" sublabel=".vox format" onClick={() => onAction('saveAs', 'vox')} />
                     </div>
                 </div>
@@ -171,7 +193,9 @@ const FileManager: React.FC<FileManagerProps> = ({ currentName, recentFiles = []
                                 name={file.name} 
                                 date={file.date} 
                                 current={file.name === currentName}
-                                onClick={() => {}} // Integration for opening from list can be added here
+                                onClick={() => onAction('openRecent', file.name)}
+                                onDelete={(e) => { e.stopPropagation(); onAction('deleteRecent', file.name); }}
+                                onDownload={(e) => { e.stopPropagation(); onAction('downloadRecent', file.name); }}
                             />
                         ))}
                     </div>

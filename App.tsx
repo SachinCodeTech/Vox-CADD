@@ -59,7 +59,8 @@ const INITIAL_LAYERS_CONFIG: Record<string, LayerConfig> = {
 export type ToolbarCategory = 'Draw' | 'Modify' | 'Anno' | 'View' | 'Assist' | 'History' | 'Edit';
 type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 'file' | 'mainmenu' | 'drawing_props' | 'help' | 'about' | 'privacy' | 'new_file';
 
-const STORAGE_KEY = 'voxcadd_active_workspace';
+const STORAGE_PREFIX = 'voxcadd_file_v1_';
+const REGISTRY_KEY = 'voxcadd_recent_files';
 
 const App: React.FC = () => {
   const [layers, setLayers] = useState<Record<string, Shape[]>>({ '0': [], 'defpoints': [] });
@@ -115,7 +116,7 @@ const App: React.FC = () => {
     setRecentFiles(prev => {
       const filtered = prev.filter(f => f.name !== name);
       const updated = [{ name, date: Date.now() }, ...filtered].slice(0, 10);
-      localStorage.setItem('voxcadd_recent_files', JSON.stringify(updated));
+      localStorage.setItem(REGISTRY_KEY, JSON.stringify(updated));
       return updated;
     });
   }, []);
@@ -140,11 +141,36 @@ const App: React.FC = () => {
 
   // Restore session from LocalStorage
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    const savedRecent = localStorage.getItem('voxcadd_recent_files');
+    const saved = localStorage.getItem('voxcadd_active_workspace');
+    const savedRecent = localStorage.getItem(REGISTRY_KEY);
     
-    if (savedRecent) {
-      try { setRecentFiles(JSON.parse(savedRecent)); } catch(e) {}
+    // Seed sample files if empty to demonstrate multi-file switching
+    if (!savedRecent || JSON.parse(savedRecent).length === 0) {
+        const samples = [
+            { name: "1.vox", date: Date.now() - 3000 },
+            { name: "2.vox", date: Date.now() - 2000 },
+            { name: "3.vox", date: Date.now() - 1000 }
+        ];
+        localStorage.setItem(REGISTRY_KEY, JSON.stringify(samples));
+        setRecentFiles(samples);
+        
+        // Create sample contents
+        samples.forEach((s, i) => {
+            const sampleLayers = { 
+                '0': [
+                    { id: `seed-${i}`, type: 'circle', x: 200 * (i+1), y: 200 * (i+1), radius: 50 * (i+1), color: '#00bcd4', layer: '0' } as Shape
+                ], 
+                'defpoints': [] 
+            };
+            localStorage.setItem(`${STORAGE_PREFIX}${s.name}`, JSON.stringify({
+                layers: sampleLayers,
+                layerConfig: INITIAL_LAYERS_CONFIG,
+                settings: INITIAL_SETTINGS,
+                fileName: s.name
+            }));
+        });
+    } else {
+        try { setRecentFiles(JSON.parse(savedRecent)); } catch(e) {}
     }
 
     if (saved) {
@@ -205,6 +231,10 @@ const App: React.FC = () => {
     const isVox = fileName.toLowerCase().endsWith('.vox');
     
     try {
+        let finalLayers: Record<string, Shape[]> = { '0': [], 'defpoints': [] };
+        let finalConfig: Record<string, LayerConfig> = INITIAL_LAYERS_CONFIG;
+        let finalSettings: AppSettings = INITIAL_SETTINGS;
+
         if (isDwg) {
             if (!(content instanceof ArrayBuffer)) {
                 setLogMessage("LOAD_ERR: BINARY_DATA_REQUIRED");
@@ -212,55 +242,72 @@ const App: React.FC = () => {
             }
             setLogMessage("PARSING_DWG_BINARY...");
             const result = await dwgToShapes(content);
-            const { shapes: importedShapes, stats } = result;
-            
+            const { shapes: importedShapes } = result;
             if (importedShapes.length > 0) {
-                setLayers({ '0': importedShapes, 'defpoints': [] }); // Overwrite or add? User likely wants to OPEN
+                finalLayers = { '0': importedShapes, 'defpoints': [] };
                 setLogMessage(`DWG_IMPORT: ${importedShapes.length} ENTITIES`);
             } else {
                 setLogMessage("DWG_EMPTY_OR_UNSUPPORTED");
+                return;
             }
         } else if (isDxf || isVox) {
             if (typeof content !== 'string') return;
             
-            // Try native VOX format first
             const voxResult = voxToShapes(content);
             if (voxResult) {
-                setLayers(voxResult.shapes.reduce((acc, s) => {
+                finalLayers = voxResult.shapes.reduce((acc, s) => {
                     const l = s.layer || '0';
                     if (!acc[l]) acc[l] = [];
                     acc[l].push(s);
                     return acc;
-                }, {} as Record<string, Shape[]>));
-                setLayerConfig(voxResult.layers);
-                setSettings({ ...INITIAL_SETTINGS, ...voxResult.settings });
+                }, {} as Record<string, Shape[]>);
+                finalConfig = voxResult.layers;
+                finalSettings = { ...INITIAL_SETTINGS, ...voxResult.settings };
                 setLogMessage("VOX_PROJECT_LOADED");
             } else {
-                // If not VOX, try DXF
                 setLogMessage("PARSING_DXF_DATA...");
                 const importedShapes = dxfToShapes(content);
                 if (importedShapes.length > 0) {
-                    setLayers({ '0': importedShapes, 'defpoints': [] });
+                    finalLayers = { '0': importedShapes, 'defpoints': [] };
                     setLogMessage(`DXF_IMPORT: ${importedShapes.length} ENTITIES`);
                 } else {
-                    // Try legacy JSON format as last resort
                     try {
                         const data = JSON.parse(content);
                         if (data.layers || data.shapes) {
-                            if (data.layers && !Array.isArray(data.layers)) setLayers(data.layers);
-                            else if (data.shapes) setLayers({ '0': data.shapes });
+                            if (data.layers && !Array.isArray(data.layers)) finalLayers = data.layers;
+                            else if (data.shapes) finalLayers = { '0': data.shapes };
+                            if (data.layerConfig) finalConfig = data.layerConfig;
+                            if (data.settings) finalSettings = { ...INITIAL_SETTINGS, ...data.settings };
                             setLogMessage("LEGACY_WORKSPACE_LOADED");
                         } else {
                             setLogMessage("LOAD_ERR: NO_RECOGNIZABLE_CAD_DATA");
+                            return;
                         }
                     } catch (e) {
                         setLogMessage("LOAD_ERR: UNRECOGNIZED_FILE_TYPE");
+                        return;
                     }
                 }
             }
         }
+
+        // Update State
+        setLayers(finalLayers);
+        setLayerConfig(finalConfig);
+        setSettings(finalSettings);
         setCurrentFileName(fileName);
         updateRecentFiles(fileName);
+        setView(INITIAL_VIEW); 
+        
+        // Immediate Cache
+        const cachePayload = {
+          layers: finalLayers,
+          layerConfig: finalConfig,
+          settings: finalSettings,
+          fileName: fileName
+        };
+        localStorage.setItem(`${STORAGE_PREFIX}${fileName}`, JSON.stringify(cachePayload));
+        localStorage.setItem('voxcadd_active_workspace', JSON.stringify(cachePayload));
         setActivePanel('none');
     } catch(err) { 
         console.error(err);
@@ -272,12 +319,21 @@ const App: React.FC = () => {
     const currentState = JSON.parse(JSON.stringify(layersRef.current));
     setHistory(prev => [...prev.slice(-49), currentState]);
     setRedoStack([]);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    
+    // Save to active workspace
+    const payload = {
       layers: currentState,
       layerConfig: layerConfigRef.current,
       settings: settingsRef.current,
       fileName: currentFileName
-    }));
+    };
+    
+    localStorage.setItem('voxcadd_active_workspace', JSON.stringify(payload));
+    
+    // Save to specific file storage if it's a named file
+    if (currentFileName) {
+        localStorage.setItem(`${STORAGE_PREFIX}${currentFileName}`, JSON.stringify(payload));
+    }
   }, [currentFileName]);
 
   const undo = useCallback(() => {
@@ -315,32 +371,125 @@ const App: React.FC = () => {
       case 'zoomOut': setView(v => ({ ...v, scale: v.scale / 1.5 })); break;
       case 'setUnits': setSettings(s => ({ ...s, units: payload })); break;
       case 'new': 
-        if ('showSaveFilePicker' in window) {
-            try {
-                const handle = await (window as any).showSaveFilePicker({
-                    suggestedName: 'Untitled.vox',
-                    types: [{
-                        description: 'VoxCADD Project',
-                        accept: { 'application/vnd.voxcadd.project': ['.vox'] }
-                    }]
-                });
-                setFileHandle(handle);
-                setCurrentFileName(handle.name);
-                setLayers({ '0': [], 'defpoints': [] });
-                setLayerConfig(INITIAL_LAYERS_CONFIG);
-                setSettings(INITIAL_SETTINGS);
-                setHistory([]);
-                setRedoStack([]);
-                setLogMessage(`NEW_FILE_CREATED: ${handle.name}`);
-                setActivePanel('none');
-            } catch (e) {
-                console.warn("User cancelled file creation");
-            }
-        } else {
-            setActivePanel('new_file'); 
+        setActivePanel('new_file'); 
+        break;
+      case 'saveAs':
+        if (payload === 'vox') {
+          // Internal Save As - essentially just ask for a new name
+          const newName = prompt("Enter new filename:", currentFileName.replace(/\.vox$/, "") + "_copy.vox");
+          if (newName) {
+              const cleanedName = newName.endsWith('.vox') ? newName : newName + '.vox';
+              // Clone current data
+              const currentState = JSON.parse(JSON.stringify(layersRef.current));
+              const newPayload = {
+                  layers: currentState,
+                  layerConfig: layerConfigRef.current,
+                  settings: settingsRef.current,
+                  fileName: cleanedName
+              };
+              localStorage.setItem(`${STORAGE_PREFIX}${cleanedName}`, JSON.stringify(newPayload));
+              setCurrentFileName(cleanedName);
+              updateRecentFiles(cleanedName);
+              setLogMessage(`SAVED_AS: ${cleanedName}`);
+              setFileHandle(null); // Reset native handle for new file
+          }
+        } else if (payload === 'dxf') {
+          // Export to DXF
+          handleAction('save', 'dxf');
         }
         break;
-      case 'rename': setCurrentFileName(payload); commitToHistory(); setLogMessage(`RENAMED_TO: ${payload}`); break;
+      case 'rename': {
+        const oldName = currentFileName;
+        const newName = payload;
+        if (oldName === newName) return;
+
+        // Migrate storage
+        const data = localStorage.getItem(`${STORAGE_PREFIX}${oldName}`);
+        if (data) {
+            localStorage.setItem(`${STORAGE_PREFIX}${newName}`, data);
+            localStorage.removeItem(`${STORAGE_PREFIX}${oldName}`);
+        }
+        
+        // Update registry
+        const updatedRecent = recentFiles.map(f => f.name === oldName ? { ...f, name: newName } : f);
+        setRecentFiles(updatedRecent);
+        localStorage.setItem(REGISTRY_KEY, JSON.stringify(updatedRecent));
+
+        setCurrentFileName(newName);
+        setLogMessage(`RENAMED_TO: ${newName}`);
+        break;
+      }
+      case 'deleteRecent': {
+        const filtered = recentFiles.filter(f => f.name !== payload);
+        setRecentFiles(filtered);
+        localStorage.setItem(REGISTRY_KEY, JSON.stringify(filtered));
+        localStorage.removeItem(`${STORAGE_PREFIX}${payload}`);
+        setLogMessage(`FILE_DELETED: ${payload}`);
+        break;
+      }
+      case 'downloadRecent': {
+        const data = localStorage.getItem(`${STORAGE_PREFIX}${payload}`);
+        if (data) {
+            const blob = new Blob([data], { type: 'application/x-vox' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = payload;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            setLogMessage(`DOWNLOADING: ${payload}`);
+        }
+        break;
+      }
+      case 'openRecent': {
+        if (payload === currentFileName) {
+            setActivePanel('none');
+            return;
+        }
+        
+        // Save current work before switching safely
+        const oldState = {
+          layers: JSON.parse(JSON.stringify(layersRef.current)),
+          layerConfig: layerConfigRef.current,
+          settings: settingsRef.current,
+          fileName: currentFileName
+        };
+        localStorage.setItem(`${STORAGE_PREFIX}${currentFileName}`, JSON.stringify(oldState));
+        localStorage.setItem('voxcadd_active_workspace', JSON.stringify(oldState));
+
+        setLogMessage(`LOADING: ${payload}...`);
+        const savedData = localStorage.getItem(`${STORAGE_PREFIX}${payload}`);
+        if (savedData) {
+            try {
+                const data = JSON.parse(savedData);
+                // Ensure all keys are present
+                const newLayers = data.layers || { '0': [], 'defpoints': [] };
+                const newConfig = data.layerConfig || INITIAL_LAYERS_CONFIG;
+                const newSettings = data.settings ? { ...INITIAL_SETTINGS, ...data.settings } : INITIAL_SETTINGS;
+
+                setLayers(newLayers);
+                setLayerConfig(newConfig);
+                setSettings(newSettings);
+                setCurrentFileName(payload);
+                setFileHandle(null); 
+                updateRecentFiles(payload);
+                setView(INITIAL_VIEW); // Reset view to ensure content is visible
+                setLogMessage(`OPENED: ${payload}`);
+                setActivePanel('none');
+                
+                // Force a view reset or small nudge if needed, but standard prop change should trigger redraw
+                // No need for nudges if CADCanvas is robust
+            } catch (e) {
+                console.error("Load failed", e);
+                setLogMessage("LOAD_ERR: CORRUPT_DATA");
+            }
+        } else {
+            setLogMessage("LOAD_ERR: FILE_MISSING");
+        }
+        break;
+      }
       case 'open':
         setLogMessage("AWAITING_FILE_SELECTION...");
         const input = document.createElement('input');
@@ -366,6 +515,9 @@ const App: React.FC = () => {
         break;
       case 'save':
       case 'saveAs':
+        // Ensure local storage is updated first
+        commitToHistory();
+        
         setLogMessage("PREPARING_DATA...");
         const isDxfExport = payload === 'dxf';
         const finalExt = isDxfExport ? '.dxf' : '.vox';
@@ -451,6 +603,46 @@ const App: React.FC = () => {
       case 'openFileManager': setActivePanel('file'); break;
     }
   };
+
+  // Global Keyboard Shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.ctrlKey || e.metaKey) {
+            switch(e.key.toLowerCase()) {
+                case 's':
+                    e.preventDefault();
+                    handleAction('save');
+                    break;
+                case 'o':
+                    e.preventDefault();
+                    handleAction('open');
+                    break;
+                case 'n':
+                    e.preventDefault();
+                    handleAction('new');
+                    break;
+                case 'z':
+                    e.preventDefault();
+                    if (e.shiftKey) { /* Redo? */ }
+                    else handleAction('undo');
+                    break;
+            }
+        }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [currentFileName, handleAction]);
+
+  // Auto-Save Effect
+  useEffect(() => {
+    const timer = setInterval(() => {
+        if (layersRef.current && Object.values(layersRef.current).flat().length > 0) {
+            commitToHistory();
+            setLogMessage("AUTO_SAVE_COMPLETED");
+        }
+    }, 30000); // Every 30 seconds
+    return () => clearInterval(timer);
+  }, [commitToHistory]);
 
   const executeCommand = useCallback((cmdStr: string) => {
     const trimmed = cmdStr.trim();
