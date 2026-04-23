@@ -200,7 +200,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
                     value={value}
                     onChange={e => { onChange(e.target.value); setShowSuggestions(true); }}
                     onKeyDown={handleKeyDown}
-                    className="flex-1 bg-transparent text-white font-mono outline-none text-[11px] uppercase tracking-widest placeholder:text-neutral-900"
+                    className="flex-1 bg-transparent text-white font-mono outline-none text-[11px] uppercase tracking-widest placeholder:text-neutral-900 select-text"
                     placeholder="COMMAND..."
                     autoComplete="off"
                 />
@@ -217,7 +217,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
                     type="text"
                     value={value}
                     onChange={e => onChange(e.target.value)}
-                    className="flex-1 bg-transparent text-white outline-none text-[11px] placeholder:text-neutral-800 tracking-tight disabled:opacity-50"
+                    className="flex-1 bg-transparent text-white outline-none text-[11px] placeholder:text-neutral-800 tracking-tight disabled:opacity-50 select-text"
                     placeholder={isAiThinking ? "ARCHITECT IS THINKING..." : "DESCRIBE ARCHITECTURE..."}
                 />
                 <div className="flex items-center gap-2">

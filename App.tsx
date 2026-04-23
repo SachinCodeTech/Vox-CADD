@@ -408,31 +408,6 @@ const App: React.FC = () => {
         };
         openInput.click();
         break;
-      case 'saveAs':
-        if (payload === 'vox') {
-          // Internal Save As - essentially just ask for a new name
-          const newName = prompt("Enter new filename:", currentFileName.replace(/\.vox$/, "") + "_copy.vox");
-          if (newName) {
-              const cleanedName = newName.endsWith('.vox') ? newName : newName + '.vox';
-              // Clone current data
-              const currentState = JSON.parse(JSON.stringify(layersRef.current));
-              const newPayload = {
-                  layers: currentState,
-                  layerConfig: layerConfigRef.current,
-                  settings: settingsRef.current,
-                  fileName: cleanedName
-              };
-              localStorage.setItem(`${STORAGE_PREFIX}${cleanedName}`, JSON.stringify(newPayload));
-              setCurrentFileName(cleanedName);
-              updateRecentFiles(cleanedName);
-              setLogMessage(`SAVED_AS: ${cleanedName}`);
-              setFileHandle(null); // Reset native handle for new file
-          }
-        } else if (payload === 'dxf') {
-          // Export to DXF
-          handleAction('save', 'dxf');
-        }
-        break;
       case 'rename': {
         const oldName = currentFileName;
         const newName = payload;
@@ -528,19 +503,19 @@ const App: React.FC = () => {
 
       case 'save':
       case 'saveAs':
+      case 'saveas':
         // Ensure local storage is updated first
         commitToHistory();
         
-        setLogMessage("PREPARING_DATA...");
+        setLogMessage(`${act.toUpperCase()}_INITIATED...`);
         const isDxfExport = payload === 'dxf';
         const finalExt = isDxfExport ? '.dxf' : '.vox';
+        const isSaveAs = act.toLowerCase() === 'saveas';
         
         let content: string = "";
         try {
-            // For .vox, we now use DXF format internally to ensure "any CAD tool" support as requested
             content = shapesToDXF(Object.values(layers).flat() as Shape[], layerConfig, settings);
             if (!content || content.length < 10) {
-                // If DXF failed or is too small, fallback to legacy VOX JSON to avoid 0B
                 content = shapesToVox(Object.values(layers).flat() as Shape[], layerConfig, settings);
             }
         } catch (err) {
@@ -551,7 +526,7 @@ const App: React.FC = () => {
         // Native File System Access
         if ('showSaveFilePicker' in window) {
             try {
-                let handle = (act === 'save' && fileHandle) ? fileHandle : null;
+                let handle = (!isSaveAs && fileHandle) ? fileHandle : null;
                 if (!handle) {
                     handle = await (window as any).showSaveFilePicker({
                         suggestedName: currentFileName.replace(/\.[^/.]+$/, "") + finalExt,
@@ -569,24 +544,22 @@ const App: React.FC = () => {
                 setFileHandle(handle);
                 setCurrentFileName(handle.name);
                 updateRecentFiles(handle.name);
-                setLogMessage(`SAVED_TO: ${handle.name}`);
+                setLogMessage(`SUCCESS:_${handle.name}_SAVED`);
             } catch (e) {
                 console.warn("Save cancelled or failed", e);
-                setLogMessage("SAVE_ERR: DISK_ACCESS_DENIED");
+                setLogMessage("SAVE_CANCELLED_OR_ERR");
             }
         } else {
-            // Fallback for browsers without File System Access API (like Chrome for Android)
+            // Fallback for browsers without File System Access API
             let downloadName = currentFileName.replace(/\.[^/.]+$/, "") + finalExt;
             
-            // If it's Save As, we should ask for a name
-            if (act === 'saveas') {
-                const newName = prompt("ENTER_FILENAME:", downloadName);
-                if (!newName) { setLogMessage("SAVE_CANCELLED"); return; }
+            if (isSaveAs) {
+                const newName = prompt("NAME_YOUR_FILE (Save As):", downloadName);
+                if (!newName) { setLogMessage("SAVE_AS_CANCELLED"); return; }
                 downloadName = newName.toLowerCase().endsWith(finalExt) ? newName : newName + finalExt;
             }
 
-            // Using application/json as secondary type might help OS show a generic data icon instead of a question mark
-            const mimeType = isDxfExport ? 'application/dxf' : 'application/json';
+            const mimeType = isDxfExport ? 'application/dxf' : 'application/vnd.voxcadd.project';
             const blob = new Blob([content], { type: mimeType });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -597,11 +570,13 @@ const App: React.FC = () => {
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
             
-            if (act === 'saveas') {
+            if (isSaveAs) {
               setCurrentFileName(downloadName);
+              updateRecentFiles(downloadName);
+            } else {
+              updateRecentFiles(currentFileName);
             }
-            updateRecentFiles(act === 'saveas' ? downloadName : currentFileName);
-            setLogMessage(`FILE_DOWNLOADED: ${finalExt.toUpperCase()}`);
+            setLogMessage(`DOWNLOADED:_${finalExt.toUpperCase()}`);
         }
         break;
       case 'saveImage': {
@@ -892,7 +867,7 @@ const App: React.FC = () => {
               <span className="font-black text-[16.5px] uppercase tracking-tighter text-white">VOX</span>
               <span className="font-bold text-[16.5px] uppercase tracking-tighter text-cyan-500 ml-1.5">CADD</span>
             </div>
-            <span className="text-neutral-700 font-bold text-[7px] uppercase tracking-[0.35em] leading-none mt-1.5 ml-0.5">V-1.0.0</span>
+            <span className="text-neutral-700 font-bold text-[7px] uppercase tracking-[0.35em] leading-none mt-1.5 ml-0.5">V-1.0.1</span>
           </div>
         </div>
 
@@ -919,9 +894,35 @@ const App: React.FC = () => {
 
       <div className="h-7 bg-black border-b border-white/5 flex items-center px-3 z-[100] shrink-0 gap-4 overflow-x-auto scrollbar-none">
           {['FILE', 'EDIT', 'VIEW', 'DRAW', 'MODIFY', 'ANNO', 'TOOLS'].map((item) => {
-            const isSelected = (item === 'TOOLS' && activeCategory === 'Assist') || (item === 'EDIT' && activeCategory === 'Edit') || (item === 'ANNO' && activeCategory === 'Anno') || activeCategory.toUpperCase() === item;
+            const isSelected = 
+              (item === 'FILE' && activePanel === 'drawing_props' || activePanel === 'file') ||
+              (item === 'TOOLS' && activeCategory === 'Assist') || 
+              (item === 'EDIT' && activeCategory === 'Edit') || 
+              (item === 'ANNO' && activeCategory === 'Anno') || 
+              activeCategory.toUpperCase() === item;
+              
             return (
-              <button key={item} onClick={() => { if (item === 'FILE') handleAction('openFileManager'); else if (item === 'EDIT') setActiveCategory('Edit'); else if (item === 'VIEW') setActiveCategory('View'); else if (item === 'DRAW') setActiveCategory('Draw'); else if (item === 'MODIFY') setActiveCategory('Modify'); else if (item === 'ANNO') setActiveCategory('Anno'); else if (item === 'TOOLS') setActiveCategory('Assist'); }} className={`text-[9px] font-black tracking-widest transition-all no-tap whitespace-nowrap px-1 h-full flex items-center border-b-2 ${isSelected ? 'text-white border-cyan-500' : 'text-neutral-600 border-transparent hover:text-neutral-300'}`}>{item}</button>
+              <button 
+                key={item} 
+                id={`tab-${item.toLowerCase()}`}
+                onClick={() => { 
+                  if (item === 'FILE') handleAction('openFileManager'); 
+                  else if (item === 'EDIT') setActiveCategory('Edit'); 
+                  else if (item === 'VIEW') setActiveCategory('View'); 
+                  else if (item === 'DRAW') setActiveCategory('Draw'); 
+                  else if (item === 'MODIFY') setActiveCategory('Modify'); 
+                  else if (item === 'ANNO') setActiveCategory('Anno'); 
+                  else if (item === 'TOOLS') setActiveCategory('Assist'); 
+                }} 
+                className={`text-[9px] font-black tracking-widest transition-all no-tap whitespace-nowrap px-1 h-full flex items-center border-b-2 relative ${
+                  isSelected 
+                    ? 'text-cyan-400 border-cyan-500 shadow-[inset_0_-8px_10px_-4px_rgba(34,211,238,0.2)]' 
+                    : 'text-neutral-600 border-transparent hover:text-neutral-300'
+                }`}
+              >
+                {item}
+                {isSelected && <div className="absolute inset-x-0 bottom-[-1px] h-[3px] bg-cyan-400 shadow-[0_0_10px_#22d3ee] rounded-full z-10"></div>}
+              </button>
             );
           })}
       </div>
@@ -967,7 +968,19 @@ const App: React.FC = () => {
         {activePanel === 'calculator' && <CalculatorPanel onClose={() => setActivePanel('none')} />}
         {activePanel === 'drafting' && <DraftingSettings options={settings.snapOptions} settings={settings} onSettingsChange={(upd) => setSettings(s => ({...s, ...upd}))} onChange={(upd) => setSettings(s => ({...s, snapOptions: { ...s.snapOptions, ...upd }}))} onClose={() => setActivePanel('none')} />}
         {activePanel === 'file' && <FileManager currentName={currentFileName} recentFiles={recentFiles} onAction={handleAction} onClose={() => setActivePanel('none')} />}
-        {activePanel === 'drawing_props' && <DrawingProperties settings={settings} onUpdateSettings={(upd) => setSettings(s => ({...s, ...upd}))} onClose={() => setActivePanel('none')} entityCount={(Object.values(layers).flat() as Shape[]).length} currentFileName={currentFileName} onAction={handleAction} />}
+        {activePanel === 'drawing_props' && (
+          <DrawingProperties 
+            settings={settings} 
+            onUpdateSettings={(upd) => setSettings(s => ({...s, ...upd}))} 
+            onClose={() => {
+              commitToHistory();
+              setActivePanel('none');
+            }} 
+            entityCount={(Object.values(layers).flat() as Shape[]).length} 
+            currentFileName={currentFileName} 
+            onAction={handleAction} 
+          />
+        )}
         {activePanel === 'help' && <InfoPanel type="help" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
         {activePanel === 'about' && <InfoPanel type="about" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
         {activePanel === 'privacy' && <InfoPanel type="privacy" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}

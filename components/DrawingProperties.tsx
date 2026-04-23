@@ -72,7 +72,7 @@ const DrawingProperties: React.FC<DrawingPropertiesProps> = ({ settings, onUpdat
           value={value} 
           onChange={(e) => onChange(e.target.value)} 
           placeholder={placeholder}
-          className={`w-full bg-black/40 border border-neutral-800 rounded-xl py-2.5 ${Icon ? 'pl-9' : 'px-3'} pr-3 text-[11px] text-neutral-200 outline-none focus:border-cyan-600 transition-all font-bold placeholder:text-neutral-800`}
+          className={`w-full bg-black/40 border border-neutral-800 rounded-xl py-2.5 ${Icon ? 'pl-9' : 'px-3'} pr-3 text-[11px] text-neutral-200 outline-none focus:border-cyan-600 transition-all font-bold placeholder:text-neutral-800 select-text cursor-text`}
         />
       </div>
     </div>
@@ -80,7 +80,7 @@ const DrawingProperties: React.FC<DrawingPropertiesProps> = ({ settings, onUpdat
 
   return (
     <div 
-      className="fixed left-1/2 top-20 -translate-x-1/2 w-[340px] max-w-[95vw] glass-panel rounded-[2.5rem] shadow-[0_40px_100px_rgba(0,0,0,0.9)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 select-none"
+      className="fixed left-1/2 top-20 -translate-x-1/2 w-[340px] max-w-[95vw] glass-panel rounded-[2.5rem] shadow-[0_40px_100px_rgba(0,0,0,0.9)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200"
       style={{ 
         transform: `translate(calc(-50% + ${pos.x}px), ${pos.y}px)`,
         zIndex: isInteracting ? 9999 : 500
@@ -126,8 +126,8 @@ const DrawingProperties: React.FC<DrawingPropertiesProps> = ({ settings, onUpdat
           <div className="grid grid-cols-2 gap-3">
              <InputField 
                 label="Date Created" 
-                value={new Date(settings.metadata?.createdAt || Date.now()).toLocaleDateString()} 
-                onChange={() => {}} // Creation date should probably be read-only or handled specifically
+                value={settings.metadata?.createdAt || ''} 
+                onChange={(v) => onUpdateSettings({ metadata: { ...settings.metadata!, createdAt: v, lastModified: new Date().toISOString() } })} 
                 icon={Calendar} 
               />
              <InputField 
