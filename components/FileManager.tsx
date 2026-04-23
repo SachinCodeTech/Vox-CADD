@@ -70,7 +70,7 @@ const RecentFileItem: React.FC<RecentFileItemProps> = ({ name, date, onClick, on
     <div className="relative group/item">
         <button 
             onClick={onClick}
-            className={`w-full flex items-center gap-4 p-4 rounded-[1.2rem] transition-all group no-tap border ${current ? 'bg-cyan-500/10 border-cyan-500/30' : 'bg-[#121214] border-white/5 hover:bg-neutral-800/50'}`}
+            className={`w-full flex items-center gap-4 p-4 pr-24 rounded-[1.2rem] transition-all group no-tap border ${current ? 'bg-cyan-500/10 border-cyan-500/30' : 'bg-[#121214] border-white/5 hover:bg-neutral-800/50'}`}
         >
             <div className={`w-10 h-10 rounded-[0.8rem] flex items-center justify-center transition-all ${current ? 'bg-cyan-400 text-black' : 'bg-neutral-800 text-neutral-500 group-hover:text-white'}`}>
                 <File size={18} />
@@ -81,27 +81,29 @@ const RecentFileItem: React.FC<RecentFileItemProps> = ({ name, date, onClick, on
                     {new Date(date).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                 </div>
             </div>
-            {current && (
-                <div className="px-2 py-1 bg-cyan-400 rounded text-[7px] font-black text-black uppercase tracking-tight shrink-0">Active</div>
-            )}
         </button>
-        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover/item:opacity-100 transition-opacity">
-            <button 
-                onClick={onDownload}
-                title="Download"
-                className="w-7 h-7 flex items-center justify-center rounded-full bg-neutral-800 text-neutral-400 hover:bg-cyan-500 hover:text-black transition-all"
-            >
-                <Download size={14} />
-            </button>
-            {!current && (
-                <button 
-                    onClick={onDelete}
-                    title="Delete"
-                    className="w-7 h-7 flex items-center justify-center rounded-full bg-neutral-800 text-neutral-400 hover:bg-red-500 hover:text-white transition-all"
-                >
-                    <X size={14} />
-                </button>
+        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
+            {current && (
+                <div className="px-2 py-1 bg-cyan-400 rounded text-[7px] font-black text-black uppercase tracking-tight shadow-[0_0_10px_rgba(6,182,212,0.3)]">Active</div>
             )}
+            <div className="flex items-center gap-1 opacity-0 group-hover/item:opacity-100 transition-opacity">
+                <button 
+                    onClick={onDownload}
+                    title="Download"
+                    className="w-7 h-7 flex items-center justify-center rounded-full bg-neutral-800 text-neutral-400 hover:bg-cyan-500 hover:text-black transition-all"
+                >
+                    <Download size={14} />
+                </button>
+                {!current && (
+                    <button 
+                        onClick={onDelete}
+                        title="Delete"
+                        className="w-7 h-7 flex items-center justify-center rounded-full bg-neutral-800 text-neutral-400 hover:bg-red-500 hover:text-white transition-all"
+                    >
+                        <X size={14} />
+                    </button>
+                )}
+            </div>
         </div>
     </div>
 );

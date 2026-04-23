@@ -373,6 +373,34 @@ const App: React.FC = () => {
       case 'new': 
         setActivePanel('new_file'); 
         break;
+      case 'close': {
+        // Clear history and reset to default
+        setLayers({ '0': [], 'defpoints': [] });
+        setLayerConfig(INITIAL_LAYERS_CONFIG);
+        setSettings(INITIAL_SETTINGS);
+        setCurrentFileName("Drawing 1.vox");
+        setFileHandle(null);
+        setHistory([]);
+        setRedoStack([]);
+        setActivePanel('none');
+        updateRecentFiles("Drawing 1.vox");
+        setLogMessage("WORKSPACE_RESET_SUCCESS");
+        break;
+      }
+      case 'open':
+        setLogMessage("AWAITING_FILE_SELECTION...");
+        const openInput = document.createElement('input');
+        openInput.type = 'file';
+        openInput.accept = ".vox,.dxf,.dwg";
+        openInput.onchange = async (e: any) => {
+            const file = e.target.files[0];
+            if (!file) { setLogMessage("OPEN_CANCELLED"); return; }
+            const isDwg = file.name.toLowerCase().endsWith('.dwg');
+            const content = isDwg ? await file.arrayBuffer() : await file.text();
+            handleOpenFile(file.name, content);
+        };
+        openInput.click();
+        break;
       case 'saveAs':
         if (payload === 'vox') {
           // Internal Save As - essentially just ask for a new name
@@ -490,29 +518,7 @@ const App: React.FC = () => {
         }
         break;
       }
-      case 'open':
-        setLogMessage("AWAITING_FILE_SELECTION...");
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = ".vox,.dxf,.dwg";
-        input.onchange = (e: any) => {
-            const file = e.target.files[0];
-            if (!file) { setLogMessage("OPEN_CANCELLED"); return; }
-            const reader = new FileReader();
-            if (file.name.toLowerCase().endsWith('.dwg')) {
-                reader.onload = (res: any) => {
-                    handleOpenFile(file.name, res.target.result);
-                };
-                reader.readAsArrayBuffer(file);
-            } else {
-                reader.onload = (res: any) => {
-                    handleOpenFile(file.name, res.target.result);
-                };
-                reader.readAsText(file);
-            }
-        };
-        input.click();
-        break;
+
       case 'save':
       case 'saveAs':
         // Ensure local storage is updated first
@@ -945,7 +951,15 @@ const App: React.FC = () => {
         {activePanel === 'help' && <InfoPanel type="help" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
         {activePanel === 'about' && <InfoPanel type="about" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
         {activePanel === 'privacy' && <InfoPanel type="privacy" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
-        {activePanel === 'new_file' && <NewFileDialog onSelect={(cfg) => { setLayers({ '0': [], 'defpoints': [] }); setSettings(s => ({...s, units: cfg.units, precision: cfg.precision })); setCurrentFileName(cfg.name + '.vox'); setActivePanel('none'); }} onClose={() => setActivePanel('none')} />}
+        {activePanel === 'new_file' && <NewFileDialog onSelect={(cfg) => { 
+            const name = cfg.name + '.vox';
+            setLayers({ '0': [], 'defpoints': [] }); 
+            setSettings(s => ({...s, units: cfg.units, precision: cfg.precision })); 
+            setCurrentFileName(name); 
+            setActivePanel('none'); 
+            updateRecentFiles(name);
+            commitToHistory();
+        }} onClose={() => setActivePanel('none')} />}
         {mtextEditor && (
           <MTextEditor 
             initialValue={mtextEditor.initialValue} 

@@ -5,7 +5,7 @@ import {
   Settings, Info, HelpCircle, Layout, Grid, 
   Zap, Calculator, Layers, Sliders, Ruler, Target,
   Globe, Cpu, Type, MousePointer2, Settings2, Trash2, FileText,
-  Mail, MessageSquare, FileCode
+  Mail, MessageSquare, FileCode, XCircle
 } from 'lucide-react';
 import { UnitType } from '../types';
 
@@ -66,6 +66,9 @@ const MenuBar: React.FC<MenuBarProps> = ({ onAction, currentFileName, units }) =
               <Download size={12} /> Save Image
             </button>
           </div>
+          <button onClick={() => onAction('close')} className="w-full py-3 bg-red-500/10 hover:bg-red-500/20 text-red-500 text-[9px] font-black uppercase rounded-xl active:scale-95 transition-all flex items-center justify-center gap-2 border border-red-500/20">
+            <XCircle size={14} /> Close Active Drawing
+          </button>
           <button onClick={() => onAction('openFileManager')} className="w-full py-3 bg-neutral-900/50 text-neutral-400 text-[9px] font-black uppercase rounded-xl active:scale-95 transition-all flex items-center justify-center gap-2 border border-white/5">
             <FolderOpen size={12} /> Project Center
           </button>
