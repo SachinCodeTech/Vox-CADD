@@ -209,6 +209,7 @@ export interface ProjectMetadata {
   lastModified: string;
   description?: string;
   revision?: string;
+  projectRevision?: string;
 }
 
 export interface AppSettings {

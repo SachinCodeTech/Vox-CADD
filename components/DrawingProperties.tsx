@@ -5,18 +5,27 @@ import { AppSettings } from '../types';
 
 interface DrawingPropertiesProps {
   settings: AppSettings;
-  onUpdateSettings: (s: Partial<AppSettings>) => void;
+  onConfirm: (metadata: any, newTitle: string) => void;
   onClose: () => void;
   entityCount: number;
   currentFileName: string;
-  onAction: (action: string, payload?: any) => void;
 }
 
-const DrawingProperties: React.FC<DrawingPropertiesProps> = ({ settings, onUpdateSettings, onClose, entityCount, currentFileName, onAction }) => {
+const DrawingProperties: React.FC<DrawingPropertiesProps> = ({ settings, onConfirm, onClose, entityCount, currentFileName }) => {
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [isInteracting, setIsInteracting] = useState(false);
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
+
+  // Internal state for smooth editing
+  const [localMetadata, setLocalMetadata] = useState(settings.metadata || {
+    author: '',
+    createdAt: '',
+    revision: '',
+    projectRevision: '',
+    description: ''
+  });
+  const [localTitle, setLocalTitle] = useState(currentFileName.replace(/\.(vox|dxf)$/i, ''));
 
   useEffect(() => {
     const handleMove = (e: MouseEvent | TouchEvent) => {
@@ -48,6 +57,16 @@ const DrawingProperties: React.FC<DrawingPropertiesProps> = ({ settings, onUpdat
     isDragging.current = true;
     setIsInteracting(true);
     dragStart.current = { x: clientX - pos.x, y: clientY - pos.y };
+  };
+
+  const handleConfirm = () => {
+    const ext = currentFileName.toLowerCase().endsWith('.dxf') ? '.dxf' : '.vox';
+    const finalName = localTitle.endsWith('.vox') || localTitle.endsWith('.dxf') ? localTitle : localTitle + ext;
+    
+    onConfirm(
+      { ...localMetadata, lastModified: new Date().toISOString() },
+      finalName
+    );
   };
 
   const PropertySection = ({ title, icon: Icon, children, accent = "cyan" }: { title: string, icon: any, children?: React.ReactNode, accent?: string }) => (
@@ -111,36 +130,43 @@ const DrawingProperties: React.FC<DrawingPropertiesProps> = ({ settings, onUpdat
         <PropertySection title="General Information" icon={FileText} accent="amber">
           <InputField 
             label="Project Title" 
-            value={currentFileName.replace(/\.(vox|dxf)$/i, '')} 
-            onChange={(v) => onAction('rename', v)} 
+            value={localTitle} 
+            onChange={(v) => setLocalTitle(v)} 
             placeholder="Drawing1" 
             icon={PenLine} 
           />
           <InputField 
-            label="Drafter" 
-            value={settings.metadata?.author || ''} 
-            onChange={(v) => onUpdateSettings({ metadata: { ...settings.metadata!, author: v, lastModified: new Date().toISOString() } })} 
+            label="Draughter" 
+            value={localMetadata.author || ''} 
+            onChange={(v) => setLocalMetadata(prev => ({ ...prev, author: v }))} 
             placeholder="ARCHITECT NAME" 
             icon={User} 
           />
           <div className="grid grid-cols-2 gap-3">
              <InputField 
-                label="Date Created" 
-                value={settings.metadata?.createdAt || ''} 
-                onChange={(v) => onUpdateSettings({ metadata: { ...settings.metadata!, createdAt: v, lastModified: new Date().toISOString() } })} 
+                label="Date" 
+                value={localMetadata.createdAt || ''} 
+                onChange={(v) => setLocalMetadata(prev => ({ ...prev, createdAt: v }))} 
                 icon={Calendar} 
               />
              <InputField 
                 label="Revision" 
-                value={settings.metadata?.revision || ''} 
-                onChange={(v) => onUpdateSettings({ metadata: { ...settings.metadata!, revision: v, lastModified: new Date().toISOString() } })} 
+                value={localMetadata.revision || ''} 
+                onChange={(v) => setLocalMetadata(prev => ({ ...prev, revision: v }))} 
                 icon={ShieldCheck} 
               />
           </div>
           <InputField 
+            label="Project Revision" 
+            value={localMetadata.projectRevision || ''} 
+            onChange={(v) => setLocalMetadata(prev => ({ ...prev, projectRevision: v }))} 
+            placeholder="e.g. V-1.0.0" 
+            icon={ShieldCheck} 
+          />
+          <InputField 
             label="Project Description" 
-            value={settings.metadata?.description || ''} 
-            onChange={(v) => onUpdateSettings({ metadata: { ...settings.metadata!, description: v, lastModified: new Date().toISOString() } })} 
+            value={localMetadata.description || ''} 
+            onChange={(v) => setLocalMetadata(prev => ({ ...prev, description: v }))} 
             placeholder="PROJECT NOTES..." 
             icon={PenLine} 
           />
@@ -173,7 +199,7 @@ const DrawingProperties: React.FC<DrawingPropertiesProps> = ({ settings, onUpdat
 
       <div className="p-6 bg-[#0f0f11] border-t border-neutral-800/50 shrink-0">
         <button 
-          onClick={onClose}
+          onClick={handleConfirm}
           className="w-full py-4 bg-amber-600 text-black text-[12px] font-black uppercase rounded-2xl shadow-xl shadow-amber-950/20 active:scale-95 transition-all"
         >
           Confirm Metadata

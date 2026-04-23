@@ -50,9 +50,10 @@ const INITIAL_SETTINGS: AppSettings = {
   textJustification: 'left',
   metadata: {
     author: '',
-    createdAt: new Date().toISOString(),
+    createdAt: new Date().toISOString().split('T')[0],
     lastModified: new Date().toISOString(),
     revision: 'REV-01',
+    projectRevision: 'V-1.0',
     description: ''
   }
 };
@@ -101,7 +102,7 @@ const App: React.FC = () => {
   const [showCircleOptions, setShowCircleOptions] = useState(false);
   const [showArcOptions, setShowArcOptions] = useState(false);
   const [showEllipseOptions, setShowEllipseOptions] = useState(false);
-  const [currentFileName, setCurrentFileName] = useState<string>("Drawing1.vox");
+  const [currentFileName, setCurrentFileName] = useState<string>("Drawing 1.vox");
   const [fileHandle, setFileHandle] = useState<any>(null);
   const [activePanel, setActivePanel] = useState<PanelType>('none');
   const [previewShapes, setPreviewShapes] = useState<Shape[] | null>(null);
@@ -895,7 +896,7 @@ const App: React.FC = () => {
       <div className="h-7 bg-black border-b border-white/5 flex items-center px-3 z-[100] shrink-0 gap-4 overflow-x-auto scrollbar-none">
           {['FILE', 'EDIT', 'VIEW', 'DRAW', 'MODIFY', 'ANNO', 'TOOLS'].map((item) => {
             const isSelected = 
-              (item === 'FILE' && activePanel === 'drawing_props' || activePanel === 'file') ||
+              (item === 'FILE' && (activePanel === 'drawing_props' || activePanel === 'file')) ||
               (item === 'TOOLS' && activeCategory === 'Assist') || 
               (item === 'EDIT' && activeCategory === 'Edit') || 
               (item === 'ANNO' && activeCategory === 'Anno') || 
@@ -914,14 +915,14 @@ const App: React.FC = () => {
                   else if (item === 'ANNO') setActiveCategory('Anno'); 
                   else if (item === 'TOOLS') setActiveCategory('Assist'); 
                 }} 
-                className={`text-[9px] font-black tracking-widest transition-all no-tap whitespace-nowrap px-1 h-full flex items-center border-b-2 relative ${
+                className={`text-[9px] font-black tracking-widest transition-all no-tap whitespace-nowrap px-1 h-full flex items-center relative ${
                   isSelected 
-                    ? 'text-cyan-400 border-cyan-500 shadow-[inset_0_-8px_10px_-4px_rgba(34,211,238,0.2)]' 
-                    : 'text-neutral-600 border-transparent hover:text-neutral-300'
+                    ? 'text-white' 
+                    : 'text-neutral-600 hover:text-neutral-300'
                 }`}
               >
                 {item}
-                {isSelected && <div className="absolute inset-x-0 bottom-[-1px] h-[3px] bg-cyan-400 shadow-[0_0_10px_#22d3ee] rounded-full z-10"></div>}
+                {isSelected && <div className="absolute inset-x-0 bottom-0 h-[1.5px] bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.5)]"></div>}
               </button>
             );
           })}
@@ -971,14 +972,19 @@ const App: React.FC = () => {
         {activePanel === 'drawing_props' && (
           <DrawingProperties 
             settings={settings} 
-            onUpdateSettings={(upd) => setSettings(s => ({...s, ...upd}))} 
-            onClose={() => {
-              commitToHistory();
+            onConfirm={(metadata, newTitle) => {
+              setSettings(s => ({...s, metadata}));
+              if (newTitle !== currentFileName) {
+                handleAction('rename', newTitle);
+              }
               setActivePanel('none');
+              setLogMessage("PROJECT_PROPERTIES_UPDATED");
+              // Use a slight timeout to allow state refs to sync
+              setTimeout(() => commitToHistory(), 50);
             }} 
+            onClose={() => setActivePanel('none')} 
             entityCount={(Object.values(layers).flat() as Shape[]).length} 
             currentFileName={currentFileName} 
-            onAction={handleAction} 
           />
         )}
         {activePanel === 'help' && <InfoPanel type="help" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
