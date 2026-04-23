@@ -116,11 +116,34 @@ const DrawingProperties: React.FC<DrawingPropertiesProps> = ({ settings, onUpdat
             placeholder="Drawing1" 
             icon={PenLine} 
           />
-          <InputField label="Drafter" value="" onChange={() => {}} placeholder="ARCHITECT NAME" icon={User} />
+          <InputField 
+            label="Drafter" 
+            value={settings.metadata?.author || ''} 
+            onChange={(v) => onUpdateSettings({ metadata: { ...settings.metadata!, author: v, lastModified: new Date().toISOString() } })} 
+            placeholder="ARCHITECT NAME" 
+            icon={User} 
+          />
           <div className="grid grid-cols-2 gap-3">
-             <InputField label="Date Created" value={new Date().toLocaleDateString()} onChange={() => {}} icon={Calendar} />
-             <InputField label="Revision" value="REV-01" onChange={() => {}} icon={ShieldCheck} />
+             <InputField 
+                label="Date Created" 
+                value={new Date(settings.metadata?.createdAt || Date.now()).toLocaleDateString()} 
+                onChange={() => {}} // Creation date should probably be read-only or handled specifically
+                icon={Calendar} 
+              />
+             <InputField 
+                label="Revision" 
+                value={settings.metadata?.revision || ''} 
+                onChange={(v) => onUpdateSettings({ metadata: { ...settings.metadata!, revision: v, lastModified: new Date().toISOString() } })} 
+                icon={ShieldCheck} 
+              />
           </div>
+          <InputField 
+            label="Project Description" 
+            value={settings.metadata?.description || ''} 
+            onChange={(v) => onUpdateSettings({ metadata: { ...settings.metadata!, description: v, lastModified: new Date().toISOString() } })} 
+            placeholder="PROJECT NOTES..." 
+            icon={PenLine} 
+          />
         </PropertySection>
 
         {/* Live Workspace Status */}

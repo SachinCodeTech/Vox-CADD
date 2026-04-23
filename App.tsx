@@ -47,7 +47,14 @@ const INITIAL_SETTINGS: AppSettings = {
   showLineWeights: true,
   textSize: 250,
   textRotation: 0,
-  textJustification: 'left'
+  textJustification: 'left',
+  metadata: {
+    author: '',
+    createdAt: new Date().toISOString(),
+    lastModified: new Date().toISOString(),
+    revision: 'REV-01',
+    description: ''
+  }
 };
 
 const INITIAL_VIEW: ViewState = { scale: 0.05, originX: 0, originY: 0 };
@@ -569,18 +576,31 @@ const App: React.FC = () => {
             }
         } else {
             // Fallback for browsers without File System Access API (like Chrome for Android)
-            // Using application/x-vox for .vox helps Android identify the app as a handler
-            const mimeType = isDxfExport ? 'application/dxf' : 'application/x-vox';
+            let downloadName = currentFileName.replace(/\.[^/.]+$/, "") + finalExt;
+            
+            // If it's Save As, we should ask for a name
+            if (act === 'saveas') {
+                const newName = prompt("ENTER_FILENAME:", downloadName);
+                if (!newName) { setLogMessage("SAVE_CANCELLED"); return; }
+                downloadName = newName.toLowerCase().endsWith(finalExt) ? newName : newName + finalExt;
+            }
+
+            // Using application/json as secondary type might help OS show a generic data icon instead of a question mark
+            const mimeType = isDxfExport ? 'application/dxf' : 'application/json';
             const blob = new Blob([content], { type: mimeType });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = currentFileName.replace(/\.[^/.]+$/, "") + finalExt;
-            document.body.appendChild(a); // Recommended for mobile
+            a.download = downloadName;
+            document.body.appendChild(a); 
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-            updateRecentFiles(currentFileName);
+            
+            if (act === 'saveas') {
+              setCurrentFileName(downloadName);
+            }
+            updateRecentFiles(act === 'saveas' ? downloadName : currentFileName);
             setLogMessage(`FILE_DOWNLOADED: ${finalExt.toUpperCase()}`);
         }
         break;

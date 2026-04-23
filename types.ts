@@ -203,6 +203,14 @@ export interface SnapOptions {
   appint: boolean;
 }
 
+export interface ProjectMetadata {
+  author?: string;
+  createdAt: string;
+  lastModified: string;
+  description?: string;
+  revision?: string;
+}
+
 export interface AppSettings {
   ortho: boolean;
   snap: boolean;
@@ -225,6 +233,7 @@ export interface AppSettings {
   textSize: number;
   textRotation: number;
   textJustification: TextJustification;
+  metadata?: ProjectMetadata;
 }
 
 export interface SnapPoint {

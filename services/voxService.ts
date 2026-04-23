@@ -11,6 +11,7 @@ export interface VoxProject {
     createdAt: string;
     lastModified: string;
     description?: string;
+    revision?: string;
   };
   settings: AppSettings;
   layers: LayerConfig[];
@@ -23,8 +24,11 @@ export const shapesToVox = (shapes: Shape[], layers: Record<string, LayerConfig>
     version: "1.0",
     units: settings.units === 'metric' ? "mm" : "inch",
     metadata: {
-      createdAt: new Date().toISOString(),
+      author: settings.metadata?.author,
+      createdAt: settings.metadata?.createdAt || new Date().toISOString(),
       lastModified: new Date().toISOString(),
+      description: settings.metadata?.description,
+      revision: settings.metadata?.revision
     },
     settings: settings,
     layers: Object.values(layers),
