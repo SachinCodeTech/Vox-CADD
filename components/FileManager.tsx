@@ -210,7 +210,7 @@ const FileManager: React.FC<FileManagerProps> = ({ currentName, recentFiles = []
                         <h4 className="text-[10px] font-black text-neutral-600 uppercase tracking-[0.25em]">CAD Export</h4>
                         <div className="bg-neutral-800/50 border border-white/5 px-2 py-0.5 rounded text-[7px] font-black text-neutral-500 uppercase tracking-widest flex items-center gap-1">
                             <CheckCircle2 size={8} className="text-cyan-500" />
-                            AutoCAD Sync
+                            VOXCADD SYNK
                         </div>
                     </div>
                     <div className="grid grid-cols-1 gap-3">
