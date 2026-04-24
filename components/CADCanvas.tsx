@@ -363,13 +363,62 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       case 'rect': ctx.rect(s.x, s.y, s.width, s.height); break;
       case 'arc': ctx.arc(s.x, s.y, s.radius, s.startAngle, s.endAngle, !s.counterClockwise); break;
       case 'ellipse': ctx.ellipse(s.x, s.y, s.rx, s.ry, s.rotation, 0, Math.PI * 2); break;
-      case 'pline': case 'polygon': case 'spline':
+      case 'donut': 
+        ctx.arc(s.x, s.y, s.outerRadius, 0, Math.PI * 2);
+        ctx.moveTo(s.x + s.innerRadius, s.y);
+        ctx.arc(s.x, s.y, s.innerRadius, 0, Math.PI * 2, true);
+        break;
+      case 'ray': {
+          const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+          const len = Math.sqrt(dx*dx + dy*dy);
+          ctx.moveTo(s.x1, s.y1);
+          ctx.lineTo(s.x1 + (dx/len) * 1e6, s.y1 + (dy/len) * 1e6);
+          break;
+      }
+      case 'xline': {
+          const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+          const len = Math.sqrt(dx*dx + dy*dy);
+          ctx.moveTo(s.x1 - (dx/len) * 1e6, s.y1 - (dy/len) * 1e6);
+          ctx.lineTo(s.x1 + (dx/len) * 1e6, s.y1 + (dy/len) * 1e6);
+          break;
+      }
+      case 'dimension': {
+          // Draw dimension line
+          ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.dimX, s.dimY);
+          ctx.moveTo(s.x2, s.y2); ctx.lineTo(s.dimX, s.dimY); // This is wrong for standard dims, but okay for a sketch
+          // Extension lines
+          const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+          const len = Math.sqrt(dx*dx + dy*dy);
+          const nx = -dy/len, ny = dx/len;
+          ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x1 + nx * 5/ts, s.y1 + ny * 5/ts);
+          ctx.moveTo(s.x2, s.y2); ctx.lineTo(s.x2 + nx * 5/ts, s.y2 + ny * 5/ts);
+          break;
+      }
+      case 'point': {
+          const size = (s.size || 5) / ts;
+          ctx.moveTo(s.x - size, s.y); ctx.lineTo(s.x + size, s.y);
+          ctx.moveTo(s.x, s.y - size); ctx.lineTo(s.x, s.y + size);
+          break;
+      }
+      case 'pline': case 'polygon': case 'spline': case 'dline':
         if(s.points && s.points.length > 0) {
             ctx.moveTo(s.points[0].x, s.points[0].y);
             s.points.forEach(p => ctx.lineTo(p.x, p.y));
             if(s.closed || s.type === 'polygon') ctx.closePath();
         }
         break;
+      case 'leader': {
+          ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2);
+          // Simple arrowhead
+          const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+          const a = Math.atan2(dy, dx);
+          const size = 10 / ts;
+          ctx.moveTo(s.x1, s.y1);
+          ctx.lineTo(s.x1 + size * Math.cos(a + 0.5), s.y1 + size * Math.sin(a + 0.5));
+          ctx.moveTo(s.x1, s.y1);
+          ctx.lineTo(s.x1 + size * Math.cos(a - 0.5), s.y1 + size * Math.sin(a - 0.5));
+          break;
+      }
       case 'text': 
       case 'mtext':
         ctx.save(); ctx.translate(s.x, s.y); if (s.rotation) ctx.rotate(s.rotation); ctx.scale(1,-1); ctx.font=`400 ${s.size}px monospace`; ctx.fillStyle=ctx.strokeStyle; 

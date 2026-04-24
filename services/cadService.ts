@@ -1,5 +1,5 @@
 
-import { Shape, Point, AppSettings, SnapPoint, LineShape, DoubleLineShape, RectShape, ArcShape, CircleShape, EllipseShape, PolyShape, TextShape, MTextShape, SnapOptions, LeaderShape, ArcData } from '../types';
+import { Shape, Point, AppSettings, SnapPoint, LineShape, DoubleLineShape, RectShape, ArcShape, CircleShape, EllipseShape, PolyShape, TextShape, MTextShape, SnapOptions, LeaderShape, ArcData, InfiniteLineShape, DonutShape } from '../types';
 
 export const generateId = (): string => Math.random().toString(36).substr(2, 9);
 
@@ -78,7 +78,7 @@ export const hitTestShape = (x: number, y: number, s: Shape, threshold: number):
       if (s.counterClockwise) { if (eA < sA) return angle >= sA || angle <= eA; return angle >= sA && angle <= eA; }
       else { if (sA < eA) return angle >= eA || angle <= sA; return angle >= eA && angle <= sA; }
     }
-    case 'pline': case 'polygon': {
+    case 'pline': case 'polygon': case 'spline': case 'dline': {
         for(let i=0; i<s.points.length-1; i++) {
             if (distToSegment(x, y, s.points[i].x, s.points[i].y, s.points[i+1].x, s.points[i+1].y) < threshold) return true;
         }
@@ -88,12 +88,35 @@ export const hitTestShape = (x: number, y: number, s: Shape, threshold: number):
         }
         return false;
     }
+    case 'donut': {
+        const d = Math.sqrt(Math.pow(x - s.x, 2) + Math.pow(y - s.y, 2));
+        return (d >= s.innerRadius - threshold && d <= s.outerRadius + threshold);
+    }
+    case 'ray': case 'xline': {
+        const d = distToInfiniteLine(x, y, s.x1, s.y1, s.x2, s.y2);
+        if (d > threshold) return false;
+        if (s.type === 'ray') {
+            const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+            const pdx = x - s.x1, pdy = y - s.y1;
+            return (dx * pdx + dy * pdy) >= -threshold;
+        }
+        return true;
+    }
+    case 'dimension': {
+        return distToSegment(x, y, s.x1, s.y1, s.x2, s.y2) < threshold || 
+               distToSegment(x, y, s.x1, s.y1, s.dimX, s.dimY) < threshold ||
+               distToSegment(x, y, s.x2, s.y2, s.dimX, s.dimY) < threshold;
+    }
     case 'ellipse': {
         const dx = x - s.x, dy = y - s.y;
         const cos = Math.cos(-s.rotation), sin = Math.sin(-s.rotation);
         const tx = dx * cos - dy * sin, ty = dx * sin + dy * cos;
         const val = (tx * tx) / (s.rx * s.rx) + (ty * ty) / (s.ry * s.ry);
         return Math.abs(val - 1) < threshold / Math.min(s.rx, s.ry);
+    }
+    case 'point': {
+        const d = Math.sqrt(Math.pow(x - s.x, 2) + Math.pow(y - s.y, 2));
+        return d < threshold + (s.size || 5) / 2;
     }
   }
   return false;
@@ -161,14 +184,24 @@ export const distToSegment = (px: number, py: number, x1: number, y1: number, x2
   return Math.sqrt(Math.pow(px - (x1 + t * (x2 - x1)), 2) + Math.pow(py - (y1 + t * (y2 - y1)), 2));
 };
 
+export const distToInfiniteLine = (px: number, py: number, x1: number, y1: number, x2: number, y2: number): number => {
+    const l2 = Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2);
+    if (l2 === 0) return Math.sqrt(Math.pow(px - x1, 2) + Math.pow(py - y1, 2));
+    const t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+    return Math.sqrt(Math.pow(px - (x1 + t * (x2 - x1)), 2) + Math.pow(py - (y1 + t * (y2 - y1)), 2));
+};
+
 export const moveShape = (s: Shape, dx: number, dy: number): Shape => {
     const ns = { ...s };
     switch (ns.type) {
-        case 'line': ns.x1 += dx; ns.y1 += dy; ns.x2 += dx; ns.y2 += dy; break;
-        case 'circle': case 'arc': case 'text': case 'mtext': case 'rect': case 'ellipse': case 'point':
-            ns.x += dx; ns.y += dy; break;
-        case 'pline': case 'polygon': case 'spline':
-            ns.points = ns.points.map(p => ({ x: p.x + dx, y: p.y + dy })); break;
+        case 'line': case 'ray': case 'xline': case 'leader':
+            (ns as any).x1 += dx; (ns as any).y1 += dy; (ns as any).x2 += dx; (ns as any).y2 += dy; break;
+        case 'circle': case 'arc': case 'text': case 'mtext': case 'rect': case 'ellipse': case 'point': case 'donut': case 'dimang':
+            (ns as any).x += dx; (ns as any).y += dy; break;
+        case 'pline': case 'polygon': case 'spline': case 'dline':
+            (ns as any).points = (ns as any).points.map((p: Point) => ({ x: p.x + dx, y: p.y + dy })); break;
+        case 'dimension':
+            (ns as any).x1 += dx; (ns as any).y1 += dy; (ns as any).x2 += dx; (ns as any).y2 += dy; (ns as any).dimX += dx; (ns as any).dimY += dy; break;
     }
     return ns as Shape;
 };
@@ -454,23 +487,51 @@ export const offsetShape = (s: Shape, dist: number, sidePoint: Point): Shape | n
             const w = Math.abs(pts[1].x - pts[0].x), h = Math.abs(pts[2].y - pts[1].y);
             return { ...s, id, x, y, width: w, height: h } as RectShape;
         }
-        case 'pline': case 'polygon': case 'dline': {
+        case 'ellipse': {
+            const d = distance({ x: s.x, y: s.y }, sidePoint);
+            const factor = d > Math.max(s.rx, s.ry) ? (Math.max(s.rx, s.ry) + dist) / Math.max(s.rx, s.ry) : Math.max(0.1, Math.max(s.rx, s.ry) - dist) / Math.max(s.rx, s.ry);
+            // Simple approximation: scale Rx and Ry
+            const newRx = s.rx + (d > (s.rx+s.ry)/2 ? dist : -dist);
+            const newRy = s.ry + (d > (s.rx+s.ry)/2 ? dist : -dist);
+            return { ...s, id, rx: Math.max(0.1, newRx), ry: Math.max(0.1, newRy) } as EllipseShape;
+        }
+        case 'pline': case 'polygon': case 'dline': case 'spline': {
             const pts = s.points;
-            if (pts.length < 2) return null;
+            if (!pts || pts.length < 2) return null;
             const isClosed = (s as any).closed || s.type === 'polygon';
             const segments: { p1: Point, p2: Point }[] = [];
             for (let i = 0; i < (isClosed ? pts.length : pts.length - 1); i++) {
-                segments.push({ p1: pts[i], p2: pts[(i + 1) % pts.length] });
+                const p1 = pts[i], p2 = pts[(i + 1) % pts.length];
+                if (distance(p1, p2) > 0.0001) segments.push({ p1, p2 });
             }
+
+            if (segments.length === 0) return null;
+
+            // Determine side based on closest segment to sidePoint
+            let bestDist = Infinity;
+            let useLeft = true;
+            segments.forEach(seg => {
+                const dx = seg.p2.x - seg.p1.x, dy = seg.p2.y - seg.p1.y;
+                const len = Math.sqrt(dx * dx + dy * dy);
+                const nx = -dy / len, ny = dx / len;
+                const d = distToSegment(sidePoint.x, sidePoint.y, seg.p1.x, seg.p1.y, seg.p2.x, seg.p2.y);
+                if (d < bestDist) {
+                    bestDist = d;
+                    const test1 = { x: seg.p1.x + nx * dist, y: seg.p1.y + ny * dist };
+                    const test2 = { x: seg.p1.x - nx * dist, y: seg.p1.y - ny * dist };
+                    useLeft = distance(sidePoint, test1) < distance(sidePoint, test2);
+                }
+            });
 
             const offsetSegments = segments.map(seg => {
                 const dx = seg.p2.x - seg.p1.x, dy = seg.p2.y - seg.p1.y;
                 const len = Math.sqrt(dx * dx + dy * dy);
-                if (len === 0) return { p1: seg.p1, p2: seg.p2 };
                 const nx = -dy / len, ny = dx / len;
-                const test = { x: seg.p1.x + nx * dist, y: seg.p1.y + ny * dist };
-                const finalOffset = distance(sidePoint, test) < distance(sidePoint, { x: seg.p1.x - nx * dist, y: seg.p1.y - ny * dist }) ? dist : -dist;
-                return { p1: { x: seg.p1.x + nx * finalOffset, y: seg.p1.y + ny * finalOffset }, p2: { x: seg.p2.x + nx * finalOffset, y: seg.p2.y + ny * finalOffset } };
+                const finalOffset = useLeft ? dist : -dist;
+                return { 
+                    p1: { x: seg.p1.x + nx * finalOffset, y: seg.p1.y + ny * finalOffset }, 
+                    p2: { x: seg.p2.x + nx * finalOffset, y: seg.p2.y + ny * finalOffset } 
+                };
             });
 
             const newPts: Point[] = [];
@@ -491,6 +552,22 @@ export const offsetShape = (s: Shape, dist: number, sidePoint: Point): Shape | n
             
             return { ...s, id, points: newPts } as PolyShape;
         }
+        case 'ray': case 'xline': {
+            const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+            const len = Math.sqrt(dx*dx + dy*dy);
+            if (len === 0) return null;
+            const nx = -dy / len, ny = dx / len;
+            const p1 = { x: s.x1 + nx * dist, y: s.y1 + ny * dist };
+            const p2 = { x: s.x1 - nx * dist, y: s.y1 - ny * dist };
+            const final = distance(sidePoint, p1) < distance(sidePoint, p2) ? dist : -dist;
+            return { ...s, id, x1: s.x1 + nx * final, y1: s.y1 + ny * final, x2: s.x2 + nx * final, y2: s.y2 + ny * final } as InfiniteLineShape;
+        }
+        case 'donut': {
+            const d = distance({x: s.x, y: s.y}, sidePoint);
+            const mid = (s.innerRadius + s.outerRadius) / 2;
+            const factor = d > mid ? 1 : -1;
+            return { ...s, id, innerRadius: Math.max(0.1, s.innerRadius + factor * dist), outerRadius: Math.max(0.2, s.outerRadius + factor * dist) } as DonutShape;
+        }
     }
     return null;
 };
@@ -504,27 +581,27 @@ export const rotateShape = (s: Shape, base: Point, angle: number): Shape => {
     };
 
     switch (ns.type) {
-        case 'line': {
-            const p1 = rotatePt({ x: ns.x1, y: ns.y1 }), p2 = rotatePt({ x: ns.x2, y: ns.y2 });
-            ns.x1 = p1.x; ns.y1 = p1.y; ns.x2 = p2.x; ns.y2 = p2.y; break;
+        case 'line': case 'ray': case 'xline': case 'leader': {
+            const p1 = rotatePt({ x: (ns as any).x1, y: (ns as any).y1 }), p2 = rotatePt({ x: (ns as any).x2, y: (ns as any).y2 });
+            (ns as any).x1 = p1.x; (ns as any).y1 = p1.y; (ns as any).x2 = p2.x; (ns as any).y2 = p2.y; break;
         }
-        case 'circle': case 'arc': case 'text': case 'mtext': case 'rect': case 'point': {
-            const p = rotatePt({ x: ns.x, y: ns.y });
-            ns.x = p.x; ns.y = p.y; 
-            if (ns.type === 'text' || ns.type === 'mtext') (ns as any).rotation = ((ns as any).rotation || 0) + angle;
-            if (ns.type === 'rect') {
-                // Rect actually needs to become a Polyline or we need to support rotation in RectShape
-                // For simplicity let's assume Rect is axis-aligned unless we add rotation field
-                // Standard CAD usually turns rectangles into polylines for rotation
-            }
+        case 'circle': case 'arc': case 'text': case 'mtext': case 'rect': case 'point': case 'donut': case 'dimang': {
+            const p = rotatePt({ x: (ns as any).x, y: (ns as any).y });
+            (ns as any).x = p.x; (ns as any).y = p.y; 
+            if (ns.type === 'text' || ns.type === 'mtext' || ns.type === 'rect') (ns as any).rotation = ((ns as any).rotation || 0) + angle;
+            if (ns.type === 'arc' || ns.type === 'dimang') { (ns as any).startAngle += angle; (ns as any).endAngle += angle; }
             break;
         }
         case 'ellipse': {
             const p = rotatePt({ x: ns.x, y: ns.y });
             ns.x = p.x; ns.y = p.y; ns.rotation += angle; break;
         }
-        case 'pline': case 'polygon': case 'spline':
-            ns.points = ns.points.map(p => rotatePt(p)); break;
+        case 'pline': case 'polygon': case 'spline': case 'dline':
+            (ns as any).points = (ns as any).points.map((p: Point) => rotatePt(p)); break;
+        case 'dimension': {
+            const p1 = rotatePt({x: ns.x1, y: ns.y1}), p2 = rotatePt({x: ns.x2, y: ns.y2}), p3 = rotatePt({x: ns.dimX, y: ns.dimY});
+            ns.x1 = p1.x; ns.y1 = p1.y; ns.x2 = p2.x; ns.y2 = p2.y; ns.dimX = p3.x; ns.dimY = p3.y; break;
+        }
     }
     return ns as Shape;
 };
@@ -534,13 +611,16 @@ export const scaleShape = (s: Shape, base: Point, factor: number): Shape => {
     const scalePt = (p: Point) => ({ x: base.x + (p.x - base.x) * factor, y: base.y + (p.y - base.y) * factor });
 
     switch (ns.type) {
-        case 'line': {
-            const p1 = scalePt({ x: ns.x1, y: ns.y1 }), p2 = scalePt({ x: ns.x2, y: ns.y2 });
-            ns.x1 = p1.x; ns.y1 = p1.y; ns.x2 = p2.x; ns.y2 = p2.y; break;
+        case 'line': case 'ray': case 'xline': case 'leader': {
+            const p1 = scalePt({ x: (ns as any).x1, y: (ns as any).y1 }), p2 = scalePt({ x: (ns as any).x2, y: (ns as any).y2 });
+            (ns as any).x1 = p1.x; (ns as any).y1 = p1.y; (ns as any).x2 = p2.x; (ns as any).y2 = p2.y; break;
         }
-        case 'circle': case 'arc': {
-            const p = scalePt({ x: ns.x, y: ns.y });
-            ns.x = p.x; ns.y = p.y; ns.radius *= factor; break;
+        case 'circle': case 'arc': case 'donut': case 'dimang': {
+            const p = scalePt({ x: (ns as any).x, y: (ns as any).y });
+            (ns as any).x = p.x; (ns as any).y = p.y; 
+            (ns as any).radius *= factor; 
+            if (ns.type === 'donut') (ns as any).innerRadius *= factor;
+            break;
         }
         case 'text': case 'mtext': {
             const p = scalePt({ x: ns.x, y: ns.y });
@@ -558,8 +638,12 @@ export const scaleShape = (s: Shape, base: Point, factor: number): Shape => {
             const p = scalePt({ x: ns.x, y: ns.y });
             ns.x = p.x; ns.y = p.y; break;
         }
-        case 'pline': case 'polygon': case 'spline':
-            ns.points = ns.points.map(p => scalePt(p)); break;
+        case 'pline': case 'polygon': case 'spline': case 'dline':
+            (ns as any).points = (ns as any).points.map((p: Point) => scalePt(p)); break;
+        case 'dimension': {
+            const p1 = scalePt({x: ns.x1, y: ns.y1}), p2 = scalePt({x: ns.x2, y: ns.y2}), p3 = scalePt({x: ns.dimX, y: ns.dimY});
+            ns.x1 = p1.x; ns.y1 = p1.y; ns.x2 = p2.x; ns.y2 = p2.y; ns.dimX = p3.x; ns.dimY = p3.y; break;
+        }
     }
     return ns as Shape;
 };
@@ -964,4 +1048,67 @@ export const getShapesInRect = (p1: Point, p2: Point, shapes: Shape[], crossing:
 
         return false;
     });
+};
+
+export const filletLines = (s1: LineShape, s2: LineShape, radius: number): { l1: LineShape, l2: LineShape, arc: ArcShape | null } | null => {
+    const p1 = {x: s1.x1, y: s1.y1}, p2 = {x: s1.x2, y: s1.y2};
+    const p3 = {x: s2.x1, y: s2.y1}, p4 = {x: s2.x2, y: s2.y2};
+
+    const intersect = getIntersection(p1, p2, p3, p4, true);
+    if (!intersect) return null;
+
+    if (radius <= 0.001) {
+        return {
+            l1: { ...s1, id: generateId(), x1: p1.x, y1: p1.y, x2: intersect.x, y2: intersect.y },
+            l2: { ...s2, id: generateId(), x1: p3.x, y1: p3.y, x2: intersect.x, y2: intersect.y },
+            arc: null
+        };
+    }
+
+    const v1 = { x: p2.x - p1.x, y: p2.y - p1.y };
+    const v2 = { x: p4.x - p3.x, y: p4.y - p3.y };
+    const len1 = Math.sqrt(v1.x*v1.x + v1.y*v1.y), len2 = Math.sqrt(v2.x*v2.x + v2.y*v2.y);
+    const u1 = { x: v1.x/len1, y: v1.y/len1 }, u2 = { x: v2.x/len2, y: v2.y/len2 };
+
+    const dot = u1.x * u2.x + u1.y * u2.y;
+    const angle = Math.acos(Math.max(-1, Math.min(1, dot)));
+    if (Math.abs(angle) < 0.01 || Math.abs(angle - Math.PI) < 0.01) return null;
+    
+    // Distance to tangent points
+    const tDist = radius / Math.tan(angle / 2);
+    
+    // Determine which side of intersection to go for both lines
+    // We aim for the direction that points "towards" the original segments if possible
+    const d1 = distance(p1, intersect), d2 = distance(p2, intersect);
+    const side1 = d1 > d2 ? -1 : 1;
+    const d3 = distance(p3, intersect), d4 = distance(p4, intersect);
+    const side2 = d3 > d4 ? -1 : 1;
+
+    const tan1 = { x: intersect.x + u1.x * tDist * side1, y: intersect.y + u1.y * tDist * side1 };
+    const tan2 = { x: intersect.x + u2.x * tDist * side2, y: intersect.y + u2.y * tDist * side2 };
+
+    // Bisector for center
+    const b1 = { x: (u1.x * side1 + u2.x * side2), y: (u1.y * side1 + u2.y * side2) };
+    const blen = Math.sqrt(b1.x*b1.x + b1.y*b1.y);
+    const distToCen = radius / Math.sin(angle/2);
+    const cen = { x: intersect.x + (b1.x/blen) * distToCen, y: intersect.y + (b1.y/blen) * distToCen };
+
+    const sa = Math.atan2(tan1.y - cen.y, tan1.x - cen.x);
+    const ea = Math.atan2(tan2.y - cen.y, tan2.x - cen.x);
+    
+    // Cross product to check CCW
+    const cp = (tan1.x - cen.x)*(tan2.y - cen.y) - (tan1.y - cen.y)*(tan2.x - cen.x);
+
+    const arc: ArcShape = {
+        id: generateId(), type: 'arc', layer: s1.layer, color: s1.color,
+        x: cen.x, y: cen.y, radius: radius, startAngle: sa, endAngle: ea,
+        counterClockwise: cp > 0,
+        thickness: s1.thickness, lineType: s1.lineType
+    };
+
+    return {
+        l1: { ...s1, id: generateId(), x1: p1.x, y1: p1.y, x2: tan1.x, y2: tan1.y },
+        l2: { ...s2, id: generateId(), x1: p3.x, y1: p3.y, x2: tan2.x, y2: tan2.y },
+        arc
+    };
 };

@@ -48,6 +48,7 @@ export interface DoubleLineShape extends BaseShape {
   points: Point[];
   thickness: number; 
   justification: DLineJustification;
+  closed?: boolean;
 }
 
 export interface DimensionShape extends BaseShape {
@@ -150,6 +151,8 @@ export interface AngularDimensionShape extends BaseShape {
 
 export interface DonutShape extends BaseShape {
   type: 'donut';
+  x: number;
+  y: number;
   innerRadius: number;
   outerRadius: number;
 }

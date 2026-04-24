@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Bot, Send, Terminal, Mic, MicOff, ChevronUp, ChevronDown, Paperclip, Sparkles, X, Check } from 'lucide-react';
+import { Bot, Send, Terminal, Mic, MicOff, ChevronUp, ChevronDown, Paperclip, X, Check } from 'lucide-react';
 
 interface CommandBarProps {
   onCommand: (cmd: string) => void;
@@ -20,8 +20,9 @@ const COMMAND_LIST = [
     { cmd: 'RECT', alias: 'REC' }, { cmd: 'ARC', alias: 'A' }, { cmd: 'MOVE', alias: 'M' },
     { cmd: 'ROTATE', alias: 'RO' }, { cmd: 'SCALE', alias: 'SC' }, { cmd: 'MIRROR', alias: 'MI' },
     { cmd: 'COPY', alias: 'CO' }, { cmd: 'EXTEND', alias: 'EX' }, { cmd: 'EXPLODE', alias: 'X' },
-    { cmd: 'TRIM', alias: 'TR' }, { cmd: 'OFFSET', alias: 'O' }, { cmd: 'ERASE', alias: 'E' },
-    { cmd: 'MTEXT', alias: 'MT' }
+    { cmd: 'TRIM', alias: 'TR' }, { cmd: 'OFFSET', alias: 'O' }, { cmd: 'FILLET', alias: 'F' },
+    { cmd: 'RAY', alias: 'RAY' }, { cmd: 'XLINE', alias: 'XL' },
+    { cmd: 'ERASE', alias: 'E' }, { cmd: 'MTEXT', alias: 'MT' }
 ];
 
 const CommandBar: React.FC<CommandBarProps> = ({ 
@@ -242,7 +243,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
                         {isLiveActive ? <MicOff size={14} /> : <Mic size={14} />}
                     </button>
                     <button type="submit" disabled={isAiThinking || (!value && !attachment)} className={`w-7 h-7 rounded-lg text-white flex items-center justify-center shadow-lg active:scale-95 transition-all ${isAiThinking ? 'bg-neutral-800' : 'bg-[#6366f1]'}`}>
-                        {isAiThinking ? <div className="w-3 h-3 border-2 border-white/20 border-t-white rounded-full animate-spin" /> : <Sparkles size={12} />}
+                        {isAiThinking ? <div className="w-3 h-3 border-2 border-white/20 border-t-white rounded-full animate-spin" /> : <Send size={12} />}
                     </button>
                 </div>
             </form>

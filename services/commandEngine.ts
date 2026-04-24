@@ -1,6 +1,6 @@
 
 import { Shape, Point, AppSettings, LayerConfig, LineShape, CircleShape, RectShape, ArcShape, PolyShape, TextShape, MTextShape, EllipseShape, DimensionShape, AngularDimensionShape, PointShape, InfiniteLineShape, DonutShape, LeaderShape, ViewState, DoubleLineShape, DLineJustification, TextJustification, LineType } from '../types';
-import { generateId, getCircleFrom3Points, formatLength, parseLength, hitTestShape, distance, getTrimmedShapes, moveShape, resolvePointInput, calculateArea, offsetShape, getPolygonPoints, stretchShape, getShapesInRect, rotateShape, scaleShape, mirrorShape, getExtendedShapes } from './cadService';
+import { generateId, getCircleFrom3Points, formatLength, parseLength, hitTestShape, distance, getTrimmedShapes, moveShape, resolvePointInput, calculateArea, offsetShape, getPolygonPoints, stretchShape, getShapesInRect, rotateShape, scaleShape, mirrorShape, getExtendedShapes, filletLines } from './cadService';
 
 export interface CommandContext {
     getSettings: () => AppSettings;
@@ -1172,8 +1172,9 @@ export class OffsetCommand implements CADCommand {
     onClick(p: Point) {
         if (this.dist === 0) return;
         if (!this.target) {
+            const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
             const all = Object.values(this.ctx.getLayers()).flat();
-            const hit = all.find(s => hitTestShape(p.x, p.y, s, 10));
+            const hit = all.find(s => hitTestShape(p.x, p.y, s, 15/ts));
             if (hit) { this.target = hit; this.ctx.setMessage("OFFSET Specify point on side to offset:"); }
         } else {
             const off = offsetShape(this.target, this.dist, p);
@@ -1190,6 +1191,96 @@ export class OffsetCommand implements CADCommand {
     onMove() {} 
     onEnter() { this.ctx.onFinish(); } 
     onCancel() { this.ctx.onFinish(); }
+}
+
+export class RayCommand implements CADCommand {
+    name = "RAY"; p1: Point | null = null;
+    constructor(public ctx: CommandContext) {}
+    onStart() { this.ctx.setMessage("RAY Specify start point:"); }
+    onClick(p: Point) {
+        if (!this.p1) {
+            this.p1 = p;
+            this.ctx.setMessage("RAY Specify through point:");
+        } else {
+            const layer = getStyleSettings(this.ctx).layer;
+            const shape: InfiniteLineShape = {
+                id: generateId(), type: 'ray', layer, color: getStyleSettings(this.ctx).color,
+                x1: this.p1.x, y1: this.p1.y, x2: p.x, y2: p.y,
+                thickness: getStyleSettings(this.ctx).thickness, lineType: getStyleSettings(this.ctx).lineType
+            };
+            this.ctx.setLayers(prev => ({ ...prev, [layer]: [...(prev[layer] || []), shape] }));
+            this.p1 = null;
+            this.ctx.setMessage("RAY Specify start point:");
+        }
+    }
+    onMove() {} onEnter() { this.ctx.onFinish(); } onCancel() { this.ctx.onFinish(); }
+}
+
+export class XLineCommand implements CADCommand {
+    name = "XLINE"; p1: Point | null = null;
+    constructor(public ctx: CommandContext) {}
+    onStart() { this.ctx.setMessage("XLINE Specify a point or [Hor/Ver/Ang/Bisect/Offset]:"); }
+    onClick(p: Point) {
+        if (!this.p1) {
+            this.p1 = p;
+            this.ctx.setMessage("XLINE Specify through point:");
+        } else {
+            const layer = getStyleSettings(this.ctx).layer;
+            const shape: InfiniteLineShape = {
+                id: generateId(), type: 'xline', layer, color: getStyleSettings(this.ctx).color,
+                x1: this.p1.x, y1: this.p1.y, x2: p.x, y2: p.y,
+                thickness: getStyleSettings(this.ctx).thickness, lineType: getStyleSettings(this.ctx).lineType
+            };
+            this.ctx.setLayers(prev => ({ ...prev, [layer]: [...(prev[layer] || []), shape] }));
+            this.p1 = null;
+            this.ctx.setMessage("XLINE Specify a point:");
+        }
+    }
+    onMove() {} onEnter() { this.ctx.onFinish(); } onCancel() { this.ctx.onFinish(); }
+}
+
+export class FilletCommand implements CADCommand {
+    name = "FILLET"; radius: number = 0; s1: Shape | null = null;
+    constructor(public ctx: CommandContext) {}
+    onStart() { this.ctx.setMessage("FILLET Select first object or [Radius]:"); }
+    onInput(text: string): boolean {
+        const t = text.trim().toLowerCase();
+        if (t === 'r' || t === 'radius') { this.ctx.setMessage("FILLET Specify fillet radius:"); return true; }
+        const r = parseLength(text, this.ctx.getSettings().units === 'imperial');
+        if (!isNaN(r)) { this.radius = r; this.ctx.setMessage("FILLET Select first object:"); return true; }
+        return false;
+    }
+    onClick(p: Point) {
+        const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
+        const all = Object.values(this.ctx.getLayers()).flat();
+        const hit = all.find(s => hitTestShape(p.x, p.y, s, 15/ts));
+        if (!hit) return;
+
+        if (!this.s1) {
+            this.s1 = hit;
+            this.ctx.setSelectedIds([hit.id]);
+            this.ctx.setMessage("FILLET Select second object:");
+        } else {
+            if (this.s1.id === hit.id) return;
+            if (this.s1.type === 'line' && hit.type === 'line') {
+                const res = filletLines(this.s1, hit, this.radius);
+                if (res) {
+                    this.ctx.setLayers(prev => {
+                        const next = { ...prev };
+                        Object.keys(next).forEach(l => {
+                            next[l] = next[l].filter(s => s.id !== this.s1!.id && s.id !== hit.id);
+                        });
+                        const layer = getStyleSettings(this.ctx).layer;
+                        next[layer] = [...(next[layer] || []), res.l1, res.l2];
+                        if (res.arc) next[layer] = [...next[layer], res.arc];
+                        return next;
+                    });
+                }
+            }
+            this.ctx.onFinish();
+        }
+    }
+    onMove() {} onEnter() { this.ctx.onFinish(); } onCancel() { this.ctx.onFinish(); }
 }
 
 export class TrimCommand implements CADCommand {

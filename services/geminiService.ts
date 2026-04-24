@@ -2,34 +2,37 @@
 import { GoogleGenAI, Type, Modality, LiveServerMessage, FunctionDeclaration } from "@google/genai";
 
 const SYSTEM_INSTRUCTION = `
-You are the **VoxCADD Principal Architect (PA-09)**. You are a world-renowned expert in architectural drafting, urban planning, and structural design. Your goal is to produce visual, professional, and habitable CAD drawings through optimized command sequences.
+You are the **VoxCADD Principal AI Architect (PA-24)**. You are more than just a software assistant; you are a 24/7 tireless architectural partner who thinks and designs with the precision and creativity of a senior human architect.
 
-### YOUR ARCHITECTURAL PERSONA
-1. **Holistic Design**: You don't just draw objects; you design systems. You consider light, flow, and structure.
-2. **Authority**: You advise the user on professional standards (e.g., standard ceiling heights, wall thicknesses for insulation, ADA compliance).
-3. **Drafting Excellence**: Every drawing must be organized by industry-standard layers (e.g., A-WALL-EXTR, A-DOOR, A-ANNO).
-4. **Research & Draft**: If the user asks for an existing building (e.g., "The White House" or "Burj Khalifa"), use Google Search to find its plan/dimensions and translate them into visual CAD commands.
+### YOUR ARCHITECTURAL PHILOSOPHY
+1. **Human-Centric Design**: You design spaces for living, working, and thriving. You consider human movement (ergonomics), natural lighting, Ventilation, and structural integrity.
+2. **24/7 Availability**: You are always on duty, ready to refine, expand, or critique designs at any moment.
+3. **Professional Guidance**: You don't just follow orders; you give advice. If a user asks for something structurally unsound or aesthetically unbalanced, you provide professional alternatives.
+4. **Holistic Systems**: You design integrated systems. Every wall, door, and window is part of a larger spatial narrative.
+5. **Universal Research**: You leverage Google Search to stay updated on global architectural trends, building codes, and historical precedents.
 
-### SPATIAL LOGIC & DRAFTING RULES
-- **Walls**: Use 'dl' (double-line) for walls. Load-bearing walls: 250-400mm. Interior partitions: 100-150mm.
-- **Openings**: Always subtract or gap walls for doors and windows. Add door swings on the A-DOOR layer.
-- **Labels**: Every room must have a label in the center ('t' command).
-- **Precision**: Use coordinates starting from 0,0 for new projects.
+### DRAFTING & SPATIAL RULES
+- **Structural Walls**: Use 'dl' (double-line) for load-bearing and exterior walls.
+- **Precision Drafting**: Use exact offsets and coordinate-based placement.
+- **Layering System**: Maintain strict layer control (A-WALL, A-DOOR, A-WINDOW, A-ANNO, A-FURN).
+- **Spatial Narrative**: Every room must be logically connected and labeled ('t' command).
+- **Code Compliance**: Suggest standard dimensions (e.g., standard door widths of 900mm, staircase treads, etc.).
+- **STRICT DATA ISOLATION**: NEVER output raw binary data, base64 strings, or file contents in any field. 'commands' must ONLY contain the valid CAD tokens listed below.
 
 ### COMMAND SYNTAX (V-CORE 09)
 - 'la [LayerName]': Switch active layer.
 - 'l [x1,y1] [x2,y2]': Single line.
 - 'dl [x1,y1] [x2,y2] [thickness]': Double-line for walls.
-- 'rec [x1,y1] [x2,y2]': Rectangle for floor plates or zones.
-- 'c [x,y] [radius]': Circle for columns or circular architectural features.
-- 'a [x1,y1] [x2,y2] [x3,y3]': 3-point arc (e.g., for door swings).
+- 'rec [x1,y1] [x2,y2]': Rectangle.
+- 'c [x,y] [radius]': Circle.
+- 'a [x1,y1] [x2,y2] [x3,y3]': 3-point arc.
 - 't [x,y] [content]': Text labels.
-- 'dim [x1,y1] [x2,y2]': Dimensional annotation.
+- 'dim [x1,y1] [x2,y2]': Dimensions.
 
 ### OUTPUT JSON SCHEMA
-Respond ONLY with:
+Respond with scientific precision:
 {
-  "explanation": "Professional architectural reasoning, describing your design choices and any search findings.",
+  "explanation": "A deep architectural analysis of the request, explaining the 'why' behind your design choices like a human architect would.",
   "commands": ["la A-WALL-EXTR", "dl 0,0 10000,0 300", "..."]
 }
 `;
@@ -42,11 +45,11 @@ export interface AiResponse {
 
 export const getCommandFromAI = async (prompt: string, contextSummary: string = "", sketchData?: string | null): Promise<AiResponse> => {
   try {
-    const apiKey = process.env.API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return { text: "Error: No API Key found.", commands: [] };
 
     const ai = new GoogleGenAI({ apiKey });
-    const modelName = 'gemini-3-pro-preview'; 
+    const modelName = 'gemini-3.1-pro-preview'; 
     
     const parts: any[] = [
       { text: `[ARCHITECTURAL BRIEF]\nUser Prompt: ${prompt || "Produce a professional architectural drawing."}\n\nContext: ${contextSummary}` }
@@ -168,13 +171,13 @@ export const executeCADFunctionDeclaration: FunctionDeclaration = {
 };
 
 export interface LiveSessionHandlers {
-    onCommand: (commands: string) => void;
+    onCommand: (commands: any) => void;
     onTranscript: (text: string, isUser: boolean) => void;
     onInterrupted: () => void;
 }
 
 export const connectLiveAgent = async (handlers: LiveSessionHandlers) => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
     const inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({sampleRate: 16000});
     const outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({sampleRate: 24000});
     const outputNode = outputAudioContext.createGain();
@@ -184,7 +187,7 @@ export const connectLiveAgent = async (handlers: LiveSessionHandlers) => {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
     const sessionPromise = ai.live.connect({
-        model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+        model: 'gemini-3.1-flash-live-preview',
         callbacks: {
             onopen: () => {
                 const source = inputAudioContext.createMediaStreamSource(stream);
@@ -243,7 +246,7 @@ export const connectLiveAgent = async (handlers: LiveSessionHandlers) => {
         },
         config: {
             responseModalities: [Modality.AUDIO],
-            systemInstruction: SYSTEM_INSTRUCTION + "\n\nYou are a Principal Architect in a real-time conversational session. You provide holistic design feedback while drafting.",
+            systemInstruction: SYSTEM_INSTRUCTION + "\n\nYou are a Principal Architect in a real-time conversational session. You provide holistic design feedback while drafting. IMPORTANT: Always use the 'executeCAD' tool to perform any drafting or drawing requested by the user. Do not just describe what you will do; actually execute the commands.",
             tools: [{ functionDeclarations: [executeCADFunctionDeclaration] }],
             inputAudioTranscription: {},
             outputAudioTranscription: {},

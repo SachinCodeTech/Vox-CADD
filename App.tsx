@@ -25,7 +25,8 @@ import {
   DimensionCommand, TextCommand, MTextCommand, ZoomCommand, 
   RotateCommand, ScaleCommand, MirrorCommand, CopyCommand,
   ExtendCommand, ExplodeCommand,
-  HatchCommand, LeaderCommand, PanCommand, OffsetCommand, TrimCommand, EllipseCommand, PolygonCommand,
+  RayCommand, XLineCommand,
+  HatchCommand, LeaderCommand, PanCommand, OffsetCommand, TrimCommand, FilletCommand, EllipseCommand, PolygonCommand,
   SelectAllCommand, CopyClipCommand, CutClipCommand, PasteClipCommand, SplineCommand, SketchCommand, StretchCommand, SelectCommand
 } from './services/commandEngine';
 import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType } from './types';
@@ -672,6 +673,12 @@ const App: React.FC = () => {
   const executeCommand = useCallback((cmdStr: string) => {
     const trimmed = cmdStr.trim();
     
+    // Add length safety check to prevent garbled text rendering
+    if (trimmed.length > 1000) {
+        setLogMessage("ERR: COMMAND_BUFFER_OVERFLOW");
+        return;
+    }
+
     if (trimmed && navigator.vibrate) navigator.vibrate(10);
     
     // Repeat last command on Enter/Space if no active command
@@ -752,6 +759,8 @@ const App: React.FC = () => {
       'ro': RotateCommand, 'rotate': RotateCommand, 'sc': ScaleCommand, 'scale': ScaleCommand,
       'mi': MirrorCommand, 'mirror': MirrorCommand, 'co': CopyCommand, 'copy': CopyCommand,
       'ex': ExtendCommand, 'extend': ExtendCommand, 'x': ExplodeCommand, 'explode': ExplodeCommand,
+      'f': FilletCommand, 'fillet': FilletCommand,
+      'ray': RayCommand, 'xl': XLineCommand, 'xline': XLineCommand,
     };
     
     const CommandClass = commandMap[cmdKey];
@@ -879,7 +888,14 @@ const App: React.FC = () => {
         setLogMessage("AWAKENING_ARCHITECT_CORE...");
         try {
             const sessionPromise = connectLiveAgent({
-                onCommand: (cmds) => cmds.split('\n').forEach(c => executeCommand(c)),
+                onCommand: (cmds) => {
+                    if (!cmds) return;
+                    if (typeof cmds === 'string') {
+                        cmds.split('\n').forEach(c => executeCommand(c));
+                    } else if (Array.isArray(cmds)) {
+                        cmds.forEach(c => executeCommand(c));
+                    }
+                },
                 onTranscript: (t, u) => setLogMessage(u ? `USER: ${t}` : `ARCHITECT: ${t}`),
                 onInterrupted: () => {}
             });
