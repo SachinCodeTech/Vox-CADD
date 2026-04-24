@@ -3,7 +3,7 @@ import React from 'react';
 import { 
   Move, Minus, Square, Circle, 
   RotateCw, Ruler, Hash, Target, Maximize, Trash2, 
-  PenTool, BoxSelect, Navigation, Monitor,
+  PenTool, BoxSelect, Navigation, Monitor, Scaling, FlipHorizontal, Maximize2, Ungroup,
   ZoomIn, ZoomOut, Hand, Scissors, CopyPlus, Hexagon, CircleDashed,
   RotateCcw, RotateCw as RedoIcon, FileEdit, Weight,
   FilePlus, FolderOpen, Save, Share2, Calculator, Layers, Sliders, XCircle,
@@ -33,22 +33,28 @@ const ToolCircleBtn: React.FC<{
     active?: boolean,
     danger?: boolean,
     disabled?: boolean
-}> = ({ icon, label, onClick, active, danger, disabled }) => (
-    <button 
-        onClick={onClick} 
-        disabled={disabled}
-        className={`flex-shrink-0 flex flex-col items-center justify-center active:scale-90 no-tap ${disabled ? 'opacity-20 grayscale' : ''}`}
-    >
-        <div className={`w-11 h-11 rounded-full border flex items-center justify-center transition-all
-            ${active ? 'bg-[#00bcd4] text-black border-[#00bcd4] shadow-[0_0_12px_rgba(0,188,212,0.4)]' : 
-              danger ? 'bg-red-950/20 border-red-900/40 text-red-500' :
-              'bg-[#121214] border-white/5 text-neutral-500 hover:text-white'}`}
+}> = ({ icon, label, onClick, active, danger, disabled }) => {
+    const handleClick = () => {
+        if (navigator.vibrate) navigator.vibrate(10);
+        onClick();
+    };
+    return (
+        <button 
+            onClick={handleClick} 
+            disabled={disabled}
+            className={`flex-shrink-0 flex flex-col items-center justify-center active:scale-90 no-tap ${disabled ? 'opacity-20 grayscale' : ''}`}
         >
-            {React.cloneElement(icon as React.ReactElement, { size: 18 })}
-        </div>
-        <span className={`text-[7px] font-black uppercase mt-1 tracking-widest ${active ? 'text-[#00bcd4]' : 'text-neutral-600'}`}>{label}</span>
-    </button>
-);
+            <div className={`w-11 h-11 rounded-full border flex items-center justify-center transition-all
+                ${active ? 'bg-[#00bcd4] text-black border-[#00bcd4] shadow-[0_0_12px_rgba(0,188,212,0.4)]' : 
+                  danger ? 'bg-red-950/20 border-red-900/40 text-red-500' :
+                  'bg-[#121214] border-white/5 text-neutral-500 hover:text-white'}`}
+            >
+                {React.cloneElement(icon as React.ReactElement, { size: 18 })}
+            </div>
+            <span className={`text-[7px] font-black uppercase mt-1 tracking-widest ${active ? 'text-[#00bcd4]' : 'text-neutral-600'}`}>{label}</span>
+        </button>
+    );
+};
 
 const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settings, onSettingChange, canUndo, canRedo, activeCommandName, showCircleOptions, showArcOptions, showEllipseOptions }) => {
   const renderContent = () => {
@@ -69,10 +75,17 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
       case 'Modify':
         return (
           <>
-            <ToolCircleBtn onClick={() => onCommand('m')} icon={<Move />} label="MOVE" />
-            <ToolCircleBtn onClick={() => onCommand('tr')} icon={<Scissors />} label="TRIM" />
-            <ToolCircleBtn onClick={() => onCommand('o')} icon={<CopyPlus />} label="OFFSET" />
-            <ToolCircleBtn onClick={() => onCommand('e')} icon={<Trash2 />} label="ERASE" danger />
+            <ToolCircleBtn onClick={() => onCommand('m')} icon={<Move />} label="MOVE" active={activeCommandName === 'MOVE'} />
+            <ToolCircleBtn onClick={() => onCommand('ro')} icon={<RotateCw />} label="ROTATE" active={activeCommandName === 'ROTATE'} />
+            <ToolCircleBtn onClick={() => onCommand('sc')} icon={<Scaling />} label="SCALE" active={activeCommandName === 'SCALE'} />
+            <ToolCircleBtn onClick={() => onCommand('mi')} icon={<FlipHorizontal />} label="MIRROR" active={activeCommandName === 'MIRROR'} />
+            <ToolCircleBtn onClick={() => onCommand('co')} icon={<Copy />} label="COPY" active={activeCommandName === 'COPY'} />
+            <ToolCircleBtn onClick={() => onCommand('s')} icon={<Maximize />} label="STRCH" active={activeCommandName === 'STRETCH'} />
+            <ToolCircleBtn onClick={() => onCommand('tr')} icon={<Scissors />} label="TRIM" active={activeCommandName === 'TRIM'} />
+            <ToolCircleBtn onClick={() => onCommand('ex')} icon={<Maximize2 />} label="EXTEND" active={activeCommandName === 'EXTEND'} />
+            <ToolCircleBtn onClick={() => onCommand('x')} icon={<Ungroup />} label="EXPLODE" active={activeCommandName === 'EXPLODE'} />
+            <ToolCircleBtn onClick={() => onCommand('o')} icon={<CopyPlus />} label="OFFSET" active={activeCommandName === 'OFFSET'} />
+            <ToolCircleBtn onClick={() => onCommand('e')} icon={<Trash2 />} label="ERASE" danger active={activeCommandName === 'ERASE'} />
             <ToolCircleBtn onClick={() => onAction('cancel')} icon={<XCircle />} label="CANCEL" />
           </>
         );

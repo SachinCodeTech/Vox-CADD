@@ -55,9 +55,17 @@ export const hitTestShape = (x: number, y: number, s: Shape, threshold: number):
     }
     case 'text':
     case 'mtext': {
-        const w = (s as MTextShape).width || 2000;
-        const h = s.size * (s.type === 'mtext' ? (s.content.split('\n').length * 1.5) : 1);
-        return x >= s.x - threshold && x <= s.x + w + threshold && y <= s.y + threshold && y >= s.y - h - threshold;
+        const lines = s.type === 'mtext' ? s.content.split('\n') : [s.content];
+        const h = s.size * (s.type === 'mtext' ? (lines.length * 1.2) : 1);
+        // Estimate width if not explicit
+        let w = (s as MTextShape).width;
+        if (!w) {
+            const maxChars = Math.max(...lines.map(l => l.length));
+            w = maxChars * s.size * 0.6; // Average monospace char width
+        }
+        
+        const xMin = s.x - (s.justification === 'center' ? w/2 : s.justification === 'right' ? w : 0);
+        return x >= xMin - threshold && x <= xMin + w + threshold && y <= s.y + threshold && y >= s.y - h - threshold;
     }
     case 'arc': {
       const d = Math.sqrt(Math.pow(x - s.x, 2) + Math.pow(y - s.y, 2));
@@ -113,10 +121,17 @@ export const getShapeBounds = (s: Shape): { xMin: number, yMin: number, xMax: nu
             });
             return { xMin, yMin, xMax, yMax };
         case 'text':
-        case 'mtext':
-            const w = (s as MTextShape).width || 2000;
-            const h = s.size * (s.type === 'mtext' ? (s.content.split('\n').length * 1.5) : 1);
-            return { xMin: s.x, yMin: s.y - h, xMax: s.x + w, yMax: s.y };
+        case 'mtext': {
+            const lines = s.type === 'mtext' ? s.content.split('\n') : [s.content];
+            const h = s.size * (s.type === 'mtext' ? (lines.length * 1.2) : 1);
+            let w = (s as MTextShape).width;
+            if (!w) {
+                const maxChars = Math.max(...lines.map(l => l.length));
+                w = maxChars * s.size * 0.6;
+            }
+            const xMin = s.x - (s.justification === 'center' ? w/2 : s.justification === 'right' ? w : 0);
+            return { xMin, yMin: s.y - h, xMax: xMin + w, yMax: s.y };
+        }
         case 'ellipse':
             const maxR = Math.max(s.rx, s.ry);
             return { xMin: s.x - maxR, yMin: s.y - maxR, xMax: s.x + maxR, yMax: s.y + maxR };
@@ -425,6 +440,11 @@ export const offsetShape = (s: Shape, dist: number, sidePoint: Point): Shape | n
             const newRadius = d > s.radius ? s.radius + dist : Math.max(0.1, s.radius - dist);
             return { ...s, id, radius: newRadius } as CircleShape;
         }
+        case 'arc': {
+            const d = distance({ x: s.x, y: s.y }, sidePoint);
+            const newRadius = d > s.radius ? s.radius + dist : Math.max(0.1, s.radius - dist);
+            return { ...s, id, radius: newRadius } as ArcShape;
+        }
         case 'rect': {
             const poly: PolyShape = { id, type: 'pline', layer: s.layer, color: s.color, points: [{ x: s.x, y: s.y }, { x: s.x + s.width, y: s.y }, { x: s.x + s.width, y: s.y + s.height }, { x: s.x, y: s.y + s.height }], closed: true } as any;
             const offPoly = offsetShape(poly as any, dist, sidePoint) as PolyShape;
@@ -434,10 +454,10 @@ export const offsetShape = (s: Shape, dist: number, sidePoint: Point): Shape | n
             const w = Math.abs(pts[1].x - pts[0].x), h = Math.abs(pts[2].y - pts[1].y);
             return { ...s, id, x, y, width: w, height: h } as RectShape;
         }
-        case 'pline': case 'polygon': {
+        case 'pline': case 'polygon': case 'dline': {
             const pts = s.points;
             if (pts.length < 2) return null;
-            const isClosed = s.closed || s.type === 'polygon';
+            const isClosed = (s as any).closed || s.type === 'polygon';
             const segments: { p1: Point, p2: Point }[] = [];
             for (let i = 0; i < (isClosed ? pts.length : pts.length - 1); i++) {
                 segments.push({ p1: pts[i], p2: pts[(i + 1) % pts.length] });
@@ -473,6 +493,203 @@ export const offsetShape = (s: Shape, dist: number, sidePoint: Point): Shape | n
         }
     }
     return null;
+};
+
+export const rotateShape = (s: Shape, base: Point, angle: number): Shape => {
+    const ns = { ...s };
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    const rotatePt = (p: Point) => {
+        const dx = p.x - base.x, dy = p.y - base.y;
+        return { x: base.x + dx * cos - dy * sin, y: base.y + dx * sin + dy * cos };
+    };
+
+    switch (ns.type) {
+        case 'line': {
+            const p1 = rotatePt({ x: ns.x1, y: ns.y1 }), p2 = rotatePt({ x: ns.x2, y: ns.y2 });
+            ns.x1 = p1.x; ns.y1 = p1.y; ns.x2 = p2.x; ns.y2 = p2.y; break;
+        }
+        case 'circle': case 'arc': case 'text': case 'mtext': case 'rect': case 'point': {
+            const p = rotatePt({ x: ns.x, y: ns.y });
+            ns.x = p.x; ns.y = p.y; 
+            if (ns.type === 'text' || ns.type === 'mtext') (ns as any).rotation = ((ns as any).rotation || 0) + angle;
+            if (ns.type === 'rect') {
+                // Rect actually needs to become a Polyline or we need to support rotation in RectShape
+                // For simplicity let's assume Rect is axis-aligned unless we add rotation field
+                // Standard CAD usually turns rectangles into polylines for rotation
+            }
+            break;
+        }
+        case 'ellipse': {
+            const p = rotatePt({ x: ns.x, y: ns.y });
+            ns.x = p.x; ns.y = p.y; ns.rotation += angle; break;
+        }
+        case 'pline': case 'polygon': case 'spline':
+            ns.points = ns.points.map(p => rotatePt(p)); break;
+    }
+    return ns as Shape;
+};
+
+export const scaleShape = (s: Shape, base: Point, factor: number): Shape => {
+    const ns = { ...s };
+    const scalePt = (p: Point) => ({ x: base.x + (p.x - base.x) * factor, y: base.y + (p.y - base.y) * factor });
+
+    switch (ns.type) {
+        case 'line': {
+            const p1 = scalePt({ x: ns.x1, y: ns.y1 }), p2 = scalePt({ x: ns.x2, y: ns.y2 });
+            ns.x1 = p1.x; ns.y1 = p1.y; ns.x2 = p2.x; ns.y2 = p2.y; break;
+        }
+        case 'circle': case 'arc': {
+            const p = scalePt({ x: ns.x, y: ns.y });
+            ns.x = p.x; ns.y = p.y; ns.radius *= factor; break;
+        }
+        case 'text': case 'mtext': {
+            const p = scalePt({ x: ns.x, y: ns.y });
+            ns.x = p.x; ns.y = p.y; ns.size *= factor; break;
+        }
+        case 'rect': {
+            const p = scalePt({ x: ns.x, y: ns.y });
+            ns.x = p.x; ns.y = p.y; ns.width *= factor; ns.height *= factor; break;
+        }
+        case 'ellipse': {
+            const p = scalePt({ x: ns.x, y: ns.y });
+            ns.x = p.x; ns.y = p.y; ns.rx *= factor; ns.ry *= factor; break;
+        }
+        case 'point': {
+            const p = scalePt({ x: ns.x, y: ns.y });
+            ns.x = p.x; ns.y = p.y; break;
+        }
+        case 'pline': case 'polygon': case 'spline':
+            ns.points = ns.points.map(p => scalePt(p)); break;
+    }
+    return ns as Shape;
+};
+
+export const mirrorShape = (s: Shape, p1: Point, p2: Point): Shape => {
+    const ns = { ...s };
+    const mirrorPt = (p: Point) => {
+        const dx = p2.x - p1.x, dy = p2.y - p1.y;
+        if (dx === 0 && dy === 0) return p;
+        const a = (dx * dx - dy * dy) / (dx * dx + dy * dy);
+        const b = 2 * dx * dy / (dx * dx + dy * dy);
+        const x = a * (p.x - p1.x) + b * (p.y - p1.y) + p1.x;
+        const y = b * (p.x - p1.x) - a * (p.y - p1.y) + p1.y;
+        return { x, y };
+    };
+
+    switch (ns.type) {
+        case 'line': {
+            const mp1 = mirrorPt({ x: ns.x1, y: ns.y1 }), mp2 = mirrorPt({ x: ns.x2, y: ns.y2 });
+            ns.x1 = mp1.x; ns.y1 = mp1.y; ns.x2 = mp2.x; ns.y2 = mp2.y; break;
+        }
+        case 'circle': case 'arc': case 'text': case 'mtext': case 'rect': case 'ellipse': case 'point': {
+            const p = mirrorPt({ x: ns.x, y: ns.y });
+            ns.x = p.x; ns.y = p.y; 
+            if (ns.type === 'arc') ns.counterClockwise = !ns.counterClockwise;
+            // Mirroring text/rect/ellipse might need more complex angle flipping
+            break;
+        }
+        case 'pline': case 'polygon': case 'spline':
+            ns.points = ns.points.map(p => mirrorPt(p)); break;
+    }
+    return ns as Shape;
+};
+
+export const getExtendedShapes = (boundaries: Shape[], targets: Shape[], pick: Point): Shape[] => {
+    const results: Shape[] = [];
+    targets.forEach(target => {
+        if (target.type === 'line') {
+            const p1 = {x: target.x1, y: target.y1}, p2 = {x: target.x2, y: target.y2};
+            
+            // Determine which end is closer to pick point to know which way to extend
+            const d1 = distance(pick, p1), d2 = distance(pick, p2);
+            const nearPt = d1 < d2 ? p1 : p2;
+            const farPt = d1 < d2 ? p2 : p1;
+            
+            // Ray from farPt through nearPt
+            const dx = nearPt.x - farPt.x, dy = nearPt.y - farPt.y;
+            const len = Math.sqrt(dx*dx + dy*dy);
+            if (len === 0) { results.push(target); return; }
+            const ux = dx/len, uy = dy/len;
+            
+            // Ray representation: nearPt + t * (ux, uy) where t > 0
+            let minT = Infinity;
+            let bestInter: Point | null = null;
+            
+            boundaries.forEach(boundary => {
+                const segments = getShapeSegments(boundary);
+                segments.forEach(seg => {
+                    // Infinite line intersection
+                    const inter = getIntersection(farPt, nearPt, seg.p1, seg.p2, true);
+                    if (inter) {
+                        // Check if intersection is on the boundary segment
+                        const dToSeg = distToSegment(inter.x, inter.y, seg.p1.x, seg.p1.y, seg.p2.x, seg.p2.y);
+                        if (dToSeg < 0.001) {
+                            // Check if it's in the extension direction (t > len)
+                            const t = (inter.x - farPt.x) * ux + (inter.y - farPt.y) * uy;
+                            if (t > len + 0.001 && t < minT) {
+                                minT = t;
+                                bestInter = inter;
+                            }
+                        }
+                    }
+                });
+            });
+            
+            if (bestInter) {
+                if (d1 < d2) {
+                    results.push({ ...target, id: generateId(), x1: bestInter.x, y1: bestInter.y } as Shape);
+                } else {
+                    results.push({ ...target, id: generateId(), x2: bestInter.x, y2: bestInter.y } as Shape);
+                }
+            } else {
+                results.push(target);
+            }
+        } else {
+            results.push(target);
+        }
+    });
+    return results;
+};
+
+export const stretchShape = (s: Shape, xMin: number, yMin: number, xMax: number, yMax: number, dx: number, dy: number): Shape => {
+    const ns = { ...s };
+    const inRect = (p: Point) => p.x >= xMin && p.x <= xMax && p.y >= yMin && p.y <= yMax;
+
+    switch (ns.type) {
+        case 'line':
+            if (inRect({ x: ns.x1, y: ns.y1 })) { ns.x1 += dx; ns.y1 += dy; }
+            if (inRect({ x: ns.x2, y: ns.y2 })) { ns.x2 += dx; ns.y2 += dy; }
+            break;
+        case 'circle':
+            if (inRect({ x: ns.x, y: ns.y })) { ns.x += dx; ns.y += dy; }
+            break;
+        case 'arc':
+            if (inRect({ x: ns.x, y: ns.y })) { ns.x += dx; ns.y += dy; }
+            break;
+        case 'rect': {
+            const p1 = inRect({ x: ns.x, y: ns.y });
+            const p2 = inRect({ x: ns.x + ns.width, y: ns.y });
+            const p3 = inRect({ x: ns.x + ns.width, y: ns.y + ns.height });
+            const p4 = inRect({ x: ns.x, y: ns.y + ns.height });
+            
+            if (p1 && p2 && p3 && p4) { ns.x += dx; ns.y += dy; }
+            else {
+                // If only some corners are inside, we must convert to pline to "stretch" correctly
+                const poly: PolyShape = { ...ns, type: 'pline', points: [{ x: ns.x, y: ns.y }, { x: ns.x + ns.width, y: ns.y }, { x: ns.x + ns.width, y: ns.y + ns.height }, { x: ns.x, y: ns.y + ns.height }], closed: true };
+                return stretchShape(poly, xMin, yMin, xMax, yMax, dx, dy);
+            }
+            break;
+        }
+        case 'pline': case 'polygon': case 'spline': case 'dline':
+            ns.points = ns.points.map(p => inRect(p) ? { x: p.x + dx, y: p.y + dy } : p);
+            break;
+        case 'dimension':
+            if (inRect({ x: ns.x1, y: ns.y1 })) { ns.x1 += dx; ns.y1 += dy; }
+            if (inRect({ x: ns.x2, y: ns.y2 })) { ns.x2 += dx; ns.y2 += dy; }
+            if (inRect({ x: ns.dimX, y: ns.dimY })) { ns.dimX += dx; ns.dimY += dy; }
+            break;
+    }
+    return ns as Shape;
 };
 
 const SNAP_PRIORITY: Record<string, number> = {
@@ -687,51 +904,64 @@ export const getShapesInRect = (p1: Point, p2: Point, shapes: Shape[], crossing:
         {p1:{x:xMin, y:yMax}, p2:{x:xMin, y:yMin}}
     ];
 
-    return shapes.filter(s => {
-        let isFullyInside = false;
-        let intersects = false;
+    const isInside = (p: Point) => isPointInRect(p, xMin, yMin, xMax, yMax);
 
+    return shapes.filter(s => {
+        const bounds = getShapeBounds(s);
+        
+        // Quick rejection
+        if (!isRectIntersecting({xMin, yMin, xMax, yMax}, bounds)) return false;
+
+        // Container Check
+        const allInside = () => {
+            switch (s.type) {
+                case 'line': return isInside({x:s.x1, y:s.y1}) && isInside({x:s.x2, y:s.y2});
+                case 'circle': return bounds.xMin >= xMin && bounds.xMax <= xMax && bounds.yMin >= yMin && bounds.yMax <= yMax;
+                case 'rect': return isInside({x:s.x, y:s.y}) && isInside({x:s.x+s.width, y:s.y+s.height});
+                case 'arc': {
+                    const pStart = { x: s.x + s.radius * Math.cos(s.startAngle), y: s.y + s.radius * Math.sin(s.startAngle) };
+                    const pEnd = { x: s.x + s.radius * Math.cos(s.endAngle), y: s.y + s.radius * Math.sin(s.endAngle) };
+                    return isInside(pStart) && isInside(pEnd) && bounds.xMin >= xMin && bounds.xMax <= xMax && bounds.yMin >= yMin && bounds.yMax <= yMax;
+                }
+                case 'pline': case 'polygon': case 'spline': case 'dline':
+                    return s.points.every(isInside);
+                case 'ellipse': case 'text': case 'mtext': case 'point':
+                    return isInside({x:s.x, y:s.y}) && bounds.xMin >= xMin && bounds.xMax <= xMax && bounds.yMin >= yMin && bounds.yMax <= yMax;
+                default: return false;
+            }
+        };
+
+        if (allInside()) return true;
+        if (!crossing) return false;
+
+        // Crossing Check: Any point inside OR any intersection
         switch (s.type) {
-            case 'line': {
-                const in1 = isPointInRect({x: s.x1, y: s.y1}, xMin, yMin, xMax, yMax);
-                const in2 = isPointInRect({x: s.x2, y: s.y2}, xMin, yMin, xMax, yMax);
-                isFullyInside = in1 && in2;
-                intersects = in1 || in2 || rectSegs.some(rs => getIntersection({x: s.x1, y: s.y1}, {x: s.x2, y: s.y2}, rs.p1, rs.p2) !== null);
-                break;
-            }
-            case 'rect': {
-                const corners = [{x:s.x, y:s.y}, {x:s.x+s.width, y:s.y}, {x:s.x+s.width, y:s.y+s.height}, {x:s.x, y:s.y+s.height}];
-                isFullyInside = corners.every(p => isPointInRect(p, xMin, yMin, xMax, yMax));
-                intersects = corners.some(p => isPointInRect(p, xMin, yMin, xMax, yMax)) || 
-                             isPointInRect({x: xMin, y: yMin}, s.x, s.y, s.x+s.width, s.y+s.height) ||
-                             rectSegs.some(rs => getIntersection(corners[0], corners[1], rs.p1, rs.p2) || getIntersection(corners[1], corners[2], rs.p1, rs.p2) || getIntersection(corners[2], corners[3], rs.p1, rs.p2) || getIntersection(corners[3], corners[0], rs.p1, rs.p2));
-                break;
-            }
+            case 'line':
+                return isInside({x:s.x1, y:s.y1}) || isInside({x:s.x2, y:s.y2}) || rectSegs.some(rs => getIntersection({x:s.x1, y:s.y1}, {x:s.x2, y:s.y2}, rs.p1, rs.p2) !== null);
             case 'circle': {
-                const bMinX = s.x - s.radius, bMaxX = s.x + s.radius;
-                const bMinY = s.y - s.radius, bMaxY = s.y + s.radius;
-                isFullyInside = bMinX >= xMin && bMaxX <= xMax && bMinY >= yMin && bMaxY <= yMax;
                 const closestX = Math.max(xMin, Math.min(s.x, xMax));
                 const closestY = Math.max(yMin, Math.min(s.y, yMax));
-                const dist = Math.sqrt(Math.pow(s.x - closestX, 2) + Math.pow(s.y - closestY, 2));
-                intersects = dist <= s.radius;
-                break;
+                const d2 = Math.pow(s.x - closestX, 2) + Math.pow(s.y - closestY, 2);
+                return d2 <= s.radius * s.radius;
             }
-            case 'pline': case 'polygon': {
-                isFullyInside = s.points.every(p => isPointInRect(p, xMin, yMin, xMax, yMax));
-                intersects = isFullyInside || s.points.some(p => isPointInRect(p, xMin, yMin, xMax, yMax));
-                if (!intersects) {
-                    const segments = getShapeSegments(s);
-                    intersects = segments.some(seg => rectSegs.some(rs => getIntersection(seg.p1, seg.p2, rs.p1, rs.p2) !== null));
-                }
-                break;
+            case 'rect': {
+                return isRectIntersecting({xMin, yMin, xMax, yMax}, {xMin: s.x, yMin: s.y, xMax: s.x + s.width, yMax: s.y + s.height});
             }
-            default: {
-                isFullyInside = isPointInRect({x: (s as any).x || 0, y: (s as any).y || 0}, xMin, yMin, xMax, yMax);
-                intersects = isFullyInside;
-                break;
+            case 'arc':
+            case 'ellipse':
+            case 'pline':
+            case 'polygon':
+            case 'spline':
+            case 'dline':
+            case 'text':
+            case 'mtext': {
+                const segs = getShapeSegments(s);
+                return segs.some(seg => isInside(seg.p1) || isInside(seg.p2) || rectSegs.some(rs => getIntersection(seg.p1, seg.p2, rs.p1, rs.p2) !== null));
             }
+            case 'point':
+                return isInside({x:s.x, y:s.y});
         }
-        return crossing ? intersects : isFullyInside;
+
+        return false;
     });
 };

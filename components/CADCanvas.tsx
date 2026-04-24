@@ -24,6 +24,8 @@ interface CADCanvasProps {
   activeCommandName?: string;
   isAiThinking?: boolean;
   lastAiCommandTime?: number;
+  onAction?: (action: string, payload?: any) => void;
+  onCommand?: (cmd: string) => void;
 }
 
 export interface CADCanvasHandle {
@@ -34,7 +36,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     layers, layerConfig, view, setView, settings, isCommandActive, activeTab, 
     isViewportActive = false, onViewportToggle,
     onMouseMove, onClick, selectedIds = [], highlightIds = [], onSelectionChange, previewShapes,
-    activePrompt, basePoint = null, activeCommandName, isAiThinking, lastAiCommandTime
+    activePrompt, basePoint = null, activeCommandName, isAiThinking, lastAiCommandTime, onAction, onCommand
 }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
@@ -47,16 +49,20 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   }));
 
   const [isPanning, setIsPanning] = useState(false);
-  const [selectionRect, setSelectionRect] = useState<{ start: Point, end: Point } | null>(null);
+  const [selectionRect, setSelectionRect] = useState<{ start: Point, end: Point, crossing: boolean } | null>(null);
+  const [highlightedIds, setHighlightedIds] = useState<string[]>([]);
   const pointerStartPos = useRef<Point>({ x: 0, y: 0 });
   const lastPos = useRef<Point>({ x: 0, y: 0 });
   const worldCursorRef = useRef<Point>({ x: 0, y: 0 });
   const activeSnapRef = useRef<SnapPoint | null>(null);
   const activePointers = useRef<Map<number, Point>>(new Map());
   const initialPinchDist = useRef<number | null>(null);
-  const initialPinchViewState = useRef<ViewState | null>(null);
-  const initialPinchWorldMid = useRef<Point | null>(null);
+  const initialPanMid = useRef<Point | null>(null);
+  const initialViewOnPinch = useRef<ViewState | null>(null);
+  const worldPointOnPinch = useRef<Point | null>(null);
   const lastClickTime = useRef<number>(0);
+  const touchStartTime = useRef<number>(0);
+  const touchStartCount = useRef<number>(0);
 
   const getPixelRatio = () => window.devicePixelRatio || 1;
   
@@ -131,6 +137,9 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         return conf ? conf.visible : true;
       });
       const s = findBestSnap(wp, allRenderable, settings.snapOptions, ts, basePoint);
+      if (s && !activeSnapRef.current && navigator.vibrate) {
+          navigator.vibrate(5); // Tiny buzz on new snap
+      }
       activeSnapRef.current = s;
     } else {
       activeSnapRef.current = null;
@@ -272,11 +281,11 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     if (selectionRect) {
       ctx.save();
       const s1 = selectionRect.start, s2 = selectionRect.end;
-      const isCrossing = s1.x > s2.x; 
+      const isCrossing = selectionRect.crossing; 
       if (isCrossing) {
-        ctx.fillStyle = 'rgba(0, 188, 212, 0.12)'; ctx.strokeStyle = 'rgba(0, 188, 212, 0.6)'; ctx.setLineDash([5, 5]);
+        ctx.fillStyle = 'rgba(0, 255, 127, 0.15)'; ctx.strokeStyle = 'rgba(0, 255, 127, 0.8)'; ctx.setLineDash([5, 3]);
       } else {
-        ctx.fillStyle = 'rgba(59, 130, 246, 0.12)'; ctx.strokeStyle = 'rgba(59, 130, 246, 0.6)'; ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.15)'; ctx.strokeStyle = 'rgba(59, 130, 246, 0.8)'; ctx.setLineDash([]);
       }
       ctx.lineWidth = 1.0;
       ctx.fillRect(s1.x, s1.y, s2.x - s1.x, s2.y - s1.y);
@@ -306,7 +315,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         ctx.fillStyle = '#00bcd4'; ctx.fillText(text, screenPos.x + 25, screenPos.y - 13);
     }
     ctx.restore();
-  }, [view, layers, previewShapes, selectedIds, highlightIds, settings, layerConfig, activeTab, isViewportActive, isCommandActive, selectionRect]);
+  }, [view, layers, previewShapes, selectedIds, highlightIds, highlightedIds, settings, layerConfig, activeTab, isViewportActive, isCommandActive, selectionRect]);
 
   const drawGrips = (ctx: CanvasRenderingContext2D, s: Shape, ts: number) => {
     const size = 6 / ts;
@@ -323,7 +332,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   };
 
   const drawShape = (ctx: CanvasRenderingContext2D, s: Shape, ts: number) => {
-    const isS = selectedIds.includes(s.id), isH = highlightIds.includes(s.id);
+    const isS = selectedIds.includes(s.id), isH = highlightIds.includes(s.id) || highlightedIds.includes(s.id);
     const conf = layerConfig[s.layer]; 
     if (!s.isPreview && conf && (!conf.visible || conf.frozen)) return;
     
@@ -425,13 +434,24 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       const canvas = canvasRef.current; if (!canvas) return;
       const rect = canvas.getBoundingClientRect(), x = e.clientX-rect.left, y = e.clientY-rect.top;
       activePointers.current.set(e.pointerId, {x, y}); pointerStartPos.current = { x, y };
-      if (activePointers.current.size === 2) {
-          setIsPanning(false); const pts = Array.from(activePointers.current.values()) as Point[];
+      
+      const count = activePointers.current.size;
+      if (count === 1) {
+          touchStartTime.current = Date.now();
+          touchStartCount.current = 1;
+      } else if (count === 2) {
+          touchStartCount.current = 2;
+      }
+
+      if (count === 2) {
+          setIsPanning(false); 
+          const pts = Array.from(activePointers.current.values()) as Point[];
           initialPinchDist.current = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
-          initialPinchViewState.current = { ...view };
+          initialViewOnPinch.current = { ...view };
+          
           const midX = (pts[0].x + pts[1].x) / 2, midY = (pts[0].y + pts[1].y) / 2;
-          const r = getPixelRatio(), w = canvas.width/r, h = canvas.height/r;
-          initialPinchWorldMid.current = calculateScreenToWorld(midX, midY, view, w, h);
+          initialPanMid.current = { x: midX, y: midY };
+          worldPointOnPinch.current = screenToWorld(midX, midY);
       }
       const now = Date.now();
       if (now - lastClickTime.current < 300) { if (activeTab === 'layout' && onViewportToggle) onViewportToggle(); return; }
@@ -441,7 +461,6 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         if (!isCommandActive || activeCommandName === 'PAN' || e.button === 1 || e.button === 2) {
             setIsPanning(true);
         } else if (activeCommandName === 'SPLINE' || activeCommandName === 'SKETCH') {
-            // Force start freehand drawing immediately
             const wp = screenToWorld(x, y);
             if (onClick) onClick(wp.x, wp.y, !!activeSnapRef.current);
         }
@@ -453,11 +472,22 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       const canvas = canvasRef.current; if (!canvas) return;
       const rect = canvas.getBoundingClientRect(), x = e.clientX-rect.left, y = e.clientY-rect.top;
       activePointers.current.set(e.pointerId, {x, y});
+      
       if (activePointers.current.size === 1) {
           if (isPanning) {
               const dx = x - lastPos.current.x, dy = y - lastPos.current.y;
-              if (Math.hypot(x - pointerStartPos.current.x, y - pointerStartPos.current.y) > 4) {
-                 if (!isCommandActive && e.buttons === 1) setSelectionRect({ start: pointerStartPos.current, end: {x, y} });
+              if (Math.hypot(x - pointerStartPos.current.x, y - pointerStartPos.current.y) > 2) {
+                 const isSelCmd = ['SELECT', 'ERASE', 'MOVE', 'COPYCLIP', 'CUTCLIP', 'STRETCH'].includes(activeCommandName || '');
+                 if (((!isCommandActive && activeCommandName !== 'PAN') || isSelCmd) && e.buttons === 1) {
+                    const crossing = pointerStartPos.current.x > x;
+                    setSelectionRect({ start: pointerStartPos.current, end: {x, y}, crossing });
+                    
+                    const w1 = screenToWorld(pointerStartPos.current.x, pointerStartPos.current.y);
+                    const w2 = screenToWorld(x, y);
+                    const selectableShapes = getAllShapesForSelection();
+                    const hits = getShapesInRect(w1, w2, selectableShapes, crossing);
+                    setHighlightedIds(hits.map(s => s.id));
+                 }
                  else setView(v => ({ ...v, originX: v.originX + dx, originY: v.originY + dy }));
               }
           }
@@ -465,11 +495,20 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       } else if (activePointers.current.size === 2) {
           const pts = Array.from(activePointers.current.values()) as Point[];
           const curDist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
-          if (initialPinchDist.current && initialPinchViewState.current && initialPinchWorldMid.current) {
-              const factor = curDist / initialPinchDist.current, newScale = Math.max(0.000001, initialPinchViewState.current.scale * factor);
-              const midX = (pts[0].x + pts[1].x) / 2, midY = (pts[0].y + pts[1].y) / 2, r = getPixelRatio(), w = canvas.width/r, h = canvas.height/r;
+          const midX = (pts[0].x + pts[1].x) / 2, midY = (pts[0].y + pts[1].y) / 2;
+          
+          if (initialPinchDist.current && initialViewOnPinch.current && worldPointOnPinch.current && initialPanMid.current) {
+              const r = getPixelRatio(), w = canvas.width/r, h = canvas.height/r;
+              
+              // Scale
+              const factor = curDist / initialPinchDist.current;
+              const newScale = Math.max(0.000001, initialViewOnPinch.current.scale * factor);
               const ts = newScale * settings.drawingScale;
-              const newOriginX = midX - w/2 - initialPinchWorldMid.current.x * ts, newOriginY = midY - h/2 + initialPinchWorldMid.current.y * ts;
+              
+              // Origin based on mid point movement (Panning while pinching)
+              const newOriginX = midX - w/2 - worldPointOnPinch.current.x * ts;
+              const newOriginY = midY - h/2 + worldPointOnPinch.current.y * ts;
+              
               setView({ scale: newScale, originX: newOriginX, originY: newOriginY });
           }
       }
@@ -480,17 +519,30 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       const canvas = canvasRef.current; if (!canvas) return;
       const rect = canvas.getBoundingClientRect(), x = e.clientX-rect.left, y = e.clientY-rect.top;
       
+      if (e.button === 2) {
+          // Right-click: Send Enter to command engine
+          if (isCommandActive && onAction) {
+              onAction('enter');
+          } else {
+              // If no command active, repeat last command
+              if (onCommand) onCommand('');
+          }
+          activePointers.current.delete(e.pointerId);
+          setIsPanning(false);
+          return;
+      }
+
       if ((activeCommandName === 'SPLINE' || activeCommandName === 'SKETCH') && !selectionRect) {
           // Finish sketching on PointerUp
           const wp = screenToWorld(x, y);
           if (onClick) onClick(wp.x, wp.y, !!activeSnapRef.current);
       } else if (selectionRect) {
           const w1 = screenToWorld(selectionRect.start.x, selectionRect.start.y), w2 = screenToWorld(selectionRect.end.x, selectionRect.end.y);
-          const crossing = selectionRect.start.x > selectionRect.end.x; 
           const selectableShapes = getAllShapesForSelection();
-          const hits = getShapesInRect(w1, w2, selectableShapes, crossing);
-          if (onSelectionChange) onSelectionChange(hits.map(s => s.id), false);
+          const hits = getShapesInRect(w1, w2, selectableShapes, selectionRect.crossing);
+          if (onSelectionChange) onSelectionChange(hits.map(s => s.id), e.shiftKey);
           setSelectionRect(null);
+          setHighlightedIds([]);
       } else {
           const dx = Math.abs(x - pointerStartPos.current.x), dy = Math.abs(y - pointerStartPos.current.y);
           if (dx < 10 && dy < 10 && activePointers.current.size === 1) {
@@ -504,8 +556,19 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               }
           }
       }
+      const countBefore = activePointers.current.size;
       activePointers.current.delete(e.pointerId);
-      if (activePointers.current.size === 0) { setIsPanning(false); initialPinchDist.current = null; }
+      const countAfter = activePointers.current.size;
+
+      // Gesture: Two-finger tap for Undo
+      if (touchStartCount.current === 2 && countAfter === 0) {
+          const duration = Date.now() - touchStartTime.current;
+          if (duration < 300 && onAction) {
+              onAction('undo');
+          }
+      }
+
+      if (countAfter === 0) { setIsPanning(false); initialPinchDist.current = null; }
       redraw();
   };
 

@@ -18,6 +18,8 @@ interface CommandBarProps {
 const COMMAND_LIST = [
     { cmd: 'LINE', alias: 'L' }, { cmd: 'PLINE', alias: 'PL' }, { cmd: 'CIRCLE', alias: 'C' },
     { cmd: 'RECT', alias: 'REC' }, { cmd: 'ARC', alias: 'A' }, { cmd: 'MOVE', alias: 'M' },
+    { cmd: 'ROTATE', alias: 'RO' }, { cmd: 'SCALE', alias: 'SC' }, { cmd: 'MIRROR', alias: 'MI' },
+    { cmd: 'COPY', alias: 'CO' }, { cmd: 'EXTEND', alias: 'EX' }, { cmd: 'EXPLODE', alias: 'X' },
     { cmd: 'TRIM', alias: 'TR' }, { cmd: 'OFFSET', alias: 'O' }, { cmd: 'ERASE', alias: 'E' },
     { cmd: 'MTEXT', alias: 'MT' }
 ];
@@ -46,8 +48,9 @@ const CommandBar: React.FC<CommandBarProps> = ({
     e?.preventDefault();
     const trimmed = value.trim();
     
-    // If command is active, allow empty string to pass through (it acts as Enter to finish)
-    if (!trimmed && !attachment && !(activeTab === 'cli' && isCommandActive)) return;
+    // If command is active OR empty input (for repeat last command), allow empty string
+    const canSubmit = trimmed || attachment || (activeTab === 'cli');
+    if (!canSubmit) return;
     
     if (activeTab === 'cli') {
         onCommand(trimmed);
@@ -55,6 +58,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
         setHistIdx(-1);
         setShowSuggestions(false);
     } else {
+        if (!trimmed && !attachment) return; // AI needs input
         onAiQuery(trimmed, attachment);
         setAttachment(null);
         onChange('');
@@ -79,6 +83,10 @@ const CommandBar: React.FC<CommandBarProps> = ({
         } else {
             onChange('');
         }
+    } else if (e.key === ' ' && !value.trim()) {
+        // CAD specific: Spacebar acts as Enter when input is empty
+        e.preventDefault();
+        handleSubmit();
     }
   };
 
@@ -242,30 +250,30 @@ const CommandBar: React.FC<CommandBarProps> = ({
         </div>
       )}
 
-      <div className="bg-black px-3 py-2 flex items-center justify-between shrink-0 h-12">
+      <div className="bg-black px-3 py-2 flex items-center justify-between shrink-0 h-10 sm:h-12">
           <div className="flex gap-2">
             <button 
               onClick={() => toggleTab('cli')}
-              className={`flex items-center gap-2 transition-all px-5 py-2 rounded-xl no-tap border ${activeTab === 'cli' ? 'bg-[#00bcd4] border-[#00bcd4] text-black shadow-[0_0_15px_rgba(0,188,212,0.4)]' : 'bg-[#0d0d0f] border-white/5 text-white'}`}
+              className={`flex items-center gap-1.5 sm:gap-2 transition-all px-3 sm:px-5 py-1.5 sm:py-2 rounded-xl no-tap border ${activeTab === 'cli' ? 'bg-[#00bcd4] border-[#00bcd4] text-black shadow-[0_0_15px_rgba(0,188,212,0.4)]' : 'bg-[#0d0d0f] border-white/5 text-white'}`}
             >
-              <Terminal size={14} strokeWidth={3} />
-              <span className="text-[10px] font-black uppercase tracking-widest">CLI</span>
+              <Terminal size={12} className="sm:size-[14px]" strokeWidth={3} />
+              <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-widest whitespace-nowrap">CLI</span>
             </button>
             
             <button 
               onClick={() => toggleTab('ai')}
-              className={`flex items-center gap-2 transition-all px-5 py-2 rounded-xl no-tap border ${activeTab === 'ai' ? 'bg-[#1a1a1c] border-[#6366f1]/40 text-[#6366f1] shadow-[0_0_15px_rgba(99,102,241,0.2)]' : 'bg-[#0d0d0f] border-white/5 text-white'}`}
+              className={`flex items-center gap-1.5 sm:gap-2 transition-all px-3 sm:px-5 py-1.5 sm:py-2 rounded-xl no-tap border ${activeTab === 'ai' ? 'bg-[#1a1a1c] border-[#6366f1]/40 text-[#6366f1] shadow-[0_0_15px_rgba(99,102,241,0.2)]' : 'bg-[#0d0d0f] border-white/5 text-white'}`}
             >
-              <Bot size={14} />
-              <span className="text-[10px] font-black uppercase tracking-widest">ARCHITECT AI</span>
+              <Bot size={12} className="sm:size-[14px]" />
+              <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-widest whitespace-nowrap">ARCHITECT AI</span>
             </button>
           </div>
 
           <button 
-            onClick={() => setHistoryHeight(isHistoryOpen ? 0 : 120)} 
-            className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all no-tap ${isHistoryOpen ? 'text-cyan-400 bg-cyan-400/10' : 'text-neutral-800 hover:text-neutral-600 bg-white/5'}`}
+            onClick={() => setHistoryHeight(isHistoryOpen ? 0 : 100)} 
+            className={`w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-xl transition-all no-tap ${isHistoryOpen ? 'text-cyan-400 bg-cyan-400/10' : 'text-neutral-800 hover:text-neutral-600 bg-white/5'}`}
           >
-            {isHistoryOpen ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+            {isHistoryOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
           </button>
       </div>
 

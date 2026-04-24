@@ -1,6 +1,6 @@
 
 import { Shape, Point, AppSettings, LayerConfig, LineShape, CircleShape, RectShape, ArcShape, PolyShape, TextShape, MTextShape, EllipseShape, DimensionShape, AngularDimensionShape, PointShape, InfiniteLineShape, DonutShape, LeaderShape, ViewState, DoubleLineShape, DLineJustification, TextJustification, LineType } from '../types';
-import { generateId, getCircleFrom3Points, formatLength, parseLength, hitTestShape, distance, getTrimmedShapes, moveShape, resolvePointInput, calculateArea, offsetShape, getPolygonPoints } from './cadService';
+import { generateId, getCircleFrom3Points, formatLength, parseLength, hitTestShape, distance, getTrimmedShapes, moveShape, resolvePointInput, calculateArea, offsetShape, getPolygonPoints, stretchShape, getShapesInRect, rotateShape, scaleShape, mirrorShape, getExtendedShapes } from './cadService';
 
 export interface CommandContext {
     getSettings: () => AppSettings;
@@ -8,7 +8,7 @@ export interface CommandContext {
     getLayerConfig: () => Record<string, LayerConfig>;
     getSelectedIds: () => string[]; 
     setLayers: (cb: (prev: Record<string, Shape[]>) => Record<string, Shape[]>) => void;
-    setSelectedIds: (ids: string[]) => void;
+    setSelectedIds: (ids: string[] | ((prev: string[]) => string[])) => void;
     setPreview: (shapes: Shape[] | null) => void; 
     setMessage: (msg: string | null) => void;
     addLog: (msg: string) => void; 
@@ -928,9 +928,32 @@ export class RectCommand implements CADCommand {
 export class MoveCommand implements CADCommand {
     name = "MOVE"; base: Point | null = null;
     constructor(public ctx: CommandContext) {}
-    onStart() { this.ctx.setMessage("MOVE Select items and pick base point:"); }
+    onStart() { 
+        if (this.ctx.getSelectedIds().length > 0) {
+            this.ctx.setMessage("MOVE Specify base point:"); 
+        } else {
+            this.ctx.setMessage("MOVE Select items or pick base point:"); 
+        }
+    }
     onClick(p: Point, snapped: boolean) {
-        if (!this.base) { this.base = p; this.ctx.setMessage("MOVE Specify second point:"); }
+        if (!this.base && this.ctx.getSelectedIds().length > 0) {
+            this.base = p; 
+            this.ctx.setMessage("MOVE Specify second point:");
+            return;
+        }
+        if (!this.base) {
+            // If nothing selected, maybe clicking hits something?
+            const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
+            const all = Object.values(this.ctx.getLayers()).flat();
+            const hit = all.find(s => hitTestShape(p.x, p.y, s, 15/ts));
+            if (hit) {
+                this.ctx.setSelectedIds(prev => prev.includes(hit.id) ? prev : [...prev, hit.id]);
+                this.ctx.setMessage("MOVE Items selected. Specify base point:");
+            } else {
+                this.base = p; 
+                this.ctx.setMessage("MOVE Specify second point:");
+            }
+        }
         else {
             const finalP = applyOrthoConstraint(p, this.base, this.ctx.getSettings().ortho, snapped);
             const dx = finalP.x - this.base.x, dy = finalP.y - this.base.y;
@@ -973,7 +996,19 @@ export class EraseCommand implements CADCommand {
         if (text.toLowerCase() === 'all') { this.ctx.setLayers(() => ({ '0': [] })); this.ctx.onFinish(); return true; }
         return false;
     }
-    onClick() {} onMove() {} onEnter() { this.ctx.onFinish(); } onCancel() { this.ctx.onFinish(); }
+    onClick(p: Point) {
+        const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
+        const all = Object.values(this.ctx.getLayers()).flat();
+        const hit = all.find(s => hitTestShape(p.x, p.y, s, 15/ts));
+        if (hit) {
+            this.ctx.setLayers(prev => {
+                const n = { ...prev };
+                Object.keys(n).forEach(l => n[l] = n[l].filter(s => s.id !== hit.id));
+                return n;
+            });
+        }
+    }
+    onMove() {} onEnter() { this.ctx.onFinish(); } onCancel() { this.ctx.onFinish(); }
 }
 
 export class ZoomCommand implements CADCommand {
@@ -1145,11 +1180,16 @@ export class OffsetCommand implements CADCommand {
             if (off) {
                 const style = getStyleSettings(this.ctx);
                 this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), off]}));
+                this.ctx.addLog(`OFFSET_CREATED: ${this.target.type}`);
             }
-            this.ctx.onFinish();
+            // Reset target but keep distance for next object
+            this.target = null;
+            this.ctx.setMessage("OFFSET Select object to offset:");
         }
     }
-    onMove() {} onEnter() {} onCancel() {}
+    onMove() {} 
+    onEnter() { this.ctx.onFinish(); } 
+    onCancel() { this.ctx.onFinish(); }
 }
 
 export class TrimCommand implements CADCommand {
@@ -1230,6 +1270,24 @@ export class LeaderCommand implements CADCommand {
     onEnter() {} onCancel() {}
 }
 
+export class SelectCommand implements CADCommand {
+    name = "SELECT"; constructor(public ctx: CommandContext) {}
+    onStart() { 
+        this.ctx.setMessage("SELECT objects:"); 
+    }
+    onClick(p: Point) {
+        const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
+        const all = Object.values(this.ctx.getLayers()).flat();
+        const hit = all.find(s => hitTestShape(p.x, p.y, s, 15/ts));
+        if (hit) {
+            this.ctx.setSelectedIds(prev => prev.includes(hit.id) ? prev : [...prev, hit.id]);
+        }
+    }
+    onMove() {}
+    onEnter() { this.ctx.onFinish(); }
+    onCancel() { this.ctx.onFinish(); }
+}
+
 export class SelectAllCommand implements CADCommand {
     name = "SELECT ALL"; constructor(public ctx: CommandContext) {}
     onStart() {
@@ -1242,31 +1300,103 @@ export class SelectAllCommand implements CADCommand {
 }
 
 export class CopyClipCommand implements CADCommand {
-    name = "COPYCLIP"; constructor(public ctx: CommandContext) {}
+    name = "COPYCLIP"; 
+    selecting = true;
+    constructor(public ctx: CommandContext) {}
     onStart() {
-        const all = Object.values(this.ctx.getLayers()).flat();
-        clipboardBuffer = JSON.parse(JSON.stringify(all.filter(s => this.ctx.getSelectedIds().includes(s.id))));
-        this.ctx.setMessage("COPYCLIP Specify base point:");
+        if (this.ctx.getSelectedIds().length > 0) {
+            this.selecting = false;
+            this.ctx.setMessage("COPYCLIP Specify base point:");
+        } else {
+            this.selecting = true;
+            this.ctx.setMessage("COPYCLIP Select objects:");
+        }
     }
-    onClick(p: Point) { clipboardBasePoint = p; this.ctx.onFinish(); }
-    onMove() {} onEnter() {} onCancel() {}
+    onClick(p: Point) { 
+        if (this.selecting) {
+            const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
+            const all = Object.values(this.ctx.getLayers()).flat();
+            const hit = all.find(s => hitTestShape(p.x, p.y, s, 15/ts));
+            if (hit) {
+                this.ctx.setSelectedIds(prev => prev.includes(hit.id) ? prev : [...prev, hit.id]);
+                this.ctx.setMessage(`COPYCLIP ${this.ctx.getSelectedIds().length} objects selected. <Enter> to continue:`);
+            }
+        } else {
+            const ids = this.ctx.getSelectedIds();
+            const all = Object.values(this.ctx.getLayers()).flat();
+            clipboardBuffer = JSON.parse(JSON.stringify(all.filter(s => ids.includes(s.id))));
+            clipboardBasePoint = p; 
+            this.ctx.onFinish(); 
+        }
+    }
+    onMove() {} 
+    onEnter() {
+        if (this.selecting) {
+            if (this.ctx.getSelectedIds().length > 0) {
+                this.selecting = false;
+                this.ctx.setMessage("COPYCLIP Specify base point:");
+            } else {
+                this.ctx.onFinish();
+            }
+        } else {
+            this.ctx.onFinish();
+        }
+    }
+    onCancel() { this.ctx.onFinish(); }
 }
 
 export class CutClipCommand implements CADCommand {
-    name = "CUTCLIP"; constructor(public ctx: CommandContext) {}
+    name = "CUTCLIP"; 
+    selecting = true;
+    constructor(public ctx: CommandContext) {}
     onStart() {
-        const ids = this.ctx.getSelectedIds();
-        const all = Object.values(this.ctx.getLayers()).flat();
-        clipboardBuffer = JSON.parse(JSON.stringify(all.filter(s => ids.includes(s.id))));
-        this.ctx.setLayers(prev => {
-            const next = { ...prev };
-            Object.keys(next).forEach(l => next[l] = next[l].filter(s => !ids.includes(s.id)));
-            return next;
-        });
-        this.ctx.setMessage("CUTCLIP Specify base point:");
+        if (this.ctx.getSelectedIds().length > 0) {
+            this.selecting = false;
+            this.ctx.setMessage("CUTCLIP Specify base point:");
+        } else {
+            this.selecting = true;
+            this.ctx.setMessage("CUTCLIP Select objects:");
+        }
     }
-    onClick(p: Point) { clipboardBasePoint = p; this.ctx.onFinish(); }
-    onMove() {} onEnter() {} onCancel() {}
+    onClick(p: Point) { 
+        if (this.selecting) {
+            const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
+            const all = Object.values(this.ctx.getLayers()).flat();
+            const hit = all.find(s => hitTestShape(p.x, p.y, s, 15/ts));
+            if (hit) {
+                this.ctx.setSelectedIds(prev => prev.includes(hit.id) ? prev : [...prev, hit.id]);
+                this.ctx.setMessage(`CUTCLIP ${this.ctx.getSelectedIds().length} objects selected. <Enter> to continue:`);
+            }
+        } else {
+            const ids = this.ctx.getSelectedIds();
+            const all = Object.values(this.ctx.getLayers()).flat();
+            clipboardBuffer = JSON.parse(JSON.stringify(all.filter(s => ids.includes(s.id))));
+            
+            // Remove from layers
+            this.ctx.setLayers(prev => {
+                const next = { ...prev };
+                Object.keys(next).forEach(l => next[l] = next[l].filter(s => !ids.includes(s.id)));
+                return next;
+            });
+            
+            clipboardBasePoint = p; 
+            this.ctx.onFinish(); 
+        }
+    }
+    onMove() {} 
+    onEnter() {
+        if (this.selecting) {
+            if (this.ctx.getSelectedIds().length > 0) {
+                this.selecting = false;
+                this.ctx.setMessage("CUTCLIP Specify base point:");
+            } else {
+                this.ctx.onFinish();
+            }
+        } else {
+            this.ctx.onFinish();
+        }
+    }
+    onCancel() { this.ctx.onFinish(); }
 }
 
 export class PasteClipCommand implements CADCommand {
@@ -1286,8 +1416,352 @@ export class PasteClipCommand implements CADCommand {
     onEnter() {} onCancel() {}
 }
 
+export class StretchCommand implements CADCommand {
+    name = "STRETCH"; 
+    public p1: Point | null = null; 
+    public p2: Point | null = null;
+    public base: Point | null = null;
+    public selectedShapes: Shape[] = [];
+
+    constructor(public ctx: CommandContext) {}
+
+    onStart() { 
+        this.ctx.setMessage("STRETCH Select objects to stretch (Crossing Window):"); 
+    }
+
+    onClick(p: Point, snapped: boolean) {
+        if (!this.p1) {
+            this.p1 = p;
+            this.ctx.setMessage("STRETCH Specify opposite corner:");
+        } else if (!this.p2) {
+            this.p2 = p;
+            const xMin = Math.min(this.p1.x, this.p2.x), xMax = Math.max(this.p1.x, this.p2.x);
+            const yMin = Math.min(this.p1.y, this.p2.y), yMax = Math.max(this.p1.y, this.p2.y);
+            const all = Object.values(this.ctx.getLayers()).flat();
+            // Use getShapesInRect but specifically for crossing (true)
+            this.selectedShapes = getShapesInRect(this.p1, this.p2, all, true);
+            this.ctx.setMessage("STRETCH Specify base point:");
+        } else if (!this.base) {
+            this.base = p;
+            this.ctx.setMessage("STRETCH Specify second point:");
+        } else {
+            const finalP = applyOrthoConstraint(p, this.base, this.ctx.getSettings().ortho, snapped);
+            const dx = finalP.x - this.base.x, dy = finalP.y - this.base.y;
+            const xMin = Math.min(this.p1.x, this.p2.x), xMax = Math.max(this.p1.x, this.p2.x);
+            const yMin = Math.min(this.p1.y, this.p2.y), yMax = Math.max(this.p1.y, this.p2.y);
+            
+            this.ctx.setLayers(prev => {
+                const next = { ...prev };
+                const ids = this.selectedShapes.map(s => s.id);
+                Object.keys(next).forEach(l => {
+                    next[l] = next[l].map(s => ids.includes(s.id) ? stretchShape(s, xMin, yMin, xMax, yMax, dx, dy) : s);
+                });
+                return next;
+            });
+            this.ctx.onFinish();
+        }
+    }
+
+    onMove(p: Point, snapped: boolean) {
+        if (this.p1 && !this.p2) {
+            // Visualize crossing selection window (Green dashed)
+            const x = Math.min(this.p1.x, p.x), y = Math.min(this.p1.y, p.y);
+            const w = Math.abs(p.x - this.p1.x), h = Math.abs(p.y - this.p1.y);
+            this.ctx.setPreview([{
+                id:'p', type:'rect', isPreview:true, 
+                layer: 'defpoints', color: 'rgba(0, 255, 127, 0.8)', 
+                filled: true,
+                x, y, width: w, height: h
+            } as any]);
+        } else if (this.base && this.p1 && this.p2) {
+            const finalP = applyOrthoConstraint(p, this.base, this.ctx.getSettings().ortho, snapped);
+            const dx = finalP.x - this.base.x, dy = finalP.y - this.base.y;
+            const xMin = Math.min(this.p1.x, this.p2.x), xMax = Math.max(this.p1.x, this.p2.x);
+            const yMin = Math.min(this.p1.y, this.p2.y), yMax = Math.max(this.p1.y, this.p2.y);
+            
+            this.ctx.setPreview(this.selectedShapes.map(s => ({
+                ...stretchShape(s, xMin, yMin, xMax, yMax, dx, dy),
+                isPreview: true
+            } as any)));
+        }
+    }
+
+    onEnter() { this.ctx.onFinish(); }
+    onCancel() { this.ctx.onFinish(); }
+}
+
 export class HatchCommand implements CADCommand {
     name = "HATCH"; constructor(public ctx: CommandContext) {}
     onStart() { this.ctx.setMessage("HATCH [Internal point]:"); }
     onClick() { this.ctx.onFinish(); } onMove() {} onEnter() {} onCancel() {}
+}
+
+export class RotateCommand implements CADCommand {
+    name = "ROTATE"; base: Point | null = null; selecting = true;
+    constructor(public ctx: CommandContext) {}
+    onStart() { 
+        if (this.ctx.getSelectedIds().length > 0) { this.selecting = false; this.ctx.setMessage("ROTATE Specify base point:"); }
+        else { this.selecting = true; this.ctx.setMessage("ROTATE Select objects:"); }
+    }
+    onClick(p: Point) {
+        if (this.selecting) {
+            const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
+            const all = Object.values(this.ctx.getLayers()).flat();
+            const hit = all.find(s => hitTestShape(p.x, p.y, s, 15/ts));
+            if (hit) {
+                this.ctx.setSelectedIds(prev => prev.includes(hit.id) ? prev : [...prev, hit.id]);
+                this.ctx.setMessage(`ROTATE ${this.ctx.getSelectedIds().length} selected. <Enter> to continue:`);
+            }
+        } else if (!this.base) {
+            this.base = p; this.ctx.setMessage("ROTATE Specify rotation angle:");
+        } else {
+            const dx = p.x - this.base.x, dy = p.y - this.base.y;
+            this.applyRotate(Math.atan2(dy, dx));
+        }
+    }
+    onMove(p: Point) {
+        if (this.base) {
+            const dx = p.x - this.base.x, dy = p.y - this.base.y;
+            const angle = Math.atan2(dy, dx);
+            const ids = this.ctx.getSelectedIds();
+            const all = Object.values(this.ctx.getLayers()).flat().filter(s => ids.includes(s.id));
+            this.ctx.setPreview(all.map(s => ({...rotateShape(s, this.base!, angle), isPreview: true} as any)));
+        }
+    }
+    applyRotate(angle: number) {
+        const ids = this.ctx.getSelectedIds();
+        this.ctx.setLayers(prev => {
+            const next = { ...prev };
+            Object.keys(next).forEach(l => {
+                next[l] = next[l].map(s => ids.includes(s.id) ? rotateShape(s, this.base!, angle) : s);
+            });
+            return next;
+        });
+        this.ctx.onFinish();
+    }
+    onEnter() { if (this.selecting) { this.selecting = false; this.ctx.setMessage("ROTATE Specify base point:"); } }
+    onCancel() { this.ctx.onFinish(); }
+}
+
+export class ScaleCommand implements CADCommand {
+    name = "SCALE"; base: Point | null = null; selecting = true;
+    constructor(public ctx: CommandContext) {}
+    onStart() { 
+        if (this.ctx.getSelectedIds().length > 0) { this.selecting = false; this.ctx.setMessage("SCALE Specify base point:"); }
+        else { this.selecting = true; this.ctx.setMessage("SCALE Select objects:"); }
+    }
+    onClick(p: Point) {
+        if (this.selecting) {
+            const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
+            const all = Object.values(this.ctx.getLayers()).flat();
+            const hit = all.find(s => hitTestShape(p.x, p.y, s, 15/ts));
+            if (hit) {
+                this.ctx.setSelectedIds(prev => prev.includes(hit.id) ? prev : [...prev, hit.id]);
+                this.ctx.setMessage(`SCALE ${this.ctx.getSelectedIds().length} selected. <Enter> to continue:`);
+            }
+        } else if (!this.base) {
+            this.base = p; this.ctx.setMessage("SCALE Specify scale factor:");
+        } else {
+            const d1 = 100, d2 = distance(this.base, p);
+            this.applyScale(d2 / d1);
+        }
+    }
+    onMove(p: Point) {
+        if (this.base) {
+            const d1 = 100, d2 = distance(this.base, p);
+            const factor = d2 / d1;
+            const ids = this.ctx.getSelectedIds();
+            const all = Object.values(this.ctx.getLayers()).flat().filter(s => ids.includes(s.id));
+            this.ctx.setPreview(all.map(s => ({...scaleShape(s, this.base!, factor), isPreview: true} as any)));
+        }
+    }
+    applyScale(factor: number) {
+        const ids = this.ctx.getSelectedIds();
+        this.ctx.setLayers(prev => {
+            const next = { ...prev };
+            Object.keys(next).forEach(l => {
+                next[l] = next[l].map(s => ids.includes(s.id) ? scaleShape(s, this.base!, factor) : s);
+            });
+            return next;
+        });
+        this.ctx.onFinish();
+    }
+    onEnter() { if (this.selecting) { this.selecting = false; this.ctx.setMessage("SCALE Specify base point:"); } }
+    onCancel() { this.ctx.onFinish(); }
+}
+
+export class MirrorCommand implements CADCommand {
+    name = "MIRROR"; p1: Point | null = null; selecting = true;
+    constructor(public ctx: CommandContext) {}
+    onStart() { 
+        if (this.ctx.getSelectedIds().length > 0) { this.selecting = false; this.ctx.setMessage("MIRROR Specify first point of mirror line:"); }
+        else { this.selecting = true; this.ctx.setMessage("MIRROR Select objects:"); }
+    }
+    onClick(p: Point) {
+        if (this.selecting) {
+            const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
+            const all = Object.values(this.ctx.getLayers()).flat();
+            const hit = all.find(s => hitTestShape(p.x, p.y, s, 15/ts));
+            if (hit) {
+                this.ctx.setSelectedIds(prev => prev.includes(hit.id) ? prev : [...prev, hit.id]);
+                this.ctx.setMessage(`MIRROR ${this.ctx.getSelectedIds().length} selected. <Enter> to continue:`);
+            }
+        } else if (!this.p1) {
+            this.p1 = p; this.ctx.setMessage("MIRROR Specify second point of mirror line:");
+        } else {
+            const ids = this.ctx.getSelectedIds();
+            this.ctx.setLayers(prev => {
+                const next = { ...prev };
+                Object.keys(next).forEach(l => {
+                    next[l] = next[l].map(s => ids.includes(s.id) ? mirrorShape(s, this.p1!, p) : s);
+                });
+                return next;
+            });
+            this.ctx.onFinish();
+        }
+    }
+    onMove(p: Point) {
+        if (this.p1) {
+            const ids = this.ctx.getSelectedIds();
+            const all = Object.values(this.ctx.getLayers()).flat().filter(s => ids.includes(s.id));
+            this.ctx.setPreview(all.map(s => ({...mirrorShape(s, this.p1!, p), isPreview: true} as any)));
+        }
+    }
+    onEnter() { if (this.selecting) { this.selecting = false; this.ctx.setMessage("MIRROR Specify first point of mirror line:"); } }
+    onCancel() { this.ctx.onFinish(); }
+}
+
+export class CopyCommand implements CADCommand {
+    name = "COPY"; base: Point | null = null; selecting = true;
+    constructor(public ctx: CommandContext) {}
+    onStart() { 
+        if (this.ctx.getSelectedIds().length > 0) { this.selecting = false; this.ctx.setMessage("COPY Specify base point:"); }
+        else { this.selecting = true; this.ctx.setMessage("COPY Select objects:"); }
+    }
+    onClick(p: Point) {
+        if (this.selecting) {
+            const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
+            const all = Object.values(this.ctx.getLayers()).flat();
+            const hit = all.find(s => hitTestShape(p.x, p.y, s, 15/ts));
+            if (hit) {
+                this.ctx.setSelectedIds(prev => prev.includes(hit.id) ? prev : [...prev, hit.id]);
+                this.ctx.setMessage(`COPY ${this.ctx.getSelectedIds().length} selected. <Enter> to continue:`);
+            }
+        } else if (!this.base) {
+            this.base = p; this.ctx.setMessage("COPY Specify second point:");
+        } else {
+            const dx = p.x - this.base.x, dy = p.y - this.base.y;
+            const ids = this.ctx.getSelectedIds();
+            const all = Object.values(this.ctx.getLayers()).flat().filter(s => ids.includes(s.id));
+            const style = getStyleSettings(this.ctx);
+            const newShapes = all.map(s => ({...moveShape(s, dx, dy), id: generateId(), layer: style.layer}));
+            this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), ...newShapes]}));
+            // Continue copying like standard CAD
+            this.ctx.setMessage("COPY Specify next point or <Enter> to finish:");
+        }
+    }
+    onMove(p: Point) {
+        if (this.base) {
+            const dx = p.x - this.base.x, dy = p.y - this.base.y;
+            const ids = this.ctx.getSelectedIds();
+            const all = Object.values(this.ctx.getLayers()).flat().filter(s => ids.includes(s.id));
+            this.ctx.setPreview(all.map(s => ({...moveShape(s, dx, dy), isPreview: true} as any)));
+        }
+    }
+    onEnter() { if (this.selecting) { this.selecting = false; this.ctx.setMessage("COPY Specify base point:"); } else { this.ctx.onFinish(); } }
+    onCancel() { this.ctx.onFinish(); }
+}
+
+export class ExtendCommand implements CADCommand {
+    name = "EXTEND"; boundaries: Shape[] = []; selectingBoundaries = true;
+    constructor(public ctx: CommandContext) {}
+    onStart() { this.ctx.setSelectedIds([]); this.ctx.setMessage("EXTEND Select boundary edges or <Enter> to select all:"); }
+    onClick(p: Point) {
+        const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
+        const all = Object.values(this.ctx.getLayers()).flat();
+        const hit = all.find(s => hitTestShape(p.x, p.y, s, 15/ts));
+        if (this.selectingBoundaries) {
+            if (hit) {
+                if (!this.boundaries.find(b => b.id === hit.id)) {
+                    this.boundaries.push(hit);
+                    this.ctx.setSelectedIds(this.boundaries.map(b => b.id));
+                    this.ctx.setMessage(`EXTEND ${this.boundaries.length} selected. Select more or <Enter> to continue:`);
+                }
+            }
+        } else if (hit) {
+            const results = getExtendedShapes(this.boundaries, [hit], p);
+            if (results.length > 0) {
+                this.ctx.setLayers(prev => {
+                    const next = { ...prev };
+                    Object.keys(next).forEach(l => {
+                        const filtered = next[l].filter(s => s.id !== hit.id);
+                        const added = results.filter(rs => rs.layer === l || (!rs.layer && l === hit.layer));
+                        next[l] = [...filtered, ...added];
+                    });
+                    return next;
+                });
+                this.ctx.setMessage("EXTEND Select object to extend:");
+            }
+        }
+    }
+    onMove() {}
+    onEnter() {
+        if (this.selectingBoundaries) {
+            if (this.boundaries.length === 0) {
+                this.boundaries = Object.values(this.ctx.getLayers()).flat();
+            }
+            this.selectingBoundaries = false;
+            this.ctx.setSelectedIds([]);
+            this.ctx.setMessage("EXTEND Select object to extend:");
+        } else {
+            this.ctx.onFinish();
+        }
+    }
+    onCancel() { this.ctx.onFinish(); }
+}
+
+export class ExplodeCommand implements CADCommand {
+    name = "EXPLODE"; selecting = true;
+    constructor(public ctx: CommandContext) {}
+    onStart() { 
+        if (this.ctx.getSelectedIds().length > 0) { this.applyExplode(); }
+        else { this.ctx.setMessage("EXPLODE Select objects:"); }
+    }
+    onClick(p: Point) {
+        const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
+        const all = Object.values(this.ctx.getLayers()).flat();
+        const hit = all.find(s => hitTestShape(p.x, p.y, s, 15/ts));
+        if (hit) {
+            this.ctx.setSelectedIds(prev => prev.includes(hit.id) ? prev : [...prev, hit.id]);
+            this.applyExplode();
+        }
+    }
+    applyExplode() {
+        const ids = this.ctx.getSelectedIds();
+        this.ctx.setLayers(prev => {
+            const next = { ...prev };
+            Object.keys(next).forEach(l => {
+                const layerShapes = next[l];
+                const exploded: Shape[] = [];
+                const filtered = layerShapes.filter(s => {
+                    if (ids.includes(s.id)) {
+                        if (s.type === 'pline' || s.type === 'polygon' || s.type === 'rect') {
+                            const pts = s.type === 'rect' ? [{x:s.x, y:s.y}, {x:s.x+s.width, y:s.y}, {x:s.x+s.width, y:s.y+s.height}, {x:s.x, y:s.y+s.height}] : s.points;
+                            const closed = (s as any).closed || s.type === 'polygon' || s.type === 'rect';
+                            for (let i=0; i<(closed ? pts.length : pts.length-1); i++) {
+                                const p1 = pts[i], p2 = pts[(i+1)%pts.length];
+                                exploded.push({ id: generateId(), type: 'line', layer: s.layer, color: s.color, x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y } as any);
+                            }
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+                next[l] = [...filtered, ...exploded];
+            });
+            return next;
+        });
+        this.ctx.onFinish();
+    }
+    onMove() {} onEnter() {} onCancel() {}
 }

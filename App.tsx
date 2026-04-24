@@ -23,8 +23,10 @@ import {
   CADCommand, CommandEngine, LineCommand, DoubleLineCommand, CircleCommand, RectCommand, PolyCommand, 
   ArcCommand, MoveCommand, EraseCommand, DistanceCommand, AreaCommand, 
   DimensionCommand, TextCommand, MTextCommand, ZoomCommand, 
+  RotateCommand, ScaleCommand, MirrorCommand, CopyCommand,
+  ExtendCommand, ExplodeCommand,
   HatchCommand, LeaderCommand, PanCommand, OffsetCommand, TrimCommand, EllipseCommand, PolygonCommand,
-  SelectAllCommand, CopyClipCommand, CutClipCommand, PasteClipCommand, SplineCommand, SketchCommand
+  SelectAllCommand, CopyClipCommand, CutClipCommand, PasteClipCommand, SplineCommand, SketchCommand, StretchCommand, SelectCommand
 } from './services/commandEngine';
 import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType } from './types';
 import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit } from 'lucide-react';
@@ -99,6 +101,7 @@ const App: React.FC = () => {
   }, []);
   const [isCommandActive, setIsCommandActive] = useState(false);
   const [activeCommandName, setActiveCommandName] = useState<string | undefined>(undefined);
+  const [lastCommandName, setLastCommandName] = useState<string | null>(null);
   const [showCircleOptions, setShowCircleOptions] = useState(false);
   const [showArcOptions, setShowArcOptions] = useState(false);
   const [showEllipseOptions, setShowEllipseOptions] = useState(false);
@@ -234,6 +237,7 @@ const App: React.FC = () => {
   }, []);
 
   const handleOpenFile = async (fileName: string, content: string | ArrayBuffer) => {
+    if (navigator.vibrate) navigator.vibrate(20);
     const isDxf = fileName.toLowerCase().endsWith('.dxf');
     const isDwg = fileName.toLowerCase().endsWith('.dwg');
     const isVox = fileName.toLowerCase().endsWith('.vox');
@@ -346,6 +350,7 @@ const App: React.FC = () => {
 
   const undo = useCallback(() => {
     if (history.length === 0) return;
+    if (navigator.vibrate) navigator.vibrate(10);
     const previous = history[history.length - 1];
     setRedoStack(prev => [...prev, JSON.parse(JSON.stringify(layers))]);
     setLayers(previous);
@@ -591,17 +596,35 @@ const App: React.FC = () => {
         }
         break;
       }
-      case 'share':
+      case 'share': {
         setLogMessage("GENERATING_SHARE_PKG...");
-        if (navigator.share) {
+        const isDxfExport = payload === 'dxf';
+        const finalExt = isDxfExport ? '.dxf' : '.vox';
+        const content = isDxfExport ? shapesToDXF(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current) : shapesToVox(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current);
+        const fileName = (currentFileName.replace(/\.[^/.]+$/, "") + finalExt).replace(/[^a-zA-Z0-9.\-_]/g, '_');
+        const blob = new Blob([content], { type: isDxfExport ? 'application/dxf' : 'application/vnd.voxcadd.project' });
+        
+        if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([blob], fileName, { type: blob.type })] })) {
             try {
-                await navigator.share({ title: 'VoxCADD Pro Design', text: `Sharing ${currentFileName}`, url: window.location.href });
+                await navigator.share({
+                    files: [new File([blob], fileName, { type: blob.type })],
+                    title: 'VoxCADD Project',
+                    text: `Sharing project: ${currentFileName}`
+                });
                 setLogMessage("SHARE_SENT");
+            } catch (e) {
+                setLogMessage("SHARE_CANCELLED");
+            }
+        } else if (navigator.share) {
+             try {
+                await navigator.share({ title: 'VoxCADD Pro Design', text: `Sharing ${currentFileName}`, url: window.location.href });
+                setLogMessage("SHARE_LINK_SENT");
             } catch (e) {}
         } else {
             setLogMessage("ERR: SHARING_BLOCKED");
         }
         break;
+      }
       case 'openFileManager': setActivePanel('file'); break;
     }
   };
@@ -648,6 +671,16 @@ const App: React.FC = () => {
 
   const executeCommand = useCallback((cmdStr: string) => {
     const trimmed = cmdStr.trim();
+    
+    if (trimmed && navigator.vibrate) navigator.vibrate(10);
+    
+    // Repeat last command on Enter/Space if no active command
+    if (trimmed === "" && lastCommandName && !engineRef.current?.active) {
+      setLogMessage(`REPEATING: ${lastCommandName.toUpperCase()}`);
+      executeCommand(lastCommandName);
+      return;
+    }
+
     if (trimmed) {
       setCommandHistory(prev => [...prev.slice(-50), "> " + trimmed.toUpperCase()]);
     }
@@ -711,13 +744,19 @@ const App: React.FC = () => {
       'z': ZoomCommand, 'zoom': ZoomCommand, 'tr': TrimCommand, 'trim': TrimCommand,
       'h': HatchCommand, 'hatch': HatchCommand, 'lea': LeaderCommand, 'leader': LeaderCommand,
       'p': PanCommand, 'pan': PanCommand, 'o': OffsetCommand, 'offset': OffsetCommand,
+      's': StretchCommand, 'stretch': StretchCommand,
       'el': EllipseCommand, 'ellipse': EllipseCommand, 'pol': PolygonCommand, 'polygon': PolygonCommand,
       'sk': SketchCommand, 'sketch': SketchCommand,
-      'all': SelectAllCommand, 'cut': CutClipCommand, 'copy': CopyClipCommand, 'paste': PasteClipCommand
+      'sel': SelectCommand, 'select': SelectCommand,
+      'all': SelectAllCommand, 'cut': CutClipCommand, 'copyclip': CopyClipCommand, 'paste': PasteClipCommand,
+      'ro': RotateCommand, 'rotate': RotateCommand, 'sc': ScaleCommand, 'scale': ScaleCommand,
+      'mi': MirrorCommand, 'mirror': MirrorCommand, 'co': CopyCommand, 'copy': CopyCommand,
+      'ex': ExtendCommand, 'extend': ExtendCommand, 'x': ExplodeCommand, 'explode': ExplodeCommand,
     };
     
     const CommandClass = commandMap[cmdKey];
     if (CommandClass) {
+      setLastCommandName(cmdKey);
       // Toggle options for specific commands
       if (cmdKey === 'c' || cmdKey === 'circle') {
           if (activeCommandName === 'CIRCLE') {
@@ -875,13 +914,13 @@ const App: React.FC = () => {
         <div className="flex items-center gap-3">
           <div className="flex bg-[#121214] rounded-md p-0.5 border border-white/5 items-center h-7">
             <button 
-                onClick={() => setActiveTab('model')} 
+                onClick={() => { setActiveTab('model'); if(navigator.vibrate) navigator.vibrate(5); }} 
                 className={`h-6 px-3.5 rounded-[4px] font-black uppercase transition-all flex items-center justify-center text-[9px] ${activeTab === 'model' ? 'bg-cyan-500 text-black' : 'text-neutral-500 hover:text-neutral-400'}`}
             >
                 Model
             </button>
             <button 
-                onClick={() => setActiveTab('layout')} 
+                onClick={() => { setActiveTab('layout'); if(navigator.vibrate) navigator.vibrate(5); }} 
                 className={`h-6 px-3.5 rounded-[4px] font-black uppercase transition-all flex items-center justify-center text-[9px] ${activeTab === 'layout' ? 'bg-cyan-500 text-black' : 'text-neutral-500 hover:text-neutral-400'}`}
             >
                 Layout
@@ -907,6 +946,7 @@ const App: React.FC = () => {
                 key={item} 
                 id={`tab-${item.toLowerCase()}`}
                 onClick={() => { 
+                  if (navigator.vibrate) navigator.vibrate(5);
                   if (item === 'FILE') handleAction('openFileManager'); 
                   else if (item === 'EDIT') setActiveCategory('Edit'); 
                   else if (item === 'VIEW') setActiveCategory('View'); 
@@ -943,7 +983,25 @@ const App: React.FC = () => {
           onClick={onCanvasClick} 
           onMouseMove={(x,y,s) => { if(engineRef.current) engineRef.current.move({x,y}, s); }} 
           selectedIds={selectedIds} 
-          onSelectionChange={(ids) => setSelectedIds(ids)} 
+          onSelectionChange={(ids, additive) => {
+            if (additive) {
+              setSelectedIds(prev => {
+                const combined = [...prev];
+                ids.forEach(id => {
+                  if (combined.includes(id)) {
+                    const idx = combined.indexOf(id);
+                    combined.splice(idx, 1);
+                  } else {
+                    combined.push(id);
+                  }
+                });
+                return combined;
+              });
+            } else {
+              setSelectedIds(ids);
+            }
+          }} 
+          onCommand={executeCommand}
           previewShapes={previewShapes} 
           activeCommandName={activeCommandName} 
           isAiThinking={isAiThinking}
@@ -960,7 +1018,7 @@ const App: React.FC = () => {
 
         <div className="absolute right-3 top-3 flex flex-col gap-2 z-10">
           {sidebarButtons.map(p => (
-            <button key={p.id} onClick={() => handleAction(p.action)} className={`w-9 h-9 rounded-full flex items-center justify-center transition-all border no-tap ${activePanel === p.activeOn ? 'bg-[#00bcd4] text-black border-[#00bcd4]' : 'bg-black/60 backdrop-blur-sm border-white/10 text-neutral-400 hover:text-white'}`}><p.icon size={16} /></button>
+            <button key={p.id} onClick={() => { if(navigator.vibrate) navigator.vibrate(5); handleAction(p.action); }} className={`w-9 h-9 rounded-full flex items-center justify-center transition-all border no-tap ${activePanel === p.activeOn ? 'bg-[#00bcd4] text-black border-[#00bcd4]' : 'bg-black/60 backdrop-blur-sm border-white/10 text-neutral-400 hover:text-white'}`}><p.icon size={16} /></button>
           ))}
         </div>
 

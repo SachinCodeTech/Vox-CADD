@@ -20,14 +20,14 @@ interface MenuBarProps {
 const MenuButton = ({ icon: Icon, label, color, onClick, desc }: { icon: any, label: string, color: string, onClick: () => void, desc?: string }) => (
   <button 
     onClick={onClick}
-    className="flex items-center gap-4 p-4 bg-[#181818] hover:bg-[#222] border border-white/5 rounded-2xl transition-all active:scale-[0.98] text-left w-full"
+    className="flex items-center gap-3 sm:gap-4 p-3 sm:p-4 bg-[#181818] hover:bg-[#222] border border-white/5 rounded-2xl transition-all active:scale-[0.98] text-left w-full"
   >
-    <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${color} bg-opacity-10 text-opacity-100 shadow-inner`}>
-      <Icon size={20} className={color.replace('bg-', 'text-')} />
+    <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center ${color} bg-opacity-10 text-opacity-100 shadow-inner shrink-0`}>
+      <Icon size={18} className={color.replace('bg-', 'text-')} />
     </div>
-    <div className="flex-1">
-      <div className="text-xs font-black text-neutral-100 uppercase tracking-tight">{label}</div>
-      {desc && <div className="text-[9px] text-neutral-500 font-medium uppercase tracking-tighter">{desc}</div>}
+    <div className="flex-1 overflow-hidden">
+      <div className="text-[11px] sm:text-xs font-black text-neutral-100 uppercase tracking-tight truncate">{label}</div>
+      {desc && <div className="text-[8px] sm:text-[9px] text-neutral-500 font-medium uppercase tracking-tighter truncate">{desc}</div>}
     </div>
   </button>
 );
