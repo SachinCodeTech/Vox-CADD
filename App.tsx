@@ -27,10 +27,12 @@ import {
   ExtendCommand, ExplodeCommand,
   RayCommand, XLineCommand,
   HatchCommand, LeaderCommand, PanCommand, OffsetCommand, TrimCommand, FilletCommand, EllipseCommand, PolygonCommand,
-  SelectAllCommand, CopyClipCommand, CutClipCommand, PasteClipCommand, SplineCommand, SketchCommand, StretchCommand, SelectCommand
+  DonutCommand, PointCommand,
+  SelectAllCommand, CopyClipCommand, CutClipCommand, PasteClipCommand, SplineCommand, SketchCommand, StretchCommand, SelectCommand,
+  ArrayCommand, BlockCommand, InsertCommand, FilterCommand, FindCommand, ViewportCommand, LayoutCommand
 } from './services/commandEngine';
-import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType } from './types';
-import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit } from 'lucide-react';
+import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType, BlockDefinition, LayoutDefinition } from './types';
+import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save } from 'lucide-react';
 
 import VoxIcon from './components/VoxIcon';
 
@@ -67,7 +69,7 @@ const INITIAL_LAYERS_CONFIG: Record<string, LayerConfig> = {
   'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' }
 };
 
-export type ToolbarCategory = 'Draw' | 'Modify' | 'Anno' | 'View' | 'Assist' | 'History' | 'Edit';
+export type ToolbarCategory = 'Draw' | 'Modify' | 'Anno' | 'View' | 'Tools' | 'History' | 'Edit';
 type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 'file' | 'mainmenu' | 'drawing_props' | 'help' | 'about' | 'privacy' | 'new_file';
 
 const STORAGE_PREFIX = 'voxcadd_file_v1_';
@@ -75,16 +77,24 @@ const REGISTRY_KEY = 'voxcadd_recent_files';
 
 const App: React.FC = () => {
   const [layers, setLayers] = useState<Record<string, Shape[]>>({ '0': [], 'defpoints': [] });
+  const [blocks, setBlocks] = useState<Record<string, BlockDefinition>>({});
+  const [layouts, setLayouts] = useState<LayoutDefinition[]>([
+    { id: 'layout1', name: 'Layout 1', paperSize: { width: 297, height: 210 }, viewports: [] }
+  ]);
   const [layerConfig, setLayerConfig] = useState<Record<string, LayerConfig>>(INITIAL_LAYERS_CONFIG);
   const [settings, setSettings] = useState<AppSettings>(INITIAL_SETTINGS);
-  const [activeTab, setActiveTab] = useState<'model' | 'layout'>('model');
+  const [activeTab, setActiveTab] = useState<string>('model');
+  const [currentFileName, setCurrentFileName] = useState('Draught 1');
+  const [recentFiles, setRecentFiles] = useState<string[]>(['Draught 1']);
+  const [fileMenuOpen, setFileMenuOpen] = useState(false);
+  const [fileNameMenuOpen, setFileNameMenuOpen] = useState(false);
   const [activeCategory, setActiveCategory] = useState<ToolbarCategory>('Draw');
   const [isViewportActive, setIsViewportActive] = useState(false);
   const [history, setHistory] = useState<Record<string, Shape[]>[]>([]);
   const [redoStack, setRedoStack] = useState<Record<string, Shape[]>[]>([]);
-  const [tabViews, setTabViews] = useState<Record<'model' | 'layout', ViewState>>({
+  const [tabViews, setTabViews] = useState<Record<string, ViewState>>({
     model: { ...INITIAL_VIEW },
-    layout: { scale: 0.02, originX: 0, originY: 0 },
+    layout1: { scale: 3, originX: 0, originY: 0 },
   });
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -106,7 +116,6 @@ const App: React.FC = () => {
   const [showCircleOptions, setShowCircleOptions] = useState(false);
   const [showArcOptions, setShowArcOptions] = useState(false);
   const [showEllipseOptions, setShowEllipseOptions] = useState(false);
-  const [currentFileName, setCurrentFileName] = useState<string>("Drawing 1.vox");
   const [fileHandle, setFileHandle] = useState<any>(null);
   const [activePanel, setActivePanel] = useState<PanelType>('none');
   const [previewShapes, setPreviewShapes] = useState<Shape[] | null>(null);
@@ -114,9 +123,134 @@ const App: React.FC = () => {
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [lastAiCommandTime, setLastAiCommandTime] = useState(0);
   const [isAppLoading, setIsAppLoading] = useState(true);
-  const [recentFiles, setRecentFiles] = useState<{name: string, date: number}[]>([]);
+  const [layoutContextMenu, setLayoutContextMenu] = useState<{ x: number, y: number, layoutId: string } | null>(null);
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
 
-  const view = tabViews[activeTab];
+  const handleLayoutLongPress = (e: React.MouseEvent | React.TouchEvent, layoutId: string) => {
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    
+    longPressTimer.current = setTimeout(() => {
+      setLayoutContextMenu({ x: clientX, y: clientY, layoutId });
+      if(navigator.vibrate) navigator.vibrate(50);
+    }, 500);
+  };
+
+  const cancelLongPress = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  const renameLayout = (id: string) => {
+    const layout = layouts.find(l => l.id === id);
+    if (!layout) return;
+    const newName = prompt('Enter new layout name:', layout.name);
+    if (newName) {
+      setLayouts(prev => prev.map(l => l.id === id ? { ...l, name: newName } : l));
+    }
+    setLayoutContextMenu(null);
+  };
+
+  const duplicateLayout = (id: string) => {
+    const layout = layouts.find(l => l.id === id);
+    if (!layout) return;
+          const newId = 'layout' + Date.now();
+          const newLayout = { ...layout, id: newId, name: `${layout.name} (Copy)` };
+          setLayouts(prev => [...prev, newLayout]);
+          setTabViews(prev => ({ ...prev, [newId]: tabViews[id] || { scale: 3, originX: 0, originY: 0 } }));
+          setLayoutContextMenu(null);
+  };
+
+  const deleteLayout = (id: string) => {
+    if (layouts.length <= 1) return;
+    if (confirm(`Delete layout "${layouts.find(l => l.id === id)?.name}"?`)) {
+      setLayouts(prev => prev.filter(l => l.id !== id));
+      if (activeTab === id) setActiveTab('model');
+    }
+    setLayoutContextMenu(null);
+  };
+
+  const deleteAllLayouts = () => {
+    if (confirm('Delete all layouts? This will reset you to a single default layout.')) {
+      const defaultId = 'layout' + Date.now();
+      setLayouts([{ id: defaultId, name: 'Layout 1', paperSize: { width: 297, height: 210 }, viewports: [] }]);
+      setTabViews(prev => ({ ...prev, [defaultId]: { scale: 3, originX: 0, originY: 0 } }));
+      setActiveTab('model');
+    }
+    setLayoutContextMenu(null);
+  };
+
+  const updateLayoutProperties = (id: string) => {
+    const layout = layouts.find(l => l.id === id);
+    if (!layout) return;
+    const width = prompt('Paper Width (mm):', layout.paperSize.width.toString());
+    const height = prompt('Paper Height (mm):', layout.paperSize.height.toString());
+    if (width && height) {
+      setLayouts(prev => prev.map(l => l.id === id ? { ...l, paperSize: { width: parseFloat(width), height: parseFloat(height) } } : l));
+    }
+    setLayoutContextMenu(null);
+  };
+
+  const [draggedLayoutId, setDraggedLayoutId] = useState<string | null>(null);
+
+  const handleDragStart = (id: string) => {
+    setDraggedLayoutId(id);
+  };
+
+  const handleDragOverTab = (id: string) => {
+    if (!draggedLayoutId || draggedLayoutId === id) return;
+    const fromIndex = layouts.findIndex(l => l.id === draggedLayoutId);
+    const toIndex = layouts.findIndex(l => l.id === id);
+    if (fromIndex === -1 || toIndex === -1) return;
+
+    const newLayouts = [...layouts];
+    const [moved] = newLayouts.splice(fromIndex, 1);
+    newLayouts.splice(toIndex, 0, moved);
+    setLayouts(newLayouts);
+  };
+
+  const importLayout = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.vox';
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (re) => {
+        try {
+          const content = JSON.parse(re.target?.result as string);
+          if (content.type === 'layout') {
+            const newId = 'layout' + Date.now();
+            setLayouts(prev => [...prev, { ...content, id: newId }]);
+            setTabViews(prev => ({ ...prev, [newId]: { scale: 3, originX: 0, originY: 0 } }));
+            setActiveTab(newId);
+          }
+        } catch (err) {
+          alert('Invalid .vox layout file.');
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+    setLayoutContextMenu(null);
+  };
+
+  const moveLayout = (id: string, direction: 'left' | 'right') => {
+    const index = layouts.findIndex(l => l.id === id);
+    if (index === -1) return;
+    const newLayouts = [...layouts];
+    const targetIndex = direction === 'left' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= layouts.length) return;
+    
+    [newLayouts[index], newLayouts[targetIndex]] = [newLayouts[targetIndex], newLayouts[index]];
+    setLayouts(newLayouts);
+    setLayoutContextMenu(null);
+  };
+
+  const view = tabViews[activeTab] || { scale: 1, originX: 0, originY: 0 };
   const setView = useCallback((updater: ViewState | ((v: ViewState) => ViewState)) => {
     setTabViews(prev => ({
       ...prev,
@@ -143,6 +277,8 @@ const App: React.FC = () => {
 
   const tabViewsRef = useRef(tabViews);
   const activeTabRef = useRef(activeTab);
+  const blocksRef = useRef(blocks);
+  const layoutsRef = useRef(layouts);
 
   useEffect(() => { settingsRef.current = settings; }, [settings]);
   useEffect(() => { layersRef.current = layers; }, [layers]);
@@ -150,6 +286,8 @@ const App: React.FC = () => {
   useEffect(() => { selectedIdsRef.current = selectedIds; }, [selectedIds]);
   useEffect(() => { tabViewsRef.current = tabViews; }, [tabViews]);
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
+  useEffect(() => { blocksRef.current = blocks; }, [blocks]);
+  useEffect(() => { layoutsRef.current = layouts; }, [layouts]);
 
   // Restore session from LocalStorage
   useEffect(() => {
@@ -754,6 +892,7 @@ const App: React.FC = () => {
       's': StretchCommand, 'stretch': StretchCommand,
       'el': EllipseCommand, 'ellipse': EllipseCommand, 'pol': PolygonCommand, 'polygon': PolygonCommand,
       'sk': SketchCommand, 'sketch': SketchCommand,
+      'don': DonutCommand, 'donut': DonutCommand, 'po': PointCommand, 'point': PointCommand,
       'sel': SelectCommand, 'select': SelectCommand,
       'all': SelectAllCommand, 'cut': CutClipCommand, 'copyclip': CopyClipCommand, 'paste': PasteClipCommand,
       'ro': RotateCommand, 'rotate': RotateCommand, 'sc': ScaleCommand, 'scale': ScaleCommand,
@@ -761,12 +900,60 @@ const App: React.FC = () => {
       'ex': ExtendCommand, 'extend': ExtendCommand, 'x': ExplodeCommand, 'explode': ExplodeCommand,
       'f': FilletCommand, 'fillet': FilletCommand,
       'ray': RayCommand, 'xl': XLineCommand, 'xline': XLineCommand,
+      'ar': ArrayCommand, 'array': ArrayCommand,
+      'b': BlockCommand, 'block': BlockCommand,
+      'i': InsertCommand, 'insert': InsertCommand,
+      'fi': FilterCommand, 'filter': FilterCommand,
+      'find': FindCommand, 'vports': ViewportCommand, 'viewport': ViewportCommand, 'layout': LayoutCommand,
     };
     
     const CommandClass = commandMap[cmdKey];
-    if (CommandClass) {
-      setLastCommandName(cmdKey);
-      // Toggle options for specific commands
+      if (CommandClass) {
+        setLastCommandName(cmdKey);
+        
+        // Command UI State Normalization
+        const statusMap: Record<string, string> = {
+            'l': 'LINE', 'line': 'LINE',
+            'pl': 'POLYLINE', 'pline': 'POLYLINE',
+            'spl': 'SPLINE', 'spline': 'SPLINE',
+            'c': 'CIRCLE', 'circle': 'CIRCLE',
+            'rec': 'RECTANGLE', 'rect': 'RECTANGLE',
+            'pol': 'POLYGON', 'polygon': 'POLYGON',
+            'a': 'ARC', 'arc': 'ARC',
+            'el': 'ELLIPSE', 'ellipse': 'ELLIPSE',
+            'xl': 'XLINE', 'xline': 'XLINE',
+            'ray': 'RAY', 'xray': 'RAY',
+            'dl': 'DLINE', 'dline': 'DLINE',
+            'po': 'POINT', 'point': 'POINT',
+            'donut': 'DONUT', 'don': 'DONUT',
+            'm': 'MOVE', 'move': 'MOVE',
+            'ro': 'ROTATE', 'rotate': 'ROTATE',
+            'sc': 'SCALE', 'scale': 'SCALE',
+            'mi': 'MIRROR', 'mirror': 'MIRROR',
+            'co': 'COPY', 'copy': 'COPY',
+            's': 'STRETCH', 'stretch': 'STRETCH',
+            'tr': 'TRIM', 'trim': 'TRIM',
+            'ex': 'EXTEND', 'extend': 'EXTEND',
+            'x': 'EXPLODE', 'explode': 'EXPLODE',
+            'o': 'OFFSET', 'offset': 'OFFSET',
+            'f': 'FILLET', 'fillet': 'FILLET',
+            'e': 'ERASE', 'erase': 'ERASE',
+            'mt': 'MTEXT', 'mtext': 'MTEXT',
+            't': 'TEXT', 'text': 'TEXT',
+            'dim': 'DIM', 'dist': 'DIST', 'area': 'AREA',
+            'h': 'HATCH', 'lea': 'LEADER', 'p': 'PAN',
+            'sk': 'SKETCH', 'sketch': 'SKETCH',
+            'sel': 'SELECT', 'select': 'SELECT',
+            'ar': 'ARRAY', 'array': 'ARRAY',
+            'b': 'BLOCK', 'block': 'BLOCK',
+            'i': 'INSERT', 'insert': 'INSERT',
+            'fi': 'FILTER', 'filter': 'FILTER',
+            'find': 'FIND', 'vports': 'VIEWPORT', 'viewport': 'VIEWPORT', 'layout': 'LAYOUT'
+        };
+        setActiveCommandName(statusMap[cmdKey] || cmdKey.toUpperCase());
+        setIsCommandActive(true);
+
+        // Toggle options for specific commands
       if (cmdKey === 'c' || cmdKey === 'circle') {
           if (activeCommandName === 'CIRCLE') {
               setShowCircleOptions(!showCircleOptions);
@@ -846,8 +1033,17 @@ const App: React.FC = () => {
           commitToHistory(); 
         },
         lastMousePoint: { x: 0, y: 0 },
+        getBlocks: () => blocksRef.current,
+        setBlocks: (cb) => setBlocks(cb),
+        getLayouts: () => layoutsRef.current,
+        setLayouts: (v) => setLayouts(v),
+        getActiveTab: () => activeTabRef.current,
         start: (cmd: CADCommand) => { setActiveCommandName(cmd.name); engineRef.current?.start(cmd); },
         onExternalRequest: (type, data, cb) => {
+            if (type === 'set_active_tab') {
+                setActiveTab(data);
+                cb(true);
+            }
             if (type === 'mtext_editor') {
                 setMtextEditor({ initialValue: data || "", callback: cb });
             } else if (type === 'interpret_sketch') {
@@ -918,30 +1114,114 @@ const App: React.FC = () => {
       <header className="h-14 flex items-center justify-between px-4 shrink-0 bg-black border-b border-white/5 z-[110]">
         <div className="flex items-center gap-3">
           <VoxIcon size={32} className="shrink-0" />
-          <div className="flex flex-col justify-center translate-y-[1px]">
-            <div className="flex items-center leading-none">
-              <span className="font-black text-[16.5px] uppercase tracking-tighter text-white">VOX</span>
-              <span className="font-bold text-[16.5px] uppercase tracking-tighter text-cyan-500 ml-1.5">CADD</span>
+          <div className="flex flex-col h-[32px] justify-between pt-[1px]">
+            <div className="flex items-baseline gap-3 leading-none">
+              <div className="flex items-baseline">
+                <span className="font-black text-[14.5px] uppercase tracking-tighter text-white">VOX</span>
+                <span className="font-normal text-[14.5px] uppercase tracking-tighter text-cyan-500 ml-1.5">CADD</span>
+              </div>
+              <span className="text-neutral-700 font-bold text-[8px] uppercase tracking-[0.2em] leading-none">V-1.0.1</span>
             </div>
-            <span className="text-neutral-700 font-bold text-[7px] uppercase tracking-[0.35em] leading-none mt-1.5 ml-0.5">V-1.0.1</span>
+            
+            <div className="flex items-center gap-1.5 text-[8.5px] font-bold uppercase tracking-wide leading-none mb-0.5">
+              <div className="relative">
+                <button 
+                  onClick={() => setFileMenuOpen(!fileMenuOpen)}
+                  className="text-neutral-600 hover:text-neutral-400 transition-colors"
+                >
+                  File:
+                </button>
+                {fileMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-[200]" onClick={() => setFileMenuOpen(false)} />
+                    <div className="absolute top-full left-0 mt-2 bg-[#1a1a1e] border border-white/10 rounded-md shadow-2xl py-1 z-[201] min-w-[120px] overflow-hidden">
+                      <div className="px-3 py-1 border-b border-white/5 mb-1">
+                        <div className="text-[7px] font-black uppercase text-neutral-500">Recent Files</div>
+                      </div>
+                      {recentFiles.map(file => (
+                        <button 
+                          key={file}
+                          onClick={() => {
+                            setCurrentFileName(file);
+                            setFileMenuOpen(false);
+                          }}
+                          className={`w-full text-left px-3 py-1.5 hover:bg-cyan-500 hover:text-black transition-colors ${file === currentFileName ? 'text-cyan-400' : 'text-neutral-300'}`}
+                        >
+                          {file}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+              
+              <div className="relative">
+                <button 
+                  onClick={() => setFileNameMenuOpen(!fileNameMenuOpen)}
+                  className="text-neutral-400 hover:text-cyan-400 transition-colors"
+                >
+                  {currentFileName}
+                </button>
+                {fileNameMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-[200]" onClick={() => setFileNameMenuOpen(false)} />
+                    <div className="absolute top-full left-0 mt-2 bg-[#1a1a1e] border border-white/10 rounded-md shadow-2xl py-1 z-[201] min-w-[140px] overflow-hidden">
+                      <div className="px-3 py-1 border-b border-white/5 mb-1">
+                        <div className="text-[7px] font-black uppercase text-neutral-500">File Operations</div>
+                      </div>
+                      <div className="px-3 py-1.5 text-[8px] text-neutral-500 border-b border-white/5 truncate max-w-[130px]">
+                        Path: C:/Projects/{currentFileName}.vox
+                      </div>
+                      <button 
+                        onClick={() => {
+                          const newName = prompt('Rename Project:', currentFileName);
+                          if (newName) {
+                            const updatedRecent = recentFiles.map(f => f === currentFileName ? newName : f);
+                            setRecentFiles(updatedRecent);
+                            setCurrentFileName(newName);
+                          }
+                          setFileNameMenuOpen(false);
+                        }}
+                        className="w-full text-left px-3 py-2 text-neutral-300 hover:bg-cyan-500 hover:text-black transition-colors flex items-center gap-2"
+                      >
+                        <FileEdit size={10} /> Rename
+                      </button>
+                      <button 
+                        onClick={() => {
+                          const saveName = prompt('Save Project As:', currentFileName + ' (Copy)');
+                          if (saveName) {
+                            if (!recentFiles.includes(saveName)) {
+                              setRecentFiles([...recentFiles, saveName]);
+                            }
+                            setCurrentFileName(saveName);
+                          }
+                          setFileNameMenuOpen(false);
+                        }}
+                        className="w-full text-left px-3 py-2 text-neutral-300 hover:bg-cyan-500 hover:text-black transition-colors flex items-center gap-2"
+                      >
+                        <Save size={10} /> Save As
+                      </button>
+                      <div className="h-px bg-white/5 my-1" />
+                      <button 
+                         onClick={() => {
+                           if (confirm('Close project?')) {
+                             setCurrentFileName('Draught 1');
+                           }
+                           setFileNameMenuOpen(false);
+                         }}
+                        className="w-full text-left px-3 py-2 text-red-400 hover:bg-red-500 hover:text-white transition-colors flex items-center gap-2"
+                      >
+                        <X size={10} /> Close
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="flex bg-[#121214] rounded-md p-0.5 border border-white/5 items-center h-7">
-            <button 
-                onClick={() => { setActiveTab('model'); if(navigator.vibrate) navigator.vibrate(5); }} 
-                className={`h-6 px-3.5 rounded-[4px] font-black uppercase transition-all flex items-center justify-center text-[9px] ${activeTab === 'model' ? 'bg-cyan-500 text-black' : 'text-neutral-500 hover:text-neutral-400'}`}
-            >
-                Model
-            </button>
-            <button 
-                onClick={() => { setActiveTab('layout'); if(navigator.vibrate) navigator.vibrate(5); }} 
-                className={`h-6 px-3.5 rounded-[4px] font-black uppercase transition-all flex items-center justify-center text-[9px] ${activeTab === 'layout' ? 'bg-cyan-500 text-black' : 'text-neutral-500 hover:text-neutral-400'}`}
-            >
-                Layout
-            </button>
-          </div>
           <button onClick={() => handleAction('toggleMainMenu')} className="p-1 transition-all text-neutral-500 hover:text-white no-tap">
             <Menu size={24} />
           </button>
@@ -952,7 +1232,7 @@ const App: React.FC = () => {
           {['FILE', 'EDIT', 'VIEW', 'DRAW', 'MODIFY', 'ANNO', 'TOOLS'].map((item) => {
             const isSelected = 
               (item === 'FILE' && (activePanel === 'drawing_props' || activePanel === 'file')) ||
-              (item === 'TOOLS' && activeCategory === 'Assist') || 
+              (item === 'TOOLS' && activeCategory === 'Tools') || 
               (item === 'EDIT' && activeCategory === 'Edit') || 
               (item === 'ANNO' && activeCategory === 'Anno') || 
               activeCategory.toUpperCase() === item;
@@ -969,11 +1249,11 @@ const App: React.FC = () => {
                   else if (item === 'DRAW') setActiveCategory('Draw'); 
                   else if (item === 'MODIFY') setActiveCategory('Modify'); 
                   else if (item === 'ANNO') setActiveCategory('Anno'); 
-                  else if (item === 'TOOLS') setActiveCategory('Assist'); 
+                  else if (item === 'TOOLS') setActiveCategory('Tools'); 
                 }} 
                 className={`text-[9px] font-black tracking-widest transition-all no-tap whitespace-nowrap px-1 h-full flex items-center relative ${
                   isSelected 
-                    ? 'text-white' 
+                    ? 'text-cyan-400' 
                     : 'text-neutral-600 hover:text-neutral-300'
                 }`}
               >
@@ -984,10 +1264,13 @@ const App: React.FC = () => {
           })}
       </div>
 
+
       <main className="flex-1 relative bg-black overflow-hidden border border-neutral-800/40">
         <CADCanvas 
           ref={canvasHandleRef} 
           layers={layers} 
+          blocks={blocks}
+          layouts={layouts}
           layerConfig={layerConfig} 
           view={view} 
           setView={setView as any} 
@@ -1096,6 +1379,100 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      <div className="h-7 bg-[#0a0a0c] border-t border-white/5 flex items-center shrink-0 cursor-default select-none">
+        {/* Fixed Model & Add */}
+        <div className="flex items-center h-full shrink-0">
+          <button 
+            onClick={() => setActiveTab('model')} 
+            className={`h-full px-2 text-[9px] font-black uppercase transition-all flex items-center gap-1.5 whitespace-nowrap ${activeTab === 'model' ? 'text-[#00bcd4]' : 'text-neutral-500 hover:text-neutral-300'}`}
+          >
+            <Grid3X3 size={10} /> Model
+          </button>
+          <button 
+            onClick={() => {
+              const id = 'layout' + Date.now();
+              const newLayout = { id, name: 'Layout ' + (layouts.length + 1), paperSize: { width: 297, height: 210 }, viewports: [] };
+              setLayouts([...layouts, newLayout]);
+              setTabViews(prev => ({ ...prev, [id]: { scale: 3, originX: 0, originY: 0 } }));
+              setActiveTab(id);
+            }}
+            className="h-full px-1.5 text-neutral-500 hover:text-[#00bcd4] transition-all flex items-center border-x border-white/5"
+            title="New Layout"
+          >
+            <FilePlus size={11} />
+          </button>
+        </div>
+
+        {/* Scrollable Layout List */}
+        <div className="flex-1 flex items-center h-full overflow-x-auto scrollbar-none gap-px">
+          {layouts.map(l => (
+            <button 
+              key={l.id}
+              draggable
+              onDragStart={() => handleDragStart(l.id)}
+              onDragOver={(e) => { e.preventDefault(); handleDragOverTab(l.id); }}
+              onClick={() => setActiveTab(l.id)} 
+              onMouseDown={(e) => handleLayoutLongPress(e, l.id)}
+              onMouseUp={cancelLongPress}
+              onMouseLeave={cancelLongPress}
+              onTouchStart={(e) => handleLayoutLongPress(e, l.id)}
+              onTouchEnd={cancelLongPress}
+              className={`h-full px-1.5 text-[9px] font-black uppercase transition-all flex items-center gap-1 whitespace-nowrap group relative ${activeTab === l.id ? 'text-[#00bcd4] bg-white/5' : 'text-neutral-500 hover:text-neutral-300'}`}
+            >
+              <Layers2 size={9} /> {l.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {layoutContextMenu && (
+        <>
+          <div className="fixed inset-0 z-[1000]" onClick={() => setLayoutContextMenu(null)} />
+          <div 
+            className="fixed bg-[#1a1a1e] border border-white/10 rounded-xl shadow-2xl py-1.5 z-[1001] min-w-[150px] overflow-hidden"
+            style={{ 
+              left: Math.max(10, Math.min(layoutContextMenu.x - 75, window.innerWidth - 160)), 
+              top: Math.max(10, layoutContextMenu.y - 285) 
+            }}
+          >
+            <div className="px-3 py-1 border-b border-white/5 mb-1">
+              <div className="text-[8px] font-black uppercase text-neutral-500 tracking-widest">Layout Options</div>
+            </div>
+            
+            <button onClick={() => renameLayout(layoutContextMenu.layoutId)} className="w-full text-left px-3 py-1.5 text-[9px] text-neutral-300 hover:bg-cyan-500 hover:text-black transition-all font-black uppercase flex items-center gap-2.5">
+              <FileEdit size={12} className="opacity-70" /> Rename
+            </button>
+            <button onClick={() => updateLayoutProperties(layoutContextMenu.layoutId)} className="w-full text-left px-3 py-1.5 text-[9px] text-neutral-300 hover:bg-cyan-500 hover:text-black transition-all font-black uppercase flex items-center gap-2.5">
+              <Sliders size={12} className="opacity-70" /> Properties
+            </button>
+            <button onClick={() => duplicateLayout(layoutContextMenu.layoutId)} className="w-full text-left px-3 py-1.5 text-[9px] text-neutral-300 hover:bg-cyan-500 hover:text-black transition-all font-black uppercase flex items-center gap-2.5">
+              <Layers2 size={12} className="opacity-70" /> Duplicate
+            </button>
+            <button onClick={importLayout} className="w-full text-left px-3 py-1.5 text-[9px] text-neutral-300 hover:bg-cyan-500 hover:text-black transition-all font-black uppercase flex items-center gap-2.5">
+              <FilePlus size={12} className="opacity-70" /> Import
+            </button>
+
+            <div className="h-px bg-white/5 my-1" />
+            
+            <button onClick={() => moveLayout(layoutContextMenu.layoutId, 'left')} className="w-full text-left px-3 py-1 text-[9px] text-neutral-400 hover:bg-white/5 transition-all font-black uppercase flex items-center gap-2.5">
+              <Target size={12} className="-rotate-90 opacity-50" /> Move Left
+            </button>
+            <button onClick={() => moveLayout(layoutContextMenu.layoutId, 'right')} className="w-full text-left px-3 py-1 text-[9px] text-neutral-400 hover:bg-white/5 transition-all font-black uppercase flex items-center gap-2.5">
+              <Target size={12} className="rotate-90 opacity-50" /> Move Right
+            </button>
+
+            <div className="h-px bg-white/5 my-1" />
+            
+            <button onClick={() => deleteLayout(layoutContextMenu.layoutId)} className="w-full text-left px-3 py-1.5 text-[9px] text-red-500/80 hover:bg-red-500 hover:text-white transition-all font-black uppercase flex items-center gap-2.5">
+              <X size={12} /> Delete
+            </button>
+            <button onClick={deleteAllLayouts} className="w-full text-left px-3 py-1.5 text-[9px] text-red-500/80 hover:bg-red-500 hover:text-white transition-all font-black uppercase flex items-center gap-2.5">
+              <X size={12} strokeWidth={3} /> Delete All
+            </button>
+          </div>
+        </>
+      )}
 
       <footer className="bg-black shrink-0 pb-[env(safe-area-inset-bottom)]">
         <Toolbar 

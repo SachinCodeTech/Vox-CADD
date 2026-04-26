@@ -81,21 +81,25 @@ const DrawingProperties: React.FC<DrawingPropertiesProps> = ({ settings, onConfi
     </div>
   );
 
-  const InputField = ({ label, value, onChange, placeholder, icon: Icon }: { label: string, value: string, onChange: (v: string) => void, placeholder?: string, icon?: any }) => (
-    <div className="space-y-1.5">
-      <label className="text-[9px] font-bold text-neutral-600 uppercase pl-1">{label}</label>
-      <div className="relative group">
-        {Icon && <Icon size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 group-focus-within:text-cyan-500 transition-colors" />}
-        <input 
-          type="text" 
-          value={value} 
-          onChange={(e) => onChange(e.target.value)} 
-          placeholder={placeholder}
-          className={`w-full bg-black/40 border border-neutral-800 rounded-xl py-2.5 ${Icon ? 'pl-9' : 'px-3'} pr-3 text-[11px] text-neutral-200 outline-none focus:border-cyan-600 transition-all font-bold placeholder:text-neutral-800 select-text cursor-text`}
-        />
+  const InputField = ({ label, value, onChange, placeholder, icon: Icon }: { label: string, value: string, onChange: (v: string) => void, placeholder?: string, icon?: any }) => {
+    const id = React.useId();
+    return (
+      <div className="space-y-1.5">
+        <label htmlFor={id} className="text-[9px] font-bold text-neutral-600 uppercase pl-1 cursor-pointer hover:text-neutral-400 transition-colors">{label}</label>
+        <div className="relative group">
+          {Icon && <Icon size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 group-focus-within:text-cyan-500 transition-colors pointer-events-none" />}
+          <input 
+            id={id}
+            type="text" 
+            value={value} 
+            onChange={(e) => onChange(e.target.value)} 
+            placeholder={placeholder}
+            className={`w-full bg-black/40 border border-neutral-800 rounded-xl py-2.5 ${Icon ? 'pl-9' : 'px-3'} pr-3 text-[11px] text-neutral-200 outline-none focus:border-cyan-600 focus:bg-black/60 transition-all font-bold placeholder:text-neutral-800 select-text cursor-text`}
+          />
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div 
@@ -136,7 +140,7 @@ const DrawingProperties: React.FC<DrawingPropertiesProps> = ({ settings, onConfi
             icon={PenLine} 
           />
           <InputField 
-            label="Draughter" 
+            label="Architect" 
             value={localMetadata.author || ''} 
             onChange={(v) => setLocalMetadata(prev => ({ ...prev, author: v }))} 
             placeholder="ARCHITECT NAME" 

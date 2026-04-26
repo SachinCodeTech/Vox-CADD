@@ -164,6 +164,24 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               </>
           );
       }
+      case 'text': case 'mtext': {
+          const t = s as TextShape | MTextShape;
+          return (
+              <>
+                <PropertyRow label="Position X"><NumericInput value={t.x} onChange={v => handleShapeChange('x', v)} /></PropertyRow>
+                <PropertyRow label="Position Y"><NumericInput value={t.y} onChange={v => handleShapeChange('y', v)} /></PropertyRow>
+                <PropertyRow label="Height"><NumericInput value={t.size} onChange={v => handleShapeChange('size', v)} /></PropertyRow>
+                <PropertyRow label="Rotation"><NumericInput value={t.rotation || 0} onChange={v => handleShapeChange('rotation', v)} /></PropertyRow>
+                <PropertyRow label="Content">
+                    <textarea 
+                        className="w-full bg-[#121214] border border-white/5 text-[10px] text-white font-sans rounded-lg px-3 py-2 outline-none focus:border-[#00bcd4]/50 transition-all resize-none h-20"
+                        value={t.content}
+                        onChange={e => handleShapeChange('content', e.target.value)}
+                    />
+                </PropertyRow>
+              </>
+          );
+      }
       default: return null;
     }
   };

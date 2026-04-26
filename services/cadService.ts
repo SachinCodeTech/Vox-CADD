@@ -1,5 +1,5 @@
 
-import { Shape, Point, AppSettings, SnapPoint, LineShape, DoubleLineShape, RectShape, ArcShape, CircleShape, EllipseShape, PolyShape, TextShape, MTextShape, SnapOptions, LeaderShape, ArcData, InfiniteLineShape, DonutShape } from '../types';
+import { Shape, Point, AppSettings, SnapPoint, LineShape, DoubleLineShape, RectShape, ArcShape, CircleShape, EllipseShape, PolyShape, TextShape, MTextShape, SnapOptions, LeaderShape, ArcData, InfiniteLineShape, DonutShape, BlockDefinition } from '../types';
 
 export const generateId = (): string => Math.random().toString(36).substr(2, 9);
 
@@ -41,9 +41,18 @@ export const projectPointOnLine = (p: Point, a: Point, b: Point): Point => {
     return { x: a.x + t * atob.x, y: a.y + t * atob.y };
 };
 
-export const hitTestShape = (x: number, y: number, s: Shape, threshold: number): boolean => {
+export const hitTestShape = (x: number, y: number, s: Shape, threshold: number, blocks?: Record<string, BlockDefinition>): boolean => {
   switch (s.type) {
     case 'line': return distToSegment(x, y, s.x1, s.y1, s.x2, s.y2) < threshold;
+    case 'block':
+      if (blocks && blocks[s.blockId]) {
+        const block = blocks[s.blockId];
+        const dx = x - s.x, dy = y - s.y;
+        const cos = Math.cos(s.rotation * Math.PI / 180), sin = Math.sin(s.rotation * Math.PI / 180);
+        const tx = (dx * cos + dy * sin) / s.scaleX, ty = (-dx * sin + dy * cos) / s.scaleY;
+        return block.shapes.some(bs => hitTestShape(tx, ty, bs, threshold / Math.max(s.scaleX, s.scaleY), blocks));
+      }
+      return Math.sqrt(Math.pow(x - s.x, 2) + Math.pow(y - s.y, 2)) < threshold * 2;
     case 'circle': {
       const d = Math.sqrt(Math.pow(x - s.x, 2) + Math.pow(y - s.y, 2));
       return Math.abs(d - s.radius) < threshold || (s.filled && d <= s.radius);
@@ -122,10 +131,24 @@ export const hitTestShape = (x: number, y: number, s: Shape, threshold: number):
   return false;
 };
 
-export const getShapeBounds = (s: Shape): { xMin: number, yMin: number, xMax: number, yMax: number } => {
+export const getShapeBounds = (s: Shape, blocks?: Record<string, BlockDefinition>): { xMin: number, yMin: number, xMax: number, yMax: number } => {
     switch (s.type) {
         case 'line':
             return { xMin: Math.min(s.x1, s.x2), yMin: Math.min(s.y1, s.y2), xMax: Math.max(s.x1, s.x2), yMax: Math.max(s.y1, s.y2) };
+        case 'block':
+            if (blocks && blocks[s.blockId]) {
+                const block = blocks[s.blockId];
+                let xMin = Infinity, yMin = Infinity, xMax = -Infinity, yMax = -Infinity;
+                block.shapes.forEach(bs => {
+                    const b = getShapeBounds(bs, blocks);
+                    xMin = Math.min(xMin, b.xMin); yMin = Math.min(yMin, b.yMin);
+                    xMax = Math.max(xMax, b.xMax); yMax = Math.max(yMax, b.yMax);
+                });
+                // TODO: Apply scale and rotation to bounds (simplified for now as circle around origin)
+                const r = Math.sqrt(Math.max(xMin*xMin, xMax*xMax) + Math.max(yMin*yMin, yMax*yMax)) * Math.max(s.scaleX, s.scaleY);
+                return { xMin: s.x - r, yMin: s.y - r, xMax: s.x + r, yMax: s.y + r };
+            }
+            return { xMin: s.x - 5, yMin: s.y - 5, xMax: s.x + 5, yMax: s.y + 5 };
         case 'circle':
             return { xMin: s.x - s.radius, yMin: s.y - s.radius, xMax: s.x + s.radius, yMax: s.y + s.radius };
         case 'rect':
@@ -160,6 +183,21 @@ export const getShapeBounds = (s: Shape): { xMin: number, yMin: number, xMax: nu
             return { xMin: s.x - maxR, yMin: s.y - maxR, xMax: s.x + maxR, yMax: s.y + maxR };
         case 'point':
             return { xMin: s.x - 5, yMin: s.y - 5, xMax: s.x + 5, yMax: s.y + 5 };
+        case 'donut':
+            return { xMin: s.x - s.outerRadius, yMin: s.y - s.outerRadius, xMax: s.x + s.outerRadius, yMax: s.y + s.outerRadius };
+        case 'ray':
+        case 'xline': {
+            // Infinite lines don't have finite bounds, but we can return something that doesn't mess up zoom extents
+            return { xMin: Math.min(s.x1, s.x2), yMin: Math.min(s.y1, s.y2), xMax: Math.max(s.x1, s.x2), yMax: Math.max(s.y1, s.y2) };
+        }
+        case 'dline':
+            if (!s.points || s.points.length === 0) return { xMin: 0, yMin: 0, xMax: 0, yMax: 0 };
+            let dxMin = s.points[0].x, dyMin = s.points[0].y, dxMax = s.points[0].x, dyMax = s.points[0].y;
+            s.points.forEach(p => {
+                dxMin = Math.min(dxMin, p.x); dyMin = Math.min(dyMin, p.y);
+                dxMax = Math.max(dxMax, p.x); dyMax = Math.max(dyMax, p.y);
+            });
+            return { xMin: dxMin - s.thickness/2, yMin: dyMin - s.thickness/2, xMax: dxMax + s.thickness/2, yMax: dyMax + s.thickness/2 };
         case 'dimension':
             return { 
                 xMin: Math.min(s.x1, s.x2, s.dimX), 
@@ -395,6 +433,49 @@ export const getShapeSegments = (s: Shape): { p1: Point, p2: Point }[] => {
                     p2: { x: s.x + s.radius * Math.cos(a2), y: s.y + s.radius * Math.sin(a2) }
                 });
             }
+            break;
+        case 'donut':
+            const donutSteps = 32;
+            for (let i = 0; i < donutSteps; i++) {
+                const a1 = (i / donutSteps) * Math.PI * 2;
+                const a2 = ((i + 1) / donutSteps) * Math.PI * 2;
+                segments.push({
+                    p1: { x: s.x + s.outerRadius * Math.cos(a1), y: s.y + s.outerRadius * Math.sin(a1) },
+                    p2: { x: s.x + s.outerRadius * Math.cos(a2), y: s.y + s.outerRadius * Math.sin(a2) }
+                });
+                if (s.innerRadius > 0) {
+                    segments.push({
+                        p1: { x: s.x + s.innerRadius * Math.cos(a1), y: s.y + s.innerRadius * Math.sin(a1) },
+                        p2: { x: s.x + s.innerRadius * Math.cos(a2), y: s.y + s.innerRadius * Math.sin(a2) }
+                    });
+                }
+            }
+            break;
+        case 'ray':
+        case 'xline': {
+            const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+            const len = Math.sqrt(dx*dx + dy*dy);
+            if (len > 0) {
+                const ux = dx/len, uy = dy/len;
+                const far = 1000000;
+                if (s.type === 'xline') {
+                    segments.push({
+                        p1: { x: s.x1 - ux * far, y: s.y1 - uy * far },
+                        p2: { x: s.x1 + ux * far, y: s.y1 + uy * far }
+                    });
+                } else {
+                    segments.push({
+                        p1: { x: s.x1, y: s.y1 },
+                        p2: { x: s.x1 + ux * far, y: s.y1 + uy * far }
+                    });
+                }
+            }
+            break;
+        }
+        case 'point':
+            const sz = 10;
+            segments.push({ p1: { x: s.x - sz, y: s.y }, p2: { x: s.x + sz, y: s.y } });
+            segments.push({ p1: { x: s.x, y: s.y - sz }, p2: { x: s.x, y: s.y + sz } });
             break;
     }
     return segments;
@@ -745,10 +826,18 @@ export const stretchShape = (s: Shape, xMin: number, yMin: number, xMax: number,
             if (inRect({ x: ns.x2, y: ns.y2 })) { ns.x2 += dx; ns.y2 += dy; }
             break;
         case 'circle':
-            if (inRect({ x: ns.x, y: ns.y })) { ns.x += dx; ns.y += dy; }
-            break;
         case 'arc':
-            if (inRect({ x: ns.x, y: ns.y })) { ns.x += dx; ns.y += dy; }
+        case 'ellipse':
+        case 'text':
+        case 'mtext':
+        case 'point':
+        case 'donut':
+            if (inRect({ x: (ns as any).x, y: (ns as any).y })) { (ns as any).x += dx; (ns as any).y += dy; }
+            break;
+        case 'ray':
+        case 'xline':
+            if (inRect({ x: ns.x1, y: ns.y1 })) { ns.x1 += dx; ns.y1 += dy; }
+            if (inRect({ x: ns.x2, y: ns.y2 })) { ns.x2 += dx; ns.y2 += dy; }
             break;
         case 'rect': {
             const p1 = inRect({ x: ns.x, y: ns.y });

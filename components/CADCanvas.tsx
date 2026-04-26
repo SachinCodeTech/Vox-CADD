@@ -1,16 +1,18 @@
 
 import React, { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
-import { Shape, ViewState, AppSettings, SnapPoint, LayerConfig, Point, MTextShape } from '../types';
+import { Shape, ViewState, AppSettings, SnapPoint, LayerConfig, Point, MTextShape, BlockDefinition, LayoutDefinition } from '../types';
 import { hitTestShape, findBestSnap, formatLength, getShapesInRect, getShapeBounds, isRectIntersecting } from '../services/cadService';
 
 interface CADCanvasProps {
   layers: Record<string, Shape[]>;
+  blocks: Record<string, BlockDefinition>;
+  layouts: LayoutDefinition[];
   layerConfig: Record<string, LayerConfig>; 
   view: ViewState;
   setView: React.Dispatch<React.SetStateAction<ViewState>>;
   settings: AppSettings;
   isCommandActive: boolean;
-  activeTab: 'model' | 'layout';
+  activeTab: string;
   isViewportActive?: boolean;
   onViewportToggle?: () => void;
   onClick?: (x: number, y: number, snapped: boolean) => void; 
@@ -33,7 +35,7 @@ export interface CADCanvasHandle {
 }
 
 const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({ 
-    layers, layerConfig, view, setView, settings, isCommandActive, activeTab, 
+    layers, blocks, layouts, layerConfig, view, setView, settings, isCommandActive, activeTab, 
     isViewportActive = false, onViewportToggle,
     onMouseMove, onClick, selectedIds = [], highlightIds = [], onSelectionChange, previewShapes,
     activePrompt, basePoint = null, activeCommandName, isAiThinking, lastAiCommandTime, onAction, onCommand
@@ -86,13 +88,13 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   };
 
   const screenToWorld = (sx: number, sy: number): Point => {
-    const canvas = canvasRef.current; if (!canvas) return { x: 0, y: 0 };
+    const canvas = canvasRef.current; if (!canvas || !view) return { x: 0, y: 0 };
     const r = getPixelRatio(), w = canvas.width/r, h = canvas.height/r;
     return calculateScreenToWorld(sx, sy, view, w, h);
   };
 
   const worldToScreen = (wx: number, wy: number): Point => {
-      const canvas = canvasRef.current; if (!canvas) return { x: 0, y: 0 };
+      const canvas = canvasRef.current; if (!canvas || !view) return { x: 0, y: 0 };
       const r = getPixelRatio(), w = canvas.width/r, h = canvas.height/r, ts = view.scale * settings.drawingScale;
       return { x: wx * ts + w/2 + view.originX, y: -wy * ts + h/2 + view.originY };
   };
@@ -153,20 +155,86 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   const redraw = useCallback(() => {
     const canvas = canvasRef.current; if (!canvas) return;
     const ctx = canvas.getContext('2d', { alpha: false }) as CanvasRenderingContext2D | null;
-    if (!ctx) return;
+    if (!ctx || !view) return;
     const r = getPixelRatio(), w = canvas.width/r, h = canvas.height/r, ts = view.scale * settings.drawingScale;
     ctx.setTransform(r, 0, 0, r, 0, 0); 
     const isModel = activeTab === 'model';
-    ctx.fillStyle = isModel ? "#121212" : "#ffffff"; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = isModel ? "#121212" : "#333"; ctx.fillRect(0, 0, w, h);
 
-    if (!isModel && !isViewportActive) {
-      ctx.strokeStyle = "#ccc"; ctx.lineWidth = 1; ctx.strokeRect(w*0.05, h*0.05, w*0.9, h*0.9);
-      ctx.fillStyle = "#888"; ctx.font = "bold 11px Inter"; ctx.textAlign = "center";
-      ctx.fillText("Double-tap Viewport to Focus", w/2, h/2);
-      return;
+    if (!isModel) {
+      const activeLayout = layouts.find(l => l.id === activeTab);
+      if (activeLayout) {
+          // Render Background around paper (Darker contrast)
+          ctx.fillStyle = "#0c0c0e"; ctx.fillRect(0, 0, w, h);
+          
+          // Render Paper
+          const paperW = activeLayout.paperSize.width; 
+          const paperH = activeLayout.paperSize.height;
+          const px = w/2 - (paperW * ts)/2 + view.originX;
+          const py = h/2 - (paperH * ts)/2 + view.originY;
+          const pw = paperW * ts;
+          const ph = paperH * ts;
+
+          // Shadow for paper
+          ctx.save();
+          ctx.shadowBlur = 40; ctx.shadowColor = "rgba(0,0,0,0.8)";
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(px, py, pw, ph);
+          ctx.restore();
+
+          // Border for paper
+          ctx.strokeStyle = "rgba(255,255,255,0.05)";
+          ctx.lineWidth = 1;
+          ctx.strokeRect(px, py, pw, ph);
+
+          // Paper Grid (Subtle)
+          if (settings.grid) {
+            ctx.strokeStyle = "rgba(0, 0, 0, 0.05)";
+            ctx.lineWidth = 0.5;
+            const g = settings.gridSpacing * ts;
+            if (g > 5) {
+              ctx.beginPath();
+              for (let gx = px; gx <= px + pw; gx += g) { ctx.moveTo(gx, py); ctx.lineTo(gx, py + ph); }
+              for (let gy = py; gy <= py + ph; gy += g) { ctx.moveTo(px, gy); ctx.lineTo(px + pw, gy); }
+              ctx.stroke();
+            }
+          }
+
+          // Render Viewports
+          activeLayout.viewports.forEach(vp => {
+              ctx.save();
+              const vX = px + vp.x * ts;
+              const vY = py + vp.y * ts;
+              const vW = vp.width * ts;
+              const vH = vp.height * ts;
+              
+              ctx.translate(vX, vY);
+              ctx.strokeStyle = isViewportActive ? "#00bcd4" : "#adadad"; 
+              ctx.lineWidth = isViewportActive ? 2 : 1;
+              ctx.strokeRect(0, 0, vW, vH);
+              
+              const region = new Path2D();
+              region.rect(0, 0, vW, vH);
+              ctx.clip(region);
+              
+              // Render model space inside viewport
+              const vts = vp.viewState.scale * settings.drawingScale;
+              ctx.translate(vW/2 + vp.viewState.originX, vH/2 + vp.viewState.originY);
+              ctx.scale(vts, -vts);
+              
+              const vShapes = getAllShapesForRendering();
+              vShapes.forEach(s => drawShape(ctx, s, vts));
+              ctx.restore();
+          });
+      }
+      
+      if (!isViewportActive) {
+          // return? Let's check how we handle clicks in layout
+      }
     }
 
-    ctx.save(); ctx.translate(w/2 + view.originX, h/2 + view.originY); ctx.scale(ts, -ts);
+    if (isModel || isViewportActive) {
+      ctx.save(); ctx.translate(w/2 + view.originX, h/2 + view.originY); ctx.scale(ts, -ts);
     
     if (isModel && settings.grid) {
         const sMin = calculateScreenToWorld(0, 0, view, w, h);
@@ -236,6 +304,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     
     visibleShapes.filter(s => selectedIds.includes(s.id)).forEach(s => drawGrips(ctx, s, ts));
     ctx.restore();
+    }
 
     if (isModel) {
       drawUCS(ctx, w, h);
@@ -315,7 +384,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         ctx.fillStyle = '#00bcd4'; ctx.fillText(text, screenPos.x + 25, screenPos.y - 13);
     }
     ctx.restore();
-  }, [view, layers, previewShapes, selectedIds, highlightIds, highlightedIds, settings, layerConfig, activeTab, isViewportActive, isCommandActive, selectionRect]);
+  }, [view, layers, previewShapes, selectedIds, highlightIds, settings, layerConfig, activeTab, isViewportActive, isCommandActive, selectionRect]);
 
   const drawGrips = (ctx: CanvasRenderingContext2D, s: Shape, ts: number) => {
     const size = 6 / ts;
@@ -429,6 +498,17 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
             lines.forEach((line, i) => ctx.fillText(line, xOffset, (i + 1) * s.size * 1.2));
         } else ctx.fillText(s.content, 0, 0);
         ctx.restore(); break;
+      case 'block':
+        const block = blocks[s.blockId];
+        if (block) {
+          ctx.save();
+          ctx.translate(s.x, s.y);
+          ctx.rotate(-s.rotation * Math.PI / 180);
+          ctx.scale(s.scaleX, s.scaleY);
+          block.shapes.forEach(bs => drawShape(ctx, bs, ts));
+          ctx.restore();
+        }
+        break;
     }
     if(s.filled && !isS && !isH) { ctx.fillStyle = ctx.strokeStyle; ctx.globalAlpha = 0.25; ctx.fill(); ctx.globalAlpha = 1.0; }
     ctx.stroke(); ctx.restore();
@@ -600,7 +680,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               if (isCommandActive && onClick && activeCommandName !== 'PAN') onClick(finalP.x, finalP.y, snapped);
               else if (activeCommandName !== 'PAN') {
                 const ts = view.scale * settings.drawingScale, selectableShapes = getAllShapesForSelection();
-                const hit = selectableShapes.find(s => hitTestShape(finalP.x, finalP.y, s, 20/ts));
+                const hit = selectableShapes.find(s => hitTestShape(finalP.x, finalP.y, s, 20/ts, blocks));
                 if (onSelectionChange) onSelectionChange(hit ? [hit.id] : [], false);
               }
           }

@@ -13,7 +13,7 @@ export interface Point {
   y: number;
 }
 
-export type ShapeType = 'line' | 'dline' | 'circle' | 'rect' | 'text' | 'mtext' | 'arc' | 'pline' | 'spline' | 'dimension' | 'dimang' | 'ellipse' | 'polygon' | 'point' | 'ray' | 'xline' | 'donut' | 'leader';
+export type ShapeType = 'line' | 'dline' | 'circle' | 'rect' | 'text' | 'mtext' | 'arc' | 'pline' | 'spline' | 'dimension' | 'dimang' | 'ellipse' | 'polygon' | 'point' | 'ray' | 'xline' | 'donut' | 'leader' | 'block';
 
 export type LineType = 'continuous' | 'dashed' | 'dotted' | 'center';
 
@@ -167,7 +167,40 @@ export interface LeaderShape extends BaseShape {
   size: number;
 }
 
-export type Shape = LineShape | DoubleLineShape | DimensionShape | CircleShape | RectShape | TextShape | MTextShape | ArcShape | PolyShape | EllipseShape | PointShape | LeaderShape | InfiniteLineShape | AngularDimensionShape | DonutShape;
+export interface BlockShape extends BaseShape {
+  type: 'block';
+  blockId: string;
+  x: number;
+  y: number;
+  scaleX: number;
+  scaleY: number;
+  rotation: number;
+}
+
+export interface BlockDefinition {
+  id: string;
+  name: string;
+  basePoint: Point;
+  shapes: Shape[];
+}
+
+export interface LayoutViewport {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  viewState: ViewState;
+}
+
+export interface LayoutDefinition {
+  id: string;
+  name: string;
+  paperSize: { width: number; height: number };
+  viewports: LayoutViewport[];
+}
+
+export type Shape = LineShape | DoubleLineShape | DimensionShape | CircleShape | RectShape | TextShape | MTextShape | ArcShape | PolyShape | EllipseShape | PointShape | LeaderShape | InfiniteLineShape | AngularDimensionShape | DonutShape | BlockShape;
 
 export interface ViewState {
   scale: number;

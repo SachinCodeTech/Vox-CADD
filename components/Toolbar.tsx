@@ -7,7 +7,10 @@ import {
   ZoomIn, ZoomOut, Hand, Scissors, CopyPlus, Hexagon, CircleDashed,
   RotateCcw, RotateCw as RedoIcon, FileEdit, Weight,
   FilePlus, FolderOpen, Save, Share2, Calculator, Layers, Sliders, XCircle,
-  LayoutGrid, MousePointer2, Clipboard, Copy, Spline
+  LayoutGrid, MousePointer2, Clipboard, Copy, Spline,
+  Infinity, ArrowUpRight, Rows, Dot, CircleOff, Type, AlignLeft, MousePointer, 
+  Zap, Pencil, Activity, Grid3X3, Layers2, Settings2, Info, Lock, Eye, EyeOff,
+  Package, Grid2X2, Download, Search, Filter, MonitorPlay
 } from 'lucide-react';
 import { AppSettings } from '../types';
 import { ToolbarCategory } from '../App';
@@ -44,10 +47,10 @@ const ToolCircleBtn: React.FC<{
             disabled={disabled}
             className={`flex-shrink-0 flex flex-col items-center justify-center active:scale-90 no-tap ${disabled ? 'opacity-20 grayscale' : ''}`}
         >
-            <div className={`w-11 h-11 rounded-full border flex items-center justify-center transition-all
-                ${active ? 'bg-[#00bcd4] text-black border-[#00bcd4] shadow-[0_0_12px_rgba(0,188,212,0.4)]' : 
-                  danger ? 'bg-red-950/20 border-red-900/40 text-red-500' :
-                  'bg-[#121214] border-white/5 text-neutral-500 hover:text-white'}`}
+            <div className={`w-11 h-11 rounded-full border flex items-center justify-center transition-all duration-300
+                ${active ? 'bg-[#00bcd4] text-black border-[#00bcd4] shadow-[0_0_15px_rgba(0,188,212,0.5)] scale-105' : 
+                  danger ? 'bg-red-950/20 border-red-900/40 text-red-500 hover:border-red-500 hover:bg-red-500/10 hover:shadow-[0_0_10px_rgba(239,68,68,0.2)]' :
+                  'bg-[#121214] border-white/5 text-neutral-500 hover:text-[#00bcd4] hover:border-[#00bcd4] hover:bg-[#00bcd4]/5 hover:shadow-[0_0_10px_rgba(0,188,212,0.2)]'}`}
             >
                 {React.cloneElement(icon as React.ReactElement, { size: 18 })}
             </div>
@@ -63,13 +66,18 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
         return (
           <>
             <ToolCircleBtn onClick={() => onCommand('l')} icon={<Minus className="rotate-45" />} label="LINE" active={activeCommandName === 'LINE'} />
-            <ToolCircleBtn onClick={() => onCommand('pl')} icon={<PenTool />} label="PLINE" active={activeCommandName === 'POLYLINE'} />
+            <ToolCircleBtn onClick={() => onCommand('pl')} icon={<PenTool />} label="PLINE" active={activeCommandName === 'PLINE'} />
             <ToolCircleBtn onClick={() => onCommand('spl')} icon={<Spline />} label="SPLINE" active={activeCommandName === 'SPLINE'} />
             <ToolCircleBtn onClick={() => onCommand('c')} icon={<Circle />} label="CIRCLE" active={activeCommandName === 'CIRCLE'} />
-            <ToolCircleBtn onClick={() => onCommand('rec')} icon={<Square />} label="RECT" active={activeCommandName === 'RECTANGLE'} />
+            <ToolCircleBtn onClick={() => onCommand('rec')} icon={<Square />} label="RECT" active={activeCommandName === 'RECT'} />
             <ToolCircleBtn onClick={() => onCommand('pol')} icon={<Hexagon />} label="POLY" active={activeCommandName === 'POLYGON'} />
             <ToolCircleBtn onClick={() => onCommand('a')} icon={<RotateCw />} label="ARC" active={activeCommandName === 'ARC'} />
             <ToolCircleBtn onClick={() => onCommand('el')} icon={<CircleDashed />} label="ELLIPSE" active={activeCommandName === 'ELLIPSE'} />
+            <ToolCircleBtn onClick={() => onCommand('xl')} icon={<Infinity />} label="XLINE" active={activeCommandName === 'XLINE'} />
+            <ToolCircleBtn onClick={() => onCommand('ray')} icon={<ArrowUpRight />} label="XRAY" active={activeCommandName === 'RAY'} />
+            <ToolCircleBtn onClick={() => onCommand('dl')} icon={<Rows />} label="DLINE" active={activeCommandName === 'DLINE'} />
+            <ToolCircleBtn onClick={() => onCommand('po')} icon={<Dot />} label="POINT" active={activeCommandName === 'POINT'} />
+            <ToolCircleBtn onClick={() => onCommand('donut')} icon={<CircleOff />} label="DONUT" active={activeCommandName === 'DONUT'} />
           </>
         );
       case 'Modify':
@@ -84,7 +92,11 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
             <ToolCircleBtn onClick={() => onCommand('tr')} icon={<Scissors />} label="TRIM" active={activeCommandName === 'TRIM'} />
             <ToolCircleBtn onClick={() => onCommand('ex')} icon={<Maximize2 />} label="EXTEND" active={activeCommandName === 'EXTEND'} />
             <ToolCircleBtn onClick={() => onCommand('x')} icon={<Ungroup />} label="EXPLODE" active={activeCommandName === 'EXPLODE'} />
+            <ToolCircleBtn onClick={() => onCommand('ar')} icon={<Grid2X2 />} label="ARRAY" active={activeCommandName === 'ARRAY'} />
+            <ToolCircleBtn onClick={() => onCommand('block')} icon={<Package />} label="BLOCK" active={activeCommandName === 'BLOCK'} />
+            <ToolCircleBtn onClick={() => onCommand('insert')} icon={<Download />} label="INSERT" active={activeCommandName === 'INSERT'} />
             <ToolCircleBtn onClick={() => onCommand('o')} icon={<CopyPlus />} label="OFFSET" active={activeCommandName === 'OFFSET'} />
+            <ToolCircleBtn onClick={() => onCommand('f')} icon={<Zap />} label="FILLET" active={activeCommandName === 'FILLET'} />
             <ToolCircleBtn onClick={() => onCommand('e')} icon={<Trash2 />} label="ERASE" danger active={activeCommandName === 'ERASE'} />
             <ToolCircleBtn onClick={() => onAction('cancel')} icon={<XCircle />} label="CANCEL" />
           </>
@@ -92,21 +104,26 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
       case 'Edit':
         return (
           <>
+            <ToolCircleBtn onClick={() => onCommand('select')} icon={<MousePointer2 />} label="SELECT" active={activeCommandName === 'SELECT'} />
             <ToolCircleBtn onClick={() => onAction('undo')} icon={<RotateCcw />} label="UNDO" disabled={!canUndo} />
-            <ToolCircleBtn onClick={() => onCommand('all')} icon={<MousePointer2 />} label="ALL" />
+            <ToolCircleBtn onClick={() => onCommand('all')} icon={<MousePointer />} label="ALL" />
             <ToolCircleBtn onClick={() => onCommand('cut')} icon={<Scissors />} label="CUT" />
-            <ToolCircleBtn onClick={() => onCommand('copy')} icon={<Copy />} label="COPY" />
+            <ToolCircleBtn onClick={() => onCommand('copyclip')} icon={<Copy />} label="COPY" />
             <ToolCircleBtn onClick={() => onCommand('paste')} icon={<Clipboard />} label="PASTE" />
+            <ToolCircleBtn onClick={() => onAction('toggleProperties')} icon={<Settings2 />} label="PROPS" />
+            <ToolCircleBtn onClick={() => onCommand('sketch')} icon={<Pencil />} label="SKETCH" active={activeCommandName === 'SKETCH'} />
           </>
         );
       case 'Anno':
         return (
           <>
-            <ToolCircleBtn onClick={() => onCommand('mt')} icon={<FileEdit />} label="MTEXT" />
-            <ToolCircleBtn onClick={() => onCommand('t')} icon={<FileEdit size={14}/>} label="TEXT" />
-            <ToolCircleBtn onClick={() => onCommand('dim')} icon={<Ruler />} label="DIM" />
-            <ToolCircleBtn onClick={() => onCommand('dist')} icon={<Target />} label="DIST" />
-            <ToolCircleBtn onClick={() => onCommand('area')} icon={<BoxSelect />} label="AREA" />
+            <ToolCircleBtn onClick={() => onCommand('mt')} icon={<AlignLeft />} label="MTEXT" active={activeCommandName === 'MTEXT'} />
+            <ToolCircleBtn onClick={() => onCommand('t')} icon={<Type />} label="TEXT" active={activeCommandName === 'TEXT'} />
+            <ToolCircleBtn onClick={() => onCommand('dim')} icon={<Ruler />} label="DIM" active={activeCommandName === 'DIM'} />
+            <ToolCircleBtn onClick={() => onCommand('lea')} icon={<Navigation className="rotate-[-135deg]" />} label="LEADER" active={activeCommandName === 'LEADER'} />
+            <ToolCircleBtn onClick={() => onCommand('dist')} icon={<Target />} label="DIST" active={activeCommandName === 'DIST'} />
+            <ToolCircleBtn onClick={() => onCommand('area')} icon={<BoxSelect />} label="AREA" active={activeCommandName === 'AREA'} />
+            <ToolCircleBtn onClick={() => onCommand('h')} icon={<Grid3X3 />} label="HATCH" active={activeCommandName === 'HATCH'} />
           </>
         );
       case 'View':
@@ -115,10 +132,10 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
             <ToolCircleBtn onClick={() => onAction('zoomExtents')} icon={<Maximize />} label="FULL" />
             <ToolCircleBtn onClick={() => onAction('zoomIn')} icon={<ZoomIn />} label="IN" />
             <ToolCircleBtn onClick={() => onAction('zoomOut')} icon={<ZoomOut />} label="OUT" />
-            <ToolCircleBtn onClick={() => onCommand('p')} icon={<Hand />} label="PAN" />
+            <ToolCircleBtn onClick={() => onCommand('p')} icon={<Hand />} label="PAN" active={activeCommandName === 'PAN'} />
           </>
         );
-      case 'Assist': // TOOLS
+      case 'Tools': // TOOLS
         return (
           <>
             <ToolCircleBtn onClick={() => onSettingChange({ ...settings, snap: !settings.snap })} icon={<Target />} label="SNAP" active={settings.snap} />
@@ -126,6 +143,14 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
             <ToolCircleBtn onClick={() => onSettingChange({ ...settings, grid: !settings.grid })} icon={<LayoutGrid />} label="GRID" active={settings.grid} />
             <ToolCircleBtn onClick={() => onSettingChange({ ...settings, showHUD: !settings.showHUD })} icon={<Monitor />} label="HUD" active={settings.showHUD} />
             <ToolCircleBtn onClick={() => onSettingChange({ ...settings, showLineWeights: !settings.showLineWeights })} icon={<Weight />} label="L-WEIGHT" active={settings.showLineWeights} />
+            <ToolCircleBtn onClick={() => onAction('toggleLayers')} icon={<Layers2 />} label="LAYERS" />
+            <ToolCircleBtn onClick={() => onAction('toggleProperties')} icon={<Settings2 />} label="PROPS" />
+            <ToolCircleBtn onClick={() => onAction('toggleDraftingSettings')} icon={<Sliders />} label="DRAFT" />
+            <ToolCircleBtn onClick={() => onAction('toggleCalculator')} icon={<Calculator />} label="CALC" />
+            <ToolCircleBtn onClick={() => onCommand('filter')} icon={<Filter />} label="FILTER" active={activeCommandName === 'FILTER'} />
+            <ToolCircleBtn onClick={() => onCommand('find')} icon={<Search />} label="FIND" active={activeCommandName === 'FIND'} />
+            <ToolCircleBtn onClick={() => onCommand('vports')} icon={<MonitorPlay />} label="VPORTS" active={activeCommandName === 'VIEWPORT'} />
+            <ToolCircleBtn onClick={() => onAction('toggleAbout')} icon={<Info />} label="ABOUT" />
           </>
         );
       default: return null;
