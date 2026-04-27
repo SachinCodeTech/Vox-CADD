@@ -16,6 +16,18 @@ export const calculateArea = (points: Point[]): number => {
     return Math.abs(area) / 2;
 };
 
+export const calculatePolylineLength = (points: Point[], closed: boolean = false): number => {
+    let len = 0;
+    if (!points || points.length < 2) return 0;
+    for (let i = 0; i < points.length - 1; i++) {
+        len += distance(points[i], points[i + 1]);
+    }
+    if (closed) {
+        len += distance(points[points.length - 1], points[0]);
+    }
+    return len;
+};
+
 export const isPointInPoly = (p: Point, poly: Point[]): boolean => {
     let inside = false;
     for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -307,6 +319,31 @@ export const formatLength = (val: number, isImperial: boolean): string => {
     const feet = Math.floor(absVal / 12);
     const inches = absVal % 12;
     return `${val < 0 ? "-" : ""}${feet}'${inches.toFixed(2)}"`;
+};
+
+export const formatDualLength = (val: number, isImperial: boolean): { primary: string, secondary: string } => {
+    const primary = formatLength(val, isImperial);
+    const secondary = formatLength(isImperial ? val * 25.4 : val / 25.4, !isImperial);
+    return { primary, secondary: isImperial ? `${secondary} mm` : secondary };
+};
+
+export const formatDualArea = (val: number, isImperial: boolean): { primary: string, secondary: string } => {
+    // Area conversion: 1 sq. inch = 645.16 sq. mm
+    if (isImperial) {
+        const sqmm = val * 645.16;
+        const sqm = sqmm / 1000000;
+        return { 
+            primary: `${val.toFixed(2)} sq. in`, 
+            secondary: sqm > 0.1 ? `${sqm.toFixed(3)} m²` : `${sqmm.toFixed(0)} mm²` 
+        };
+    } else {
+        const sqin = val / 645.16;
+        const sqft = sqin / 144;
+        return { 
+            primary: val > 1000000 ? `${(val/1000000).toFixed(3)} m²` : `${val.toFixed(2)} mm²`, 
+            secondary: sqft > 1 ? `${sqft.toFixed(2)} sq. ft` : `${sqin.toFixed(2)} sq. in` 
+        };
+    }
 };
 
 export const getIntersection = (p1: Point, p2: Point, p3: Point, p4: Point, infinite: boolean = false): Point | null => {

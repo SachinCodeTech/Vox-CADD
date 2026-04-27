@@ -189,17 +189,21 @@ const FileManager: React.FC<FileManagerProps> = ({ currentName, recentFiles = []
                         <Clock size={10} /> Recent Drawings
                     </h4>
                     <div className="space-y-2">
-                        {recentFiles.map((file, i) => (
-                            <RecentFileItem 
-                                key={i} 
-                                name={file.name} 
-                                date={file.date} 
-                                current={file.name === currentName}
-                                onClick={() => onAction('openRecent', file.name)}
-                                onDelete={(e) => { e.stopPropagation(); onAction('deleteRecent', file.name); }}
-                                onDownload={(e) => { e.stopPropagation(); onAction('downloadRecent', file.name); }}
-                            />
-                        ))}
+                        {recentFiles.map((file, i) => {
+                            const fileName = typeof file === 'string' ? file : file.name;
+                            const fileDate = typeof file === 'string' ? Date.now() : file.date;
+                            return (
+                                <RecentFileItem 
+                                    key={i} 
+                                    name={fileName} 
+                                    date={fileDate} 
+                                    current={fileName === currentName}
+                                    onClick={() => onAction('openRecent', fileName)}
+                                    onDelete={(e) => { e.stopPropagation(); onAction('deleteRecent', fileName); }}
+                                    onDownload={(e) => { e.stopPropagation(); onAction('downloadRecent', fileName); }}
+                                />
+                            );
+                        })}
                     </div>
                 </div>
                 )}

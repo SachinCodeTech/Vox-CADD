@@ -218,16 +218,22 @@ const CommandBar: React.FC<CommandBarProps> = ({
                 </button>
             </form>
           ) : (
-            <form onSubmit={handleSubmit} className={`flex items-center gap-2 bg-[#0a0a0c] border rounded-xl px-3 h-10 transition-all ${isAiThinking ? 'border-[#6366f1] shadow-[0_0_15px_rgba(99,102,241,0.2)]' : 'border-white/10 focus-within:border-[#6366f1]/50'}`}>
-                <Bot size={14} className={isAiThinking ? 'text-[#6366f1] animate-bounce' : 'text-[#6366f1]'} />
+            <form onSubmit={handleSubmit} className={`flex items-center gap-2 bg-[#0a0a0c] border rounded-xl px-3 h-10 transition-all ${isAiThinking ? 'border-indigo-500 shadow-[0_0_20px_rgba(99,102,241,0.3)]' : 'border-white/10 focus-within:border-indigo-500/50'}`}>
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="relative">
+                    <Bot size={14} className={isAiThinking ? 'text-indigo-400 animate-pulse' : 'text-indigo-500'} />
+                    {isAiThinking && <div className="absolute inset-0 bg-indigo-500/20 blur-sm animate-ping rounded-full" />}
+                  </div>
+                  <span className="text-[7px] font-black text-indigo-500/50 tracking-tighter uppercase hidden sm:inline">PA-24</span>
+                </div>
                 <input 
                     autoFocus
                     disabled={isAiThinking}
                     type="text"
                     value={value}
                     onChange={e => onChange(e.target.value)}
-                    className="flex-1 bg-transparent text-white outline-none text-[11px] placeholder:text-neutral-800 tracking-tight disabled:opacity-50 select-text"
-                    placeholder={isAiThinking ? "ARCHITECT IS THINKING..." : "DESCRIBE ARCHITECTURE..."}
+                    className="flex-1 bg-transparent text-white outline-none text-[10px] sm:text-[11px] placeholder:text-neutral-800 tracking-tight disabled:opacity-50 select-text font-medium"
+                    placeholder={isAiThinking ? "PRINCIPAL ARCHITECT IS THINKING..." : "CONSULT ARCHITECT (E.G. 'DESIGN A 2BHK APARTMENT', 'CALCULATE LIVING AREA')..."}
                 />
                 <div className="flex items-center gap-2">
                     <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => {

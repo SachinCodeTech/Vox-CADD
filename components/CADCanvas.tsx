@@ -1,7 +1,7 @@
 
 import React, { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { Shape, ViewState, AppSettings, SnapPoint, LayerConfig, Point, MTextShape, BlockDefinition, LayoutDefinition } from '../types';
-import { hitTestShape, findBestSnap, formatLength, getShapesInRect, getShapeBounds, isRectIntersecting } from '../services/cadService';
+import { hitTestShape, findBestSnap, formatLength, getShapesInRect, getShapeBounds, isRectIntersecting, formatDualLength } from '../services/cadService';
 
 interface CADCanvasProps {
   layers: Record<string, Shape[]>;
@@ -71,14 +71,14 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   const getAllShapesForRendering = () => {
     return (Object.values(layers).flat() as Shape[]).filter(s => {
         const conf = layerConfig[s.layer];
-        return conf ? !conf.frozen : true;
+        return conf ? (conf.visible && !conf.frozen) : true;
     });
   };
 
   const getAllShapesForSelection = () => {
     return (Object.values(layers).flat() as Shape[]).filter(s => {
         const conf = layerConfig[s.layer];
-        return conf ? (!conf.frozen && !conf.locked) : true;
+        return conf ? (conf.visible && !conf.frozen && !conf.locked) : true;
     });
   };
 
@@ -376,7 +376,8 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     
     if (settings.showHUD) {
         const text = `${formatLength(targetWorldP.x, settings.units === 'imperial')}, ${formatLength(targetWorldP.y, settings.units === 'imperial')}`;
-        ctx.font = '700 10px "Fira Code", monospace';
+        
+        ctx.font = '700 10px "JetBrains Mono", "Fira Code", monospace';
         const tw = ctx.measureText(text).width;
         ctx.fillStyle = 'rgba(10, 10, 12, 0.85)';
         ctx.beginPath(); ctx.roundRect(screenPos.x + 15, screenPos.y - 28, tw + 20, 22, 4); ctx.fill();
@@ -406,7 +407,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     if (!s.isPreview && conf && (!conf.visible || conf.frozen)) return;
     
     ctx.save(); ctx.beginPath();
-    let baseColor = conf?.color || s.color;
+    let baseColor = s.color || conf?.color || "#FFFFFF";
     if (s.isPreview && isCommandActive) baseColor = layerConfig[settings.currentLayer]?.color || "#FFFFFF";
     if (activeTab !== 'model' && (baseColor.toUpperCase() === '#FFF' || baseColor.toUpperCase() === '#FFFFFF')) baseColor = '#111111';
     
@@ -452,15 +453,103 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           break;
       }
       case 'dimension': {
-          // Draw dimension line
-          ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.dimX, s.dimY);
-          ctx.moveTo(s.x2, s.y2); ctx.lineTo(s.dimX, s.dimY); // This is wrong for standard dims, but okay for a sketch
-          // Extension lines
-          const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
-          const len = Math.sqrt(dx*dx + dy*dy);
-          const nx = -dy/len, ny = dx/len;
-          ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x1 + nx * 5/ts, s.y1 + ny * 5/ts);
-          ctx.moveTo(s.x2, s.y2); ctx.lineTo(s.x2 + nx * 5/ts, s.y2 + ny * 5/ts);
+          const ds = settings.dimStyles[s.styleId || 'standard'] || settings.dimStyles['standard'] || {
+            arrowSize: 200, textSize: 250, textOffset: 100, extendLine: 150, offsetLine: 100, precision: 2
+          };
+
+          if (s.dimType === 'radius' || s.dimType === 'diameter' || s.dimType === 'angular' || s.dimType === 'arc') {
+              const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+              const angle = Math.atan2(dy, dx);
+              
+              ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2);
+              
+              ctx.save();
+              ctx.translate(s.x2, s.y2); ctx.rotate(angle + Math.PI);
+              ctx.moveTo(0, 0); ctx.lineTo(ds.arrowSize, ds.arrowSize/4);
+              ctx.moveTo(0, 0); ctx.lineTo(ds.arrowSize, -ds.arrowSize/4);
+              ctx.restore();
+
+              if (s.dimType === 'diameter') {
+                  ctx.save();
+                  ctx.translate(s.x1 - dx, s.y1 - dy);
+                  ctx.rotate(angle);
+                  ctx.moveTo(0, 0); ctx.lineTo(ds.arrowSize, ds.arrowSize/4);
+                  ctx.moveTo(0, 0); ctx.lineTo(ds.arrowSize, -ds.arrowSize/4);
+                  ctx.restore();
+                  ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x1 - dx, s.y1 - dy);
+              }
+
+              ctx.save();
+              const tx = (s.x1 + s.x2) / 2 + Math.cos(angle + Math.PI/2) * (ds.textOffset + ds.textSize/2);
+              const ty = (s.y1 + s.y2) / 2 + Math.sin(angle + Math.PI/2) * (ds.textOffset + ds.textSize/2);
+              ctx.translate(tx, ty);
+              let tAngle = angle;
+              if (tAngle > Math.PI/2) tAngle -= Math.PI;
+              if (tAngle < -Math.PI/2) tAngle += Math.PI;
+              ctx.rotate(tAngle); ctx.scale(1, -1);
+              ctx.font = `${ds.textSize}px monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+              ctx.fillStyle = ctx.strokeStyle; ctx.fillText(s.text, 0, 0);
+              ctx.restore();
+              break;
+          }
+
+          if (s.dimType === 'ordinate') {
+              const dx = Math.abs(s.x2 - s.x1), dy = Math.abs(s.y2 - s.y1);
+              const isX = dx > dy;
+              ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2);
+              ctx.save();
+              ctx.translate(s.x2, s.y2); ctx.scale(1, -1);
+              ctx.font = `${ds.textSize}px monospace`; ctx.textAlign = isX ? 'left' : 'center'; ctx.textBaseline = isX ? 'middle' : 'bottom';
+              ctx.fillStyle = ctx.strokeStyle;
+              ctx.fillText(s.text, isX ? ds.textOffset : 0, isX ? 0 : -ds.textOffset);
+              ctx.restore();
+              break;
+          }
+          
+          let dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+          let len = Math.sqrt(dx * dx + dy * dy);
+          if (len === 0) break;
+
+          if (s.dimType === 'linear') {
+             const mx = (s.x1 + s.x2)/2, my = (s.y1 + s.y2)/2;
+             const vdx = Math.abs(s.dimX - mx), vdy = Math.abs(s.dimY - my);
+             if (vdx > vdy) { dx = 0; len = Math.abs(dy); } else { dy = 0; len = Math.abs(dx); }
+          }
+          
+          const ux = dx / len, uy = dy / len;
+          const nx = -uy, ny = ux;
+          const vdx = s.dimX - s.x1, vdy = s.dimY - s.y1;
+          const distFromLine = vdx * nx + vdy * ny;
+          const sign = distFromLine >= 0 ? 1 : -1;
+          
+          const ex1x = s.x1 + nx * distFromLine, ex1y = s.y1 + ny * distFromLine;
+          let px2 = s.x2 + nx * distFromLine, py2 = s.y2 + ny * distFromLine;
+          if (s.dimType === 'linear') {
+              if (dx === 0) { px2 = ex1x; py2 = s.y2 + ny * distFromLine; }
+              else { px2 = s.x2 + nx * distFromLine; py2 = ex1y; }
+          }
+
+          ctx.moveTo(ex1x, ex1y); ctx.lineTo(px2, py2);
+          ctx.moveTo(s.x1 + nx * ds.offsetLine * sign, s.y1 + ny * ds.offsetLine * sign);
+          ctx.lineTo(ex1x + nx * ds.extendLine * sign, ex1y + ny * ds.extendLine * sign);
+          ctx.moveTo(s.x2 + nx * ds.offsetLine * sign, s.y2 + ny * ds.offsetLine * sign);
+          ctx.lineTo(px2 + nx * ds.extendLine * sign, py2 + ny * ds.extendLine * sign);
+
+          const angle = Math.atan2(py2 - ex1y, px2 - ex1x);
+          ctx.save(); ctx.translate(ex1x, ex1y); ctx.rotate(angle); ctx.moveTo(0, 0); ctx.lineTo(ds.arrowSize, ds.arrowSize/4); ctx.moveTo(0, 0); ctx.lineTo(ds.arrowSize, -ds.arrowSize/4); ctx.restore();
+          ctx.save(); ctx.translate(px2, py2); ctx.rotate(angle + Math.PI); ctx.moveTo(0, 0); ctx.lineTo(ds.arrowSize, ds.arrowSize/4); ctx.moveTo(0, 0); ctx.lineTo(ds.arrowSize, -ds.arrowSize/4); ctx.restore();
+          
+          ctx.save();
+          const mx = (ex1x + px2) / 2 + nx * (ds.textOffset + ds.textSize/2) * sign;
+          const my = (ex1y + py2) / 2 + ny * (ds.textOffset + ds.textSize/2) * sign;
+          ctx.translate(mx, my);
+          let tAngle = angle;
+          if (tAngle > Math.PI/2) tAngle -= Math.PI;
+          if (tAngle < -Math.PI/2) tAngle += Math.PI;
+          ctx.rotate(tAngle); ctx.scale(1, -1);
+          ctx.font = `${ds.textSize}px monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillStyle = ctx.strokeStyle; ctx.fillText(s.text, 0, 0);
+          ctx.restore();
           break;
       }
       case 'point': {
@@ -488,9 +577,14 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           ctx.lineTo(s.x1 + size * Math.cos(a - 0.5), s.y1 + size * Math.sin(a - 0.5));
           break;
       }
-      case 'text': 
+      case 'text':
       case 'mtext':
-        ctx.save(); ctx.translate(s.x, s.y); if (s.rotation) ctx.rotate(s.rotation); ctx.scale(1,-1); ctx.font=`400 ${s.size}px monospace`; ctx.fillStyle=ctx.strokeStyle; 
+        ctx.save(); 
+        ctx.translate(s.x, s.y); 
+        if (s.rotation) ctx.rotate(-s.rotation * Math.PI / 180); 
+        ctx.scale(1,-1); 
+        ctx.font=`400 ${s.size}px monospace`; 
+        ctx.fillStyle=ctx.strokeStyle; 
         ctx.textAlign = s.justification || 'left';
         if (s.type === 'mtext') {
             const lines = s.content.split('\n');

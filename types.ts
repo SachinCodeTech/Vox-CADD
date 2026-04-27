@@ -51,15 +51,23 @@ export interface DoubleLineShape extends BaseShape {
   closed?: boolean;
 }
 
+export type DimensionType = 'linear' | 'aligned' | 'radius' | 'diameter' | 'angular' | 'arc' | 'ordinate';
+
 export interface DimensionShape extends BaseShape {
   type: 'dimension';
+  dimType: DimensionType;
   x1: number;
   y1: number;
   x2: number;
   y2: number;
   dimX: number;
   dimY: number;
+  cx?: number; // Center X for radial/angular
+  cy?: number; // Center Y for radial/angular
+  angle1?: number;
+  angle2?: number;
   text: string;
+  styleId?: string;
 }
 
 export interface CircleShape extends BaseShape {
@@ -248,6 +256,17 @@ export interface ProjectMetadata {
   projectRevision?: string;
 }
 
+export interface DimensionStyle {
+  id: string;
+  name: string;
+  arrowSize: number;
+  textSize: number;
+  textOffset: number;
+  extendLine: number;
+  offsetLine: number;
+  precision: number;
+}
+
 export interface AppSettings {
   ortho: boolean;
   snap: boolean;
@@ -260,6 +279,7 @@ export interface AppSettings {
   cursorY: number;
   units: UnitType; 
   unitSubtype: string;
+  showDualUnits?: boolean;
   precision: string;
   fillEnabled: boolean;
   gridSpacing: number; 
@@ -270,6 +290,8 @@ export interface AppSettings {
   textSize: number;
   textRotation: number;
   textJustification: TextJustification;
+  activeDimStyle: string;
+  dimStyles: Record<string, DimensionStyle>;
   metadata?: ProjectMetadata;
 }
 

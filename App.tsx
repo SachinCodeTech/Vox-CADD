@@ -13,6 +13,7 @@ import DrawingProperties from './components/DrawingProperties';
 import InfoPanel from './components/InfoPanel';
 import NewFileDialog from './components/NewFileDialog';
 import MTextEditor from './components/MTextEditor';
+import DimStyleManager from './components/DimStyleManager';
 import LoadingScreen from './components/LoadingScreen';
 import { generateId } from './services/cadService';
 import { getCommandFromAI, connectLiveAgent } from './services/geminiService';
@@ -32,7 +33,7 @@ import {
   ArrayCommand, BlockCommand, InsertCommand, FilterCommand, FindCommand, ViewportCommand, LayoutCommand
 } from './services/commandEngine';
 import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType, BlockDefinition, LayoutDefinition } from './types';
-import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save } from 'lucide-react';
+import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive } from 'lucide-react';
 
 import VoxIcon from './components/VoxIcon';
 
@@ -53,6 +54,19 @@ const INITIAL_SETTINGS: AppSettings = {
   textSize: 250,
   textRotation: 0,
   textJustification: 'left',
+  activeDimStyle: 'standard',
+  dimStyles: {
+    'standard': { 
+      id: 'standard', name: 'Standard', 
+      arrowSize: 200, textSize: 250, textOffset: 100, 
+      extendLine: 150, offsetLine: 100, precision: 2 
+    },
+    'architectural': { 
+      id: 'architectural', name: 'Architectural', 
+      arrowSize: 150, textSize: 180, textOffset: 80, 
+      extendLine: 100, offsetLine: 80, precision: 1 
+    }
+  },
   metadata: {
     author: '',
     createdAt: new Date().toISOString().split('T')[0],
@@ -70,7 +84,7 @@ const INITIAL_LAYERS_CONFIG: Record<string, LayerConfig> = {
 };
 
 export type ToolbarCategory = 'Draw' | 'Modify' | 'Anno' | 'View' | 'Tools' | 'History' | 'Edit';
-type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 'file' | 'mainmenu' | 'drawing_props' | 'help' | 'about' | 'privacy' | 'new_file';
+type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 'file' | 'mainmenu' | 'drawing_props' | 'help' | 'about' | 'privacy' | 'new_file' | 'dimstyle';
 
 const STORAGE_PREFIX = 'voxcadd_file_v1_';
 const REGISTRY_KEY = 'voxcadd_recent_files';
@@ -85,9 +99,35 @@ const App: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings>(INITIAL_SETTINGS);
   const [activeTab, setActiveTab] = useState<string>('model');
   const [currentFileName, setCurrentFileName] = useState('Draught 1');
-  const [recentFiles, setRecentFiles] = useState<string[]>(['Draught 1']);
+  const [recentFiles, setRecentFiles] = useState<{name: string, date: number}[]>([]);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
   const [fileNameMenuOpen, setFileNameMenuOpen] = useState(false);
+  const [fileNameMenuPos, setFileNameMenuPos] = useState({ x: 0, y: 0 });
+  const [promptDialog, setPromptDialog] = useState<{
+    title: string;
+    message: string;
+    initialValue: string;
+    type?: 'prompt' | 'confirm';
+    onConfirm: (val: string) => void;
+  } | null>(null);
+  const fileNameBtnRef = useRef<HTMLButtonElement>(null);
+
+  const layoutContextMenuRef = useRef<HTMLDivElement>(null);
+  const fileNameMenuRef = useRef<HTMLDivElement>(null);
+  const blockNextClick = useRef(false);
+
+  const toggleFileNameMenu = () => {
+    if (blockNextClick.current) {
+      blockNextClick.current = false;
+      return;
+    }
+    if (fileNameBtnRef.current) {
+        const rect = fileNameBtnRef.current.getBoundingClientRect();
+        setFileNameMenuPos({ x: rect.left + rect.width / 2, y: rect.bottom });
+    }
+    setFileNameMenuOpen(!fileNameMenuOpen);
+    setFileMenuOpen(false);
+  };
   const [activeCategory, setActiveCategory] = useState<ToolbarCategory>('Draw');
   const [isViewportActive, setIsViewportActive] = useState(false);
   const [history, setHistory] = useState<Record<string, Shape[]>[]>([]);
@@ -100,8 +140,9 @@ const App: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [commandInput, setCommandInput] = useState('');
   const [isLiveActive, setIsLiveActive] = useState(false);
-  const [prompt, setPrompt] = useState<string>("COMMAND:");
+  const [commandPrompt, setCommandPrompt] = useState<string>("COMMAND:");
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
+  const [aiConversation, setAiConversation] = useState<{role: string, parts: any[]}[]>([]);
   const [logMessage, _setLogMessage] = useState<string | null>(null);
   const setLogMessage = useCallback((msg: string | null) => {
     _setLogMessage(msg);
@@ -119,7 +160,10 @@ const App: React.FC = () => {
   const [fileHandle, setFileHandle] = useState<any>(null);
   const [activePanel, setActivePanel] = useState<PanelType>('none');
   const [previewShapes, setPreviewShapes] = useState<Shape[] | null>(null);
-  const [mtextEditor, setMtextEditor] = useState<{ initialValue: string, callback: (text: string) => void } | null>(null);
+  const [mtextEditor, setMtextEditor] = useState<{ 
+    initialValue: string, 
+    callback: (text: string, props?: { size: number, rotation: number, justification: string }) => void 
+  } | null>(null);
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [lastAiCommandTime, setLastAiCommandTime] = useState(0);
   const [isAppLoading, setIsAppLoading] = useState(true);
@@ -127,12 +171,13 @@ const App: React.FC = () => {
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
 
   const handleLayoutLongPress = (e: React.MouseEvent | React.TouchEvent, layoutId: string) => {
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    const clientX = 'touches' in e ? (e as React.TouchEvent).touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = 'touches' in e ? (e as React.TouchEvent).touches[0].clientY : (e as React.MouseEvent).clientY;
     
     longPressTimer.current = setTimeout(() => {
+      blockNextClick.current = true;
       setLayoutContextMenu({ x: clientX, y: clientY, layoutId });
-      if(navigator.vibrate) navigator.vibrate(50);
+      if(navigator.vibrate) navigator.vibrate([30, 50]);
     }, 500);
   };
 
@@ -146,50 +191,100 @@ const App: React.FC = () => {
   const renameLayout = (id: string) => {
     const layout = layouts.find(l => l.id === id);
     if (!layout) return;
-    const newName = prompt('Enter new layout name:', layout.name);
-    if (newName) {
-      setLayouts(prev => prev.map(l => l.id === id ? { ...l, name: newName } : l));
-    }
+    setPromptDialog({
+      title: 'Rename Layout',
+      message: 'Enter new layout name:',
+      initialValue: layout.name,
+      type: 'prompt',
+      onConfirm: (newName) => {
+        if (newName && newName.trim()) {
+          const trimmedName = newName.trim();
+          setLayouts(prev => prev.map(l => l.id === id ? { ...l, name: trimmedName } : l));
+          setLogMessage(`LAYOUT_RENAMED: ${trimmedName}`);
+        }
+      }
+    });
     setLayoutContextMenu(null);
   };
 
   const duplicateLayout = (id: string) => {
     const layout = layouts.find(l => l.id === id);
     if (!layout) return;
-          const newId = 'layout' + Date.now();
-          const newLayout = { ...layout, id: newId, name: `${layout.name} (Copy)` };
-          setLayouts(prev => [...prev, newLayout]);
-          setTabViews(prev => ({ ...prev, [newId]: tabViews[id] || { scale: 3, originX: 0, originY: 0 } }));
-          setLayoutContextMenu(null);
+    const newId = 'layout' + Date.now();
+    const newLayout = { ...layout, id: newId, name: `${layout.name} (Copy)` };
+    setLayouts(prev => [...prev, newLayout]);
+    setTabViews(prev => ({ ...prev, [newId]: { ...(prev[id] || { scale: 3, originX: 0, originY: 0 }) } }));
+    setLayoutContextMenu(null);
   };
 
   const deleteLayout = (id: string) => {
-    if (layouts.length <= 1) return;
-    if (confirm(`Delete layout "${layouts.find(l => l.id === id)?.name}"?`)) {
-      setLayouts(prev => prev.filter(l => l.id !== id));
-      if (activeTab === id) setActiveTab('model');
+    if (layouts.length <= 1) {
+      setLogMessage("ERR: CANNOT_DELETE_LAST_LAYOUT");
+      return;
     }
+    const layout = layouts.find(l => l.id === id);
+    setPromptDialog({
+      title: 'Delete Layout',
+      message: `Are you sure you want to delete "${layout?.name}"?`,
+      initialValue: '',
+      type: 'confirm',
+      onConfirm: () => {
+        setLayouts(prev => prev.filter(l => l.id !== id));
+        setTabViews(prev => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        if (activeTab === id) setActiveTab('model');
+        setLogMessage(`LAYOUT_DELETED: ${layout?.name}`);
+      }
+    });
     setLayoutContextMenu(null);
   };
 
   const deleteAllLayouts = () => {
-    if (confirm('Delete all layouts? This will reset you to a single default layout.')) {
-      const defaultId = 'layout' + Date.now();
-      setLayouts([{ id: defaultId, name: 'Layout 1', paperSize: { width: 297, height: 210 }, viewports: [] }]);
-      setTabViews(prev => ({ ...prev, [defaultId]: { scale: 3, originX: 0, originY: 0 } }));
-      setActiveTab('model');
-    }
+    setPromptDialog({
+      title: 'Delete All Layouts',
+      message: 'Delete all layouts? This will reset you to a single default layout.',
+      initialValue: '',
+      type: 'confirm',
+      onConfirm: () => {
+        const defaultId = 'layout' + Date.now();
+        setLayouts([{ id: defaultId, name: 'Layout 1', paperSize: { width: 297, height: 210 }, viewports: [] }]);
+        setTabViews(prev => ({ ...prev, [defaultId]: { scale: 3, originX: 0, originY: 0 } }));
+        setActiveTab('model');
+        setLogMessage("ALL_LAYOUTS_DELETED");
+      }
+    });
     setLayoutContextMenu(null);
   };
 
   const updateLayoutProperties = (id: string) => {
     const layout = layouts.find(l => l.id === id);
     if (!layout) return;
-    const width = prompt('Paper Width (mm):', layout.paperSize.width.toString());
-    const height = prompt('Paper Height (mm):', layout.paperSize.height.toString());
-    if (width && height) {
-      setLayouts(prev => prev.map(l => l.id === id ? { ...l, paperSize: { width: parseFloat(width), height: parseFloat(height) } } : l));
-    }
+    
+    // For properties, we'll just use a double prompt pattern for now with the new dialog
+    setPromptDialog({
+      title: 'Paper Width (mm)',
+      message: 'Enter paper width in millimeters:',
+      initialValue: layout.paperSize.width.toString(),
+      type: 'prompt',
+      onConfirm: (width) => {
+        if (!width) return;
+        setPromptDialog({
+          title: 'Paper Height (mm)',
+          message: 'Enter paper height in millimeters:',
+          initialValue: layout.paperSize.height.toString(),
+          type: 'prompt',
+          onConfirm: (height) => {
+            if (height) {
+              setLayouts(prev => prev.map(l => l.id === id ? { ...l, paperSize: { width: parseFloat(width), height: parseFloat(height) } } : l));
+              setLogMessage("LAYOUT_PROPERTIES_UPDATED");
+            }
+          }
+        });
+      }
+    });
     setLayoutContextMenu(null);
   };
 
@@ -251,6 +346,7 @@ const App: React.FC = () => {
   };
 
   const view = tabViews[activeTab] || { scale: 1, originX: 0, originY: 0 };
+
   const setView = useCallback((updater: ViewState | ((v: ViewState) => ViewState)) => {
     setTabViews(prev => ({
       ...prev,
@@ -512,6 +608,7 @@ const App: React.FC = () => {
       case 'toggleLayers': setActivePanel(activePanel === 'layers' ? 'none' : 'layers'); break;
       case 'toggleProperties': setActivePanel(activePanel === 'properties' ? 'none' : 'properties'); break;
       case 'toggleCalculator': setActivePanel(activePanel === 'calculator' ? 'none' : 'calculator'); break;
+      case 'toggleDimStyle': setActivePanel(activePanel === 'dimstyle' ? 'none' : 'dimstyle'); break;
       case 'toggleDraftingSettings': setActivePanel(activePanel === 'drafting' ? 'none' : 'drafting'); break;
       case 'toggleMainMenu': setActivePanel(activePanel === 'mainmenu' ? 'none' : 'mainmenu'); break;
       case 'toggleDrawingProps': setActivePanel(activePanel === 'drawing_props' ? 'none' : 'drawing_props'); break;
@@ -555,8 +652,11 @@ const App: React.FC = () => {
         break;
       case 'rename': {
         const oldName = currentFileName;
-        const newName = payload;
-        if (oldName === newName) return;
+        let newName = payload;
+        if (newName && !newName.toLowerCase().endsWith('.vox') && !newName.toLowerCase().endsWith('.dxf')) {
+          newName += '.vox';
+        }
+        if (!newName || oldName === newName) return;
 
         // Migrate storage
         const data = localStorage.getItem(`${STORAGE_PREFIX}${oldName}`);
@@ -669,7 +769,8 @@ const App: React.FC = () => {
         }
 
         // Native File System Access
-        if ('showSaveFilePicker' in window) {
+        let usePicker = 'showSaveFilePicker' in window;
+        if (usePicker) {
             try {
                 let handle = (!isSaveAs && fileHandle) ? fileHandle : null;
                 if (!handle) {
@@ -690,38 +791,60 @@ const App: React.FC = () => {
                 setCurrentFileName(handle.name);
                 updateRecentFiles(handle.name);
                 setLogMessage(`SUCCESS:_${handle.name}_SAVED`);
-            } catch (e) {
+            } catch (e: any) {
                 console.warn("Save cancelled or failed", e);
-                setLogMessage("SAVE_CANCELLED_OR_ERR");
+                // If it's a security error or similar (often in iframes), try fallback
+                if (e.name === 'SecurityError' || e.name === 'NotAllowedError') {
+                    usePicker = false;
+                } else {
+                    setLogMessage("SAVE_CANCELLED_OR_ERR");
+                }
             }
-        } else {
+        }
+
+        if (!usePicker) {
             // Fallback for browsers without File System Access API
             let downloadName = currentFileName.replace(/\.[^/.]+$/, "") + finalExt;
             
-            if (isSaveAs) {
-                const newName = prompt("NAME_YOUR_FILE (Save As):", downloadName);
-                if (!newName) { setLogMessage("SAVE_AS_CANCELLED"); return; }
-                downloadName = newName.toLowerCase().endsWith(finalExt) ? newName : newName + finalExt;
-            }
+            const performDownload = (name: string) => {
+                const mimeType = isDxfExport ? 'application/dxf' : 'application/vnd.voxcadd.project';
+                const blob = new Blob([content], { type: mimeType });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = name;
+                document.body.appendChild(a); 
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                if (isSaveAs) {
+                  setCurrentFileName(name);
+                  updateRecentFiles(name);
+                } else {
+                  updateRecentFiles(currentFileName);
+                }
+                setLogMessage(`DOWNLOADED:_${finalExt.toUpperCase()}`);
+            };
 
-            const mimeType = isDxfExport ? 'application/dxf' : 'application/vnd.voxcadd.project';
-            const blob = new Blob([content], { type: mimeType });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = downloadName;
-            document.body.appendChild(a); 
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            
             if (isSaveAs) {
-              setCurrentFileName(downloadName);
-              updateRecentFiles(downloadName);
+                setPromptDialog({
+                  title: 'Save As',
+                  message: 'Enter filename:',
+                  initialValue: downloadName,
+                  type: 'prompt',
+                  onConfirm: (newName) => {
+                    if (newName) {
+                      const finalName = newName.toLowerCase().endsWith(finalExt) ? newName : newName + finalExt;
+                      performDownload(finalName);
+                    } else {
+                      setLogMessage("SAVE_AS_CANCELLED");
+                    }
+                  }
+                });
             } else {
-              updateRecentFiles(currentFileName);
+                performDownload(downloadName);
             }
-            setLogMessage(`DOWNLOADED:_${finalExt.toUpperCase()}`);
         }
         break;
       case 'saveImage': {
@@ -743,24 +866,32 @@ const App: React.FC = () => {
         const fileName = (currentFileName.replace(/\.[^/.]+$/, "") + finalExt).replace(/[^a-zA-Z0-9.\-_]/g, '_');
         const blob = new Blob([content], { type: isDxfExport ? 'application/dxf' : 'application/vnd.voxcadd.project' });
         
-        if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([blob], fileName, { type: blob.type })] })) {
-            try {
-                await navigator.share({
-                    files: [new File([blob], fileName, { type: blob.type })],
-                    title: 'VoxCADD Project',
-                    text: `Sharing project: ${currentFileName}`
-                });
-                setLogMessage("SHARE_SENT");
-            } catch (e) {
-                setLogMessage("SHARE_CANCELLED");
+        try {
+            if (navigator.share) {
+                const file = new File([blob], fileName, { type: blob.type });
+                // Attempt file share if supported
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    await navigator.share({
+                        files: [file],
+                        title: 'VoxCADD Project',
+                        text: `Sharing project: ${currentFileName}`
+                    });
+                    setLogMessage("SHARE_SENT");
+                } else {
+                    // Fallback to link + text share
+                    await navigator.share({ 
+                        title: 'VoxCADD Professional Design', 
+                        text: `Sharing Project: ${currentFileName}`, 
+                        url: window.location.href 
+                    });
+                    setLogMessage("SHARE_LINK_SENT");
+                }
+            } else {
+                setLogMessage("ERR: SHARING_NOT_SUPPORTED");
             }
-        } else if (navigator.share) {
-             try {
-                await navigator.share({ title: 'VoxCADD Pro Design', text: `Sharing ${currentFileName}`, url: window.location.href });
-                setLogMessage("SHARE_LINK_SENT");
-            } catch (e) {}
-        } else {
-            setLogMessage("ERR: SHARING_BLOCKED");
+        } catch (e) {
+            console.warn("Sharing failed", e);
+            setLogMessage("SHARE_CANCELLED_OR_FAILED");
         }
         break;
       }
@@ -807,6 +938,26 @@ const App: React.FC = () => {
     }, 30000); // Every 30 seconds
     return () => clearInterval(timer);
   }, [commitToHistory]);
+
+  // Global Escape Key Handler
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (mtextEditor) {
+          mtextEditor.callback("");
+          setMtextEditor(null);
+        } else if (activePanel !== 'none') {
+          setActivePanel('none');
+        } else if (engineRef.current?.active) {
+          handleAction('cancel');
+        } else if (selectedIds.length > 0) {
+          setSelectedIds([]);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [mtextEditor, activePanel, selectedIds, handleAction]);
 
   const executeCommand = useCallback((cmdStr: string) => {
     const trimmed = cmdStr.trim();
@@ -885,7 +1036,10 @@ const App: React.FC = () => {
       'mt': MTextCommand, 'mtext': MTextCommand, 'm': MoveCommand, 'move': MoveCommand, 
       'e': EraseCommand, 'erase': EraseCommand, 'dist': DistanceCommand, 'di': DistanceCommand, 
       'area': AreaCommand, 'did': AreaCommand, 
-      'dim': DimensionCommand, 't': TextCommand, 'text': TextCommand, 
+      'dim': DimensionCommand, 'dimlinear': DimensionCommand, 'aligned': DimensionCommand,
+      'dimradius': DimensionCommand, 'dimdiam': DimensionCommand, 'dimord': DimensionCommand,
+      'angular': DimensionCommand, 'dimarc': DimensionCommand,
+      't': TextCommand, 'text': TextCommand, 
       'z': ZoomCommand, 'zoom': ZoomCommand, 'tr': TrimCommand, 'trim': TrimCommand,
       'h': HatchCommand, 'hatch': HatchCommand, 'lea': LeaderCommand, 'leader': LeaderCommand,
       'p': PanCommand, 'pan': PanCommand, 'o': OffsetCommand, 'offset': OffsetCommand,
@@ -988,7 +1142,16 @@ const App: React.FC = () => {
       setPreviewShapes(null);
       setIsCommandActive(true);
       setActivePanel('none'); 
-      const cmd = new CommandClass(engineRef.current!.ctx);
+      let cmd;
+      if (cmdKey === 'dimlinear' || cmdKey === 'dim') cmd = new DimensionCommand(engineRef.current!.ctx, 'linear');
+      else if (cmdKey === 'aligned') cmd = new DimensionCommand(engineRef.current!.ctx, 'aligned');
+      else if (cmdKey === 'dimradius') cmd = new DimensionCommand(engineRef.current!.ctx, 'radius');
+      else if (cmdKey === 'dimdiam') cmd = new DimensionCommand(engineRef.current!.ctx, 'diameter');
+      else if (cmdKey === 'dimord') cmd = new DimensionCommand(engineRef.current!.ctx, 'ordinate');
+      else if (cmdKey === 'angular') cmd = new DimensionCommand(engineRef.current!.ctx, 'angular');
+      else if (cmdKey === 'dimarc') cmd = new DimensionCommand(engineRef.current!.ctx, 'arc');
+      else cmd = new CommandClass(engineRef.current!.ctx);
+      
       setActiveCommandName(cmd.name);
       engineRef.current!.start(cmd);
       if (args) engineRef.current!.input(args);
@@ -1014,17 +1177,17 @@ const App: React.FC = () => {
         addLog: (msg) => setLogMessage(msg),
         setMessage: (msg) => {
           if (msg === "Command Finished") { 
-              setPrompt("COMMAND:"); 
+              setCommandPrompt("COMMAND:"); 
               setIsCommandActive(false); 
               setActiveCommandName(undefined);
               commitToHistory();
-          } else setPrompt(msg?.toUpperCase() || "COMMAND:");
+          } else setCommandPrompt(msg?.toUpperCase() || "COMMAND:");
         },
         setView: setView as any,
         getViewState: () => tabViewsRef.current[activeTabRef.current],
         onFinish: () => { 
           setPreviewShapes(null); 
-          setPrompt("COMMAND:"); 
+          setCommandPrompt("COMMAND:"); 
           setIsCommandActive(false); 
           setShowCircleOptions(false);
           setShowArcOptions(false);
@@ -1039,7 +1202,7 @@ const App: React.FC = () => {
         setLayouts: (v) => setLayouts(v),
         getActiveTab: () => activeTabRef.current,
         start: (cmd: CADCommand) => { setActiveCommandName(cmd.name); engineRef.current?.start(cmd); },
-        onExternalRequest: (type, data, cb) => {
+        onExternalRequest: (type, data, cb: (res: any, props?: any) => void) => {
             if (type === 'set_active_tab') {
                 setActiveTab(data);
                 cb(true);
@@ -1109,7 +1272,7 @@ const App: React.FC = () => {
   ];
 
   return (
-    <div className="flex flex-col h-full w-full bg-black text-neutral-300 overflow-hidden select-none">
+    <div className="flex flex-col h-[100dvh] w-full bg-black text-neutral-300 overflow-hidden select-none">
       {isAppLoading && <LoadingScreen onComplete={() => setIsAppLoading(false)} />}
       <header className="h-14 flex items-center justify-between px-4 shrink-0 bg-black border-b border-white/5 z-[110]">
         <div className="flex items-center gap-3">
@@ -1126,30 +1289,43 @@ const App: React.FC = () => {
             <div className="flex items-center gap-1.5 text-[8.5px] font-bold uppercase tracking-wide leading-none mb-0.5">
               <div className="relative">
                 <button 
-                  onClick={() => setFileMenuOpen(!fileMenuOpen)}
-                  className="text-neutral-600 hover:text-neutral-400 transition-colors"
+                  onClick={() => { setFileMenuOpen(!fileMenuOpen); setFileNameMenuOpen(false); }}
+                  className={`transition-colors flex items-center gap-0.5 ${fileMenuOpen ? 'text-cyan-400' : 'text-neutral-600 hover:text-neutral-400'}`}
                 >
-                  File:
+                  File: {fileMenuOpen ? <RotateCw size={8} className="animate-spin-slow" /> : null}
                 </button>
                 {fileMenuOpen && (
                   <>
                     <div className="fixed inset-0 z-[200]" onClick={() => setFileMenuOpen(false)} />
-                    <div className="absolute top-full left-0 mt-2 bg-[#1a1a1e] border border-white/10 rounded-md shadow-2xl py-1 z-[201] min-w-[120px] overflow-hidden">
-                      <div className="px-3 py-1 border-b border-white/5 mb-1">
-                        <div className="text-[7px] font-black uppercase text-neutral-500">Recent Files</div>
+                    <div className="absolute top-full left-0 mt-3 bg-[#0a0a0c]/98 backdrop-blur-2xl border border-white/10 rounded-2xl p-2 flex flex-col gap-1 shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[201] min-w-[180px] animate-in zoom-in-95 fade-in slide-in-from-top-4 duration-200">
+                      <div className="px-3 py-1.5 border-b border-white/5 mb-1 text-center">
+                        <div className="text-[7.5px] font-black uppercase text-cyan-500 tracking-widest">Recent Files</div>
                       </div>
-                      {recentFiles.map(file => (
-                        <button 
-                          key={file}
-                          onClick={() => {
-                            setCurrentFileName(file);
-                            setFileMenuOpen(false);
-                          }}
-                          className={`w-full text-left px-3 py-1.5 hover:bg-cyan-500 hover:text-black transition-colors ${file === currentFileName ? 'text-cyan-400' : 'text-neutral-300'}`}
-                        >
-                          {file}
-                        </button>
-                      ))}
+                      {recentFiles.length > 0 ? recentFiles.map(file => {
+                        const fileName = typeof file === 'string' ? file : file.name;
+                        return (
+                          <button 
+                            key={fileName}
+                            onClick={() => {
+                              handleAction('openRecent', fileName);
+                              setFileMenuOpen(false);
+                            }}
+                            className={`w-full text-left px-3 py-2.5 rounded-xl text-[10px] font-bold uppercase transition-all flex items-center justify-between group active:scale-95 ${fileName === currentFileName ? 'text-cyan-400 bg-cyan-400/5' : 'text-neutral-400 hover:bg-white/5 hover:text-white'}`}
+                          >
+                            <span className="truncate">{fileName}</span>
+                            {fileName === currentFileName && <div className="w-1.5 h-1.5 rounded-full bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.6)]" />}
+                          </button>
+                        );
+                      }) : (
+                        <div className="px-3 py-4 text-[9px] text-neutral-600 uppercase text-center font-bold tracking-tighter">No recent files</div>
+                      )}
+                      <div className="h-px bg-white/5 my-1" />
+                      <button 
+                        onClick={() => { handleAction('open'); setFileMenuOpen(false); }}
+                        className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                      >
+                        <FolderOpen size={14} className="text-cyan-500" /> Browse...
+                      </button>
                     </div>
                   </>
                 )}
@@ -1157,65 +1333,41 @@ const App: React.FC = () => {
               
               <div className="relative">
                 <button 
-                  onClick={() => setFileNameMenuOpen(!fileNameMenuOpen)}
-                  className="text-neutral-400 hover:text-cyan-400 transition-colors"
+                  ref={fileNameBtnRef}
+                  onClick={() => { if(navigator.vibrate) navigator.vibrate(5); toggleFileNameMenu(); }}
+                  onMouseDown={(e) => {
+                    longPressTimer.current = setTimeout(() => {
+                        blockNextClick.current = true;
+                        setFileNameMenuOpen(true);
+                        setFileMenuOpen(false);
+                        if (fileNameBtnRef.current) {
+                            const rect = fileNameBtnRef.current.getBoundingClientRect();
+                            setFileNameMenuPos({ x: rect.left + rect.width / 2, y: rect.bottom });
+                        }
+                        if(navigator.vibrate) navigator.vibrate([30, 50]);
+                    }, 500);
+                  }}
+                  onMouseUp={cancelLongPress}
+                  onMouseLeave={cancelLongPress}
+                  onTouchStart={(e) => {
+                    longPressTimer.current = setTimeout(() => {
+                        blockNextClick.current = true;
+                        setFileNameMenuOpen(true);
+                        setFileMenuOpen(false);
+                        if (fileNameBtnRef.current) {
+                            const rect = fileNameBtnRef.current.getBoundingClientRect();
+                            setFileNameMenuPos({ x: rect.left + rect.width / 2, y: rect.bottom });
+                        }
+                        if(navigator.vibrate) navigator.vibrate([30, 50]);
+                    }, 500);
+                  }}
+                  onTouchMove={cancelLongPress}
+                  onTouchEnd={cancelLongPress}
+                  onTouchCancel={cancelLongPress}
+                  className={`transition-colors no-tap ${fileNameMenuOpen ? 'text-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.2)]' : 'text-neutral-400 hover:text-cyan-400 underline decoration-cyan-500/30 underline-offset-2'}`}
                 >
                   {currentFileName}
                 </button>
-                {fileNameMenuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-[200]" onClick={() => setFileNameMenuOpen(false)} />
-                    <div className="absolute top-full left-0 mt-2 bg-[#1a1a1e] border border-white/10 rounded-md shadow-2xl py-1 z-[201] min-w-[140px] overflow-hidden">
-                      <div className="px-3 py-1 border-b border-white/5 mb-1">
-                        <div className="text-[7px] font-black uppercase text-neutral-500">File Operations</div>
-                      </div>
-                      <div className="px-3 py-1.5 text-[8px] text-neutral-500 border-b border-white/5 truncate max-w-[130px]">
-                        Path: C:/Projects/{currentFileName}.vox
-                      </div>
-                      <button 
-                        onClick={() => {
-                          const newName = prompt('Rename Project:', currentFileName);
-                          if (newName) {
-                            const updatedRecent = recentFiles.map(f => f === currentFileName ? newName : f);
-                            setRecentFiles(updatedRecent);
-                            setCurrentFileName(newName);
-                          }
-                          setFileNameMenuOpen(false);
-                        }}
-                        className="w-full text-left px-3 py-2 text-neutral-300 hover:bg-cyan-500 hover:text-black transition-colors flex items-center gap-2"
-                      >
-                        <FileEdit size={10} /> Rename
-                      </button>
-                      <button 
-                        onClick={() => {
-                          const saveName = prompt('Save Project As:', currentFileName + ' (Copy)');
-                          if (saveName) {
-                            if (!recentFiles.includes(saveName)) {
-                              setRecentFiles([...recentFiles, saveName]);
-                            }
-                            setCurrentFileName(saveName);
-                          }
-                          setFileNameMenuOpen(false);
-                        }}
-                        className="w-full text-left px-3 py-2 text-neutral-300 hover:bg-cyan-500 hover:text-black transition-colors flex items-center gap-2"
-                      >
-                        <Save size={10} /> Save As
-                      </button>
-                      <div className="h-px bg-white/5 my-1" />
-                      <button 
-                         onClick={() => {
-                           if (confirm('Close project?')) {
-                             setCurrentFileName('Draught 1');
-                           }
-                           setFileNameMenuOpen(false);
-                         }}
-                        className="w-full text-left px-3 py-2 text-red-400 hover:bg-red-500 hover:text-white transition-colors flex items-center gap-2"
-                      >
-                        <X size={10} /> Close
-                      </button>
-                    </div>
-                  </>
-                )}
               </div>
             </div>
           </div>
@@ -1228,7 +1380,7 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <div className="h-7 bg-black border-b border-white/5 flex items-center px-3 z-[100] shrink-0 gap-4 overflow-x-auto scrollbar-none">
+      <div className="h-10 sm:h-8 bg-black border-b border-white/5 flex items-center px-4 z-[100] shrink-0 gap-5 sm:gap-4 overflow-x-auto scrollbar-none">
           {['FILE', 'EDIT', 'VIEW', 'DRAW', 'MODIFY', 'ANNO', 'TOOLS'].map((item) => {
             const isSelected = 
               (item === 'FILE' && (activePanel === 'drawing_props' || activePanel === 'file')) ||
@@ -1321,8 +1473,38 @@ const App: React.FC = () => {
           ))}
         </div>
 
-        {activePanel === 'layers' && <LayerManager layers={layerConfig} activeLayer={settings.currentLayer} onClose={() => setActivePanel('none')} onUpdateLayer={(id, upd) => setLayerConfig(prev => ({...prev, [id]: {...prev[id], ...upd} }))} onAddLayer={(name) => { const id = generateId(); setLayerConfig(prev => ({...prev, [id]: { id, name, visible: true, locked: false, frozen: false, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' }})); }} onRemoveLayer={(id) => setLayerConfig(prev => { const n = {...prev}; delete n[id]; return n; })} onSetActive={(id) => setSettings(s => ({...s, currentLayer: id}))} />}
-        {activePanel === 'properties' && <PropertiesPanel selectedShapes={(Object.values(layers).flat() as Shape[]).filter(s => selectedIds.includes(s.id))} onUpdateShape={(id, upd) => setLayers(prev => { const n = {...prev}; Object.keys(n).forEach(l => n[l] = n[l].map(s => s.id === id ? {...s, ...upd} : s)); return n; })} layers={layerConfig} settings={settings} onUpdateSettings={(upd) => setSettings(s => ({...s, ...upd}))} onClose={() => setActivePanel('none')} />}
+        {activePanel === 'layers' && (
+          <LayerManager 
+            layers={layerConfig} 
+            activeLayer={settings.currentLayer} 
+            onClose={() => setActivePanel('none')} 
+            onUpdateLayer={(id, upd) => setLayerConfig(prev => ({...prev, [id]: {...prev[id], ...upd} }))} 
+            onAddLayer={(name) => { 
+                const id = generateId(); 
+                setLayerConfig(prev => ({...prev, [id]: { id, name, visible: true, locked: false, frozen: false, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' }})); 
+                setLayers(prev => ({ ...prev, [id]: [] }));
+            }} 
+            onRemoveLayer={(id) => {
+                if (id === '0' || id === 'defpoints') return;
+                setPromptDialog({
+                  title: 'Delete Layer',
+                  message: `Delete layer "${layerConfig[id]?.name}" and all shapes in it?`,
+                  initialValue: '',
+                  type: 'confirm',
+                  onConfirm: () => {
+                    setLayerConfig(prev => { const n = {...prev}; delete n[id]; return n; });
+                    setLayers(prev => { const n = {...prev}; delete n[id]; return n; });
+                    if (settings.currentLayer === id) {
+                        setSettings(s => ({ ...s, currentLayer: '0' }));
+                    }
+                    setLogMessage(`LAYER_REMOVED: ${layerConfig[id]?.name}`);
+                  }
+                });
+            }} 
+            onSetActive={(id) => setSettings(s => ({...s, currentLayer: id}))} 
+          />
+        )}
+        {activePanel === 'properties' && <PropertiesPanel selectedShapes={(Object.values(layers).flat() as Shape[]).filter(s => selectedIds.includes(s.id))} onUpdateShape={(id, upd) => setLayers(prev => { const n = {...prev}; Object.keys(n).forEach(l => n[l] = n[l].map(s => s.id === id ? {...s, ...upd} : s)); return n; })} layers={layerConfig} settings={settings} onUpdateSettings={(upd) => setSettings(s => ({...s, ...upd}))} onCommand={executeCommand} onClose={() => setActivePanel('none')} />}
         {activePanel === 'calculator' && <CalculatorPanel onClose={() => setActivePanel('none')} />}
         {activePanel === 'drafting' && <DraftingSettings options={settings.snapOptions} settings={settings} onSettingsChange={(upd) => setSettings(s => ({...s, ...upd}))} onChange={(upd) => setSettings(s => ({...s, snapOptions: { ...s.snapOptions, ...upd }}))} onClose={() => setActivePanel('none')} />}
         {activePanel === 'file' && <FileManager currentName={currentFileName} recentFiles={recentFiles} onAction={handleAction} onClose={() => setActivePanel('none')} />}
@@ -1356,11 +1538,25 @@ const App: React.FC = () => {
             updateRecentFiles(name);
             commitToHistory();
         }} onClose={() => setActivePanel('none')} />}
+        {activePanel === 'dimstyle' && <DimStyleManager settings={settings} onUpdateSettings={setSettings} onClose={() => setActivePanel('none')} />}
         {mtextEditor && (
           <MTextEditor 
             initialValue={mtextEditor.initialValue} 
-            onSave={(text) => {
-              mtextEditor.callback(text);
+            initialSettings={{
+              size: settings.textSize,
+              rotation: settings.textRotation,
+              justification: settings.textJustification as any
+            }}
+            onSave={(text, props) => {
+              // Update app settings for next time
+              setSettings(s => ({
+                ...s, 
+                textSize: props.size, 
+                textRotation: props.rotation,
+                textJustification: props.justification
+              }));
+              // Pass values to callback for current command
+              mtextEditor.callback(text, props);
               setMtextEditor(null);
             }}
             onCancel={() => {
@@ -1380,7 +1576,7 @@ const App: React.FC = () => {
         )}
       </main>
 
-      <div className="h-7 bg-[#0a0a0c] border-t border-white/5 flex items-center shrink-0 cursor-default select-none">
+      <div className="h-7 bg-[#0a0a0c] border-t border-white/5 flex items-center shrink-0 cursor-default select-none relative z-[150]">
         {/* Fixed Model & Add */}
         <div className="flex items-center h-full shrink-0">
           <button 
@@ -1405,20 +1601,32 @@ const App: React.FC = () => {
         </div>
 
         {/* Scrollable Layout List */}
-        <div className="flex-1 flex items-center h-full overflow-x-auto scrollbar-none gap-px">
+        <div className="flex-1 flex items-center h-full overflow-x-auto scrollbar-none gap-px touch-pan-x overscroll-x-contain">
           {layouts.map(l => (
             <button 
               key={l.id}
               draggable
               onDragStart={() => handleDragStart(l.id)}
               onDragOver={(e) => { e.preventDefault(); handleDragOverTab(l.id); }}
-              onClick={() => setActiveTab(l.id)} 
+              onClick={() => {
+                if (blockNextClick.current) {
+                  blockNextClick.current = false;
+                  return;
+                }
+                if (longPressTimer.current) {
+                  clearTimeout(longPressTimer.current);
+                  longPressTimer.current = null;
+                }
+                setActiveTab(l.id);
+              }} 
               onMouseDown={(e) => handleLayoutLongPress(e, l.id)}
               onMouseUp={cancelLongPress}
               onMouseLeave={cancelLongPress}
               onTouchStart={(e) => handleLayoutLongPress(e, l.id)}
+              onTouchMove={cancelLongPress}
               onTouchEnd={cancelLongPress}
-              className={`h-full px-1.5 text-[9px] font-black uppercase transition-all flex items-center gap-1 whitespace-nowrap group relative ${activeTab === l.id ? 'text-[#00bcd4] bg-white/5' : 'text-neutral-500 hover:text-neutral-300'}`}
+              onTouchCancel={cancelLongPress}
+              className={`h-full px-2.5 text-[9px] font-black uppercase transition-all flex items-center gap-1 whitespace-nowrap group relative ${activeTab === l.id ? 'text-[#00bcd4] bg-white/5 border-b-[1.5px] border-[#00bcd4]' : 'text-neutral-500 hover:text-neutral-300'}`}
             >
               <Layers2 size={9} /> {l.name}
             </button>
@@ -1426,49 +1634,118 @@ const App: React.FC = () => {
         </div>
       </div>
 
+      {fileNameMenuOpen && (
+        <>
+          <div className="fixed inset-0 z-[1050]" onClick={() => setFileNameMenuOpen(false)} />
+          <div 
+              ref={fileNameMenuRef}
+              className="fixed bg-[#0a0a0c]/98 backdrop-blur-2xl border border-white/10 rounded-2xl p-2 flex flex-col gap-1 shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[1100] animate-in zoom-in-95 fade-in slide-in-from-top-4 duration-200 min-w-[180px]"
+              style={{ 
+                  left: Math.max(10, Math.min(fileNameMenuPos.x - 90, window.innerWidth - 190)), 
+                  top: fileNameMenuPos.y + 12
+              }}
+          >
+            <div className="px-3 py-2 mb-2 bg-[#00bcd4]/5 border border-[#00bcd4]/20 rounded-xl">
+              <div className="text-[7px] font-black text-[#00bcd4]/50 mb-1 tracking-widest uppercase">System Path</div>
+              <div className="text-[9px] text-neutral-200 font-mono flex items-center gap-2">
+                <HardDrive size={10} className="text-[#00bcd4]" />
+                <span className="truncate">STORAGE:/{currentFileName}</span>
+              </div>
+            </div>
+            <button 
+              onClick={() => {
+                setPromptDialog({
+                  title: 'Rename Project',
+                  message: 'Enter new project name:',
+                  initialValue: currentFileName,
+                  type: 'prompt',
+                  onConfirm: (newName) => {
+                    if (newName && newName !== currentFileName) {
+                      handleAction('rename', newName);
+                    }
+                  }
+                });
+                setFileNameMenuOpen(false);
+              }}
+              className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+            >
+              <FileEdit size={14} className="text-cyan-500" /> Rename
+            </button>
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                handleAction('saveAs');
+                setFileNameMenuOpen(false);
+              }}
+              className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+            >
+              <Save size={14} className="text-cyan-500" /> Save As
+            </button>
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                handleAction('share');
+                setFileNameMenuOpen(false);
+              }}
+              className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+            >
+              <Share2 size={14} className="text-cyan-500" /> Share Project
+            </button>
+            <div className="h-px bg-white/5 my-1" />
+            <button 
+               onClick={() => {
+                 handleAction('close');
+                 setFileNameMenuOpen(false);
+               }}
+              className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-red-500/80 hover:bg-red-500 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+            >
+              <XCircle size={14} /> Close Project
+            </button>
+          </div>
+        </>
+      )}
+
       {layoutContextMenu && (
         <>
-          <div className="fixed inset-0 z-[1000]" onClick={() => setLayoutContextMenu(null)} />
+          <div className="fixed inset-0 z-[1050]" onClick={() => setLayoutContextMenu(null)} />
           <div 
-            className="fixed bg-[#1a1a1e] border border-white/10 rounded-xl shadow-2xl py-1.5 z-[1001] min-w-[150px] overflow-hidden"
+            ref={layoutContextMenuRef}
+            className="fixed bg-[#0a0a0c]/98 backdrop-blur-2xl border border-white/10 rounded-2xl p-2 flex flex-col gap-1 shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[1100] animate-in zoom-in-95 fade-in slide-in-from-bottom-4 duration-200 min-w-[180px]"
             style={{ 
-              left: Math.max(10, Math.min(layoutContextMenu.x - 75, window.innerWidth - 160)), 
-              top: Math.max(10, layoutContextMenu.y - 285) 
+              left: Math.max(10, Math.min(layoutContextMenu.x - 90, window.innerWidth - 190)), 
+              bottom: (window.innerHeight - layoutContextMenu.y) + 8
             }}
           >
-            <div className="px-3 py-1 border-b border-white/5 mb-1">
-              <div className="text-[8px] font-black uppercase text-neutral-500 tracking-widest">Layout Options</div>
+            <div className="px-3 py-1.5 border-b border-white/5 mb-1 text-center">
+              <div className="text-[8px] font-black uppercase text-cyan-500 tracking-widest">Layout Options</div>
             </div>
             
-            <button onClick={() => renameLayout(layoutContextMenu.layoutId)} className="w-full text-left px-3 py-1.5 text-[9px] text-neutral-300 hover:bg-cyan-500 hover:text-black transition-all font-black uppercase flex items-center gap-2.5">
-              <FileEdit size={12} className="opacity-70" /> Rename
+            <button onClick={() => renameLayout(layoutContextMenu.layoutId)} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <FileEdit size={14} className="text-cyan-500" /> Rename
             </button>
-            <button onClick={() => updateLayoutProperties(layoutContextMenu.layoutId)} className="w-full text-left px-3 py-1.5 text-[9px] text-neutral-300 hover:bg-cyan-500 hover:text-black transition-all font-black uppercase flex items-center gap-2.5">
-              <Sliders size={12} className="opacity-70" /> Properties
+            <button onClick={() => updateLayoutProperties(layoutContextMenu.layoutId)} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <Sliders size={14} className="text-cyan-500" /> Properties
             </button>
-            <button onClick={() => duplicateLayout(layoutContextMenu.layoutId)} className="w-full text-left px-3 py-1.5 text-[9px] text-neutral-300 hover:bg-cyan-500 hover:text-black transition-all font-black uppercase flex items-center gap-2.5">
-              <Layers2 size={12} className="opacity-70" /> Duplicate
+            <button onClick={() => duplicateLayout(layoutContextMenu.layoutId)} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <Layers2 size={14} className="text-cyan-500" /> Duplicate
             </button>
-            <button onClick={importLayout} className="w-full text-left px-3 py-1.5 text-[9px] text-neutral-300 hover:bg-cyan-500 hover:text-black transition-all font-black uppercase flex items-center gap-2.5">
-              <FilePlus size={12} className="opacity-70" /> Import
-            </button>
-
-            <div className="h-px bg-white/5 my-1" />
-            
-            <button onClick={() => moveLayout(layoutContextMenu.layoutId, 'left')} className="w-full text-left px-3 py-1 text-[9px] text-neutral-400 hover:bg-white/5 transition-all font-black uppercase flex items-center gap-2.5">
-              <Target size={12} className="-rotate-90 opacity-50" /> Move Left
-            </button>
-            <button onClick={() => moveLayout(layoutContextMenu.layoutId, 'right')} className="w-full text-left px-3 py-1 text-[9px] text-neutral-400 hover:bg-white/5 transition-all font-black uppercase flex items-center gap-2.5">
-              <Target size={12} className="rotate-90 opacity-50" /> Move Right
+            <button onClick={importLayout} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <FilePlus size={14} className="text-cyan-500" /> Import
             </button>
 
             <div className="h-px bg-white/5 my-1" />
             
-            <button onClick={() => deleteLayout(layoutContextMenu.layoutId)} className="w-full text-left px-3 py-1.5 text-[9px] text-red-500/80 hover:bg-red-500 hover:text-white transition-all font-black uppercase flex items-center gap-2.5">
-              <X size={12} /> Delete
+            <button onClick={() => moveLayout(layoutContextMenu.layoutId, 'left')} className="w-full text-left px-3 py-2 rounded-xl text-[9px] text-neutral-500 hover:bg-white/5 hover:text-white transition-all font-black uppercase flex items-center gap-3 active:scale-95">
+              <Target size={14} className="-rotate-90 opacity-70" /> Move Left
             </button>
-            <button onClick={deleteAllLayouts} className="w-full text-left px-3 py-1.5 text-[9px] text-red-500/80 hover:bg-red-500 hover:text-white transition-all font-black uppercase flex items-center gap-2.5">
-              <X size={12} strokeWidth={3} /> Delete All
+            <button onClick={() => moveLayout(layoutContextMenu.layoutId, 'right')} className="w-full text-left px-3 py-2 rounded-xl text-[9px] text-neutral-500 hover:bg-white/5 hover:text-white transition-all font-black uppercase flex items-center gap-3 active:scale-95">
+              <Target size={14} className="rotate-90 opacity-70" /> Move Right
+            </button>
+
+            <div className="h-px bg-white/5 my-1" />
+            
+            <button onClick={() => deleteLayout(layoutContextMenu.layoutId)} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-red-500/80 hover:bg-red-500 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <X size={14} /> Delete
             </button>
           </div>
         </>
@@ -1494,8 +1771,27 @@ const App: React.FC = () => {
             setIsAiThinking(true);
             setCommandHistory(prev => [...prev, "> AI: " + q]);
             setLogMessage("CONSULTING PRINCIPAL ARCHITECT..."); 
+            
+            // Collect metadata for Gemini
+            const totalEntities = (Object.values(layersRef.current).flat() as Shape[]).length;
+            const context = `
+              Units: ${settingsRef.current.units} (${settingsRef.current.unitSubtype})
+              Active Layer: ${settingsRef.current.currentLayer}
+              Total Entities: ${totalEntities}
+              Viewport: scale=${view.scale}, origin=${view.originX},${view.originY}
+              Last Mouse: ${engineRef.current?.ctx.lastMousePoint.x.toFixed(0)},${engineRef.current?.ctx.lastMousePoint.y.toFixed(0)}
+            `;
+
             try {
-              const res = await getCommandFromAI(q, `Drawing: ${(Object.values(layers).flat() as Shape[]).length} entities. Settings: ${settings.units}.`, sketch); 
+              const res = await getCommandFromAI(q, context, sketch, aiConversation.slice(-6)); 
+              
+              // Update AI conversation history
+              setAiConversation(prev => [
+                ...prev,
+                { role: 'user', parts: [{ text: q }] },
+                { role: 'model', parts: [{ text: JSON.stringify({ explanation: res.text, commands: res.commands }) }] }
+              ].slice(-10)); // Keep last 5 rounds
+
               if (res.commands.length) {
                 res.commands.forEach(c => executeCommand(c)); 
                 setLastAiCommandTime(Date.now());
@@ -1519,12 +1815,55 @@ const App: React.FC = () => {
           onLiveToggle={handleLiveToggle} 
           isLiveActive={isLiveActive} 
           isCommandActive={isCommandActive} 
-          prompt={prompt} 
+          prompt={commandPrompt} 
           history={commandHistory}
           value={commandInput} 
           onChange={setCommandInput} 
         />
       </footer>
+      {promptDialog && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4">
+           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setPromptDialog(null)} />
+           <div className="relative w-full max-w-sm bg-[#0a0a0c] border border-white/10 rounded-2xl p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+              <h3 className="text-white font-black text-xs uppercase tracking-[0.2em] mb-2">{promptDialog.title}</h3>
+              <p className="text-neutral-500 text-[10px] mb-6">{promptDialog.message}</p>
+              
+              {promptDialog.type === 'prompt' && (
+                <input 
+                  type="text" 
+                  autoFocus
+                  defaultValue={promptDialog.initialValue}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                       promptDialog.onConfirm(e.currentTarget.value);
+                       setPromptDialog(null);
+                    } else if (e.key === 'Escape') {
+                       setPromptDialog(null);
+                    }
+                  }}
+                  id="prompt-input"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-xs font-bold focus:outline-none focus:border-cyan-500/50 transition-all mb-6"
+                />
+              )}
+              
+              <div className="flex gap-3">
+                 <button onClick={() => setPromptDialog(null)} className="flex-1 py-3 rounded-xl bg-white/5 text-neutral-400 text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-all active:scale-95">Cancel</button>
+                 <button 
+                   onClick={() => {
+                     const val = (document.getElementById('prompt-input') as HTMLInputElement)?.value || '';
+                     setPromptDialog(null);
+                     setTimeout(() => {
+                        promptDialog.onConfirm(val);
+                     }, 10);
+                   }} 
+                   className="flex-1 py-3 rounded-xl bg-cyan-500 text-black text-[9px] font-black uppercase tracking-widest hover:bg-cyan-400 transition-all active:scale-95"
+                 >
+                   {promptDialog.type === 'confirm' ? 'Confirm Action' : 'Confirm'}
+                 </button>
+              </div>
+           </div>
+        </div>
+      )}
     </div>
   );
 };

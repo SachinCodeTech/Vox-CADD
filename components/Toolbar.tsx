@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Move, Minus, Square, Circle, 
   RotateCw, Ruler, Hash, Target, Maximize, Trash2, 
@@ -10,7 +10,8 @@ import {
   LayoutGrid, MousePointer2, Clipboard, Copy, Spline,
   Infinity, ArrowUpRight, Rows, Dot, CircleOff, Type, AlignLeft, MousePointer, 
   Zap, Pencil, Activity, Grid3X3, Layers2, Settings2, Info, Lock, Eye, EyeOff,
-  Package, Grid2X2, Download, Search, Filter, MonitorPlay
+  Package, Grid2X2, Download, Search, Filter, MonitorPlay,
+  ArrowRightLeft, Radius, Diameter, Settings
 } from 'lucide-react';
 import { AppSettings } from '../types';
 import { ToolbarCategory } from '../App';
@@ -33,33 +34,96 @@ const ToolCircleBtn: React.FC<{
     icon: React.ReactNode, 
     label: string, 
     onClick: () => void, 
+    onLongPress?: () => void,
     active?: boolean,
     danger?: boolean,
     disabled?: boolean
-}> = ({ icon, label, onClick, active, danger, disabled }) => {
+}> = ({ icon, label, onClick, onLongPress, active, danger, disabled }) => {
+    const timerRef = React.useRef<any>(null);
+    const longPressTriggered = React.useRef(false);
+
+    const handleMouseDown = (e: React.MouseEvent) => {
+        if (!onLongPress) return;
+        longPressTriggered.current = false;
+        timerRef.current = setTimeout(() => {
+            onLongPress();
+            longPressTriggered.current = true;
+            if (navigator.vibrate) navigator.vibrate([30, 50]);
+        }, 500);
+    };
+
+    const handleTouchStart = (e: React.TouchEvent) => {
+        if (!onLongPress) return;
+        longPressTriggered.current = false;
+        timerRef.current = setTimeout(() => {
+            onLongPress();
+            longPressTriggered.current = true;
+            if (navigator.vibrate) navigator.vibrate([30, 50]);
+        }, 500);
+    };
+
+    const handleTouchMove = () => {
+        if (timerRef.current) {
+            clearTimeout(timerRef.current);
+            timerRef.current = null;
+        }
+    };
+
+    const handleMouseUp = () => {
+        if (timerRef.current) {
+            clearTimeout(timerRef.current);
+            timerRef.current = null;
+        }
+    };
+
     const handleClick = () => {
+        if (longPressTriggered.current) {
+            longPressTriggered.current = false;
+            return;
+        }
         if (navigator.vibrate) navigator.vibrate(10);
         onClick();
     };
+
     return (
         <button 
             onClick={handleClick} 
+            onMouseDown={handleMouseDown}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleMouseUp}
+            onTouchCancel={handleMouseUp}
             disabled={disabled}
-            className={`flex-shrink-0 flex flex-col items-center justify-center active:scale-90 no-tap ${disabled ? 'opacity-20 grayscale' : ''}`}
+            className={`flex-shrink-0 flex flex-col items-center justify-center active:scale-95 no-tap py-1 px-1 ${disabled ? 'opacity-20 grayscale' : ''}`}
         >
-            <div className={`w-11 h-11 rounded-full border flex items-center justify-center transition-all duration-300
+            <div className={`w-12 h-12 rounded-full border flex items-center justify-center transition-all duration-300
                 ${active ? 'bg-[#00bcd4] text-black border-[#00bcd4] shadow-[0_0_15px_rgba(0,188,212,0.5)] scale-105' : 
                   danger ? 'bg-red-950/20 border-red-900/40 text-red-500 hover:border-red-500 hover:bg-red-500/10 hover:shadow-[0_0_10px_rgba(239,68,68,0.2)]' :
                   'bg-[#121214] border-white/5 text-neutral-500 hover:text-[#00bcd4] hover:border-[#00bcd4] hover:bg-[#00bcd4]/5 hover:shadow-[0_0_10px_rgba(0,188,212,0.2)]'}`}
             >
-                {React.cloneElement(icon as React.ReactElement, { size: 18 })}
+                {React.cloneElement(icon as React.ReactElement, { size: 20 })}
             </div>
-            <span className={`text-[7px] font-black uppercase mt-1 tracking-widest ${active ? 'text-[#00bcd4]' : 'text-neutral-600'}`}>{label}</span>
+            <span className={`text-[8px] font-black uppercase mt-1 tracking-widest ${active ? 'text-[#00bcd4]' : 'text-neutral-600'}`}>{label}</span>
         </button>
     );
 };
 
 const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settings, onSettingChange, canUndo, canRedo, activeCommandName, showCircleOptions, showArcOptions, showEllipseOptions }) => {
+  const [dimFlyoutOpen, setDimFlyoutOpen] = useState(false);
+
+    const btnRef = React.useRef<HTMLDivElement>(null);
+    const [flyoutPos, setFlyoutPos] = useState({ x: 0, y: 0 });
+
+    const toggleFlyout = () => {
+        if (!dimFlyoutOpen && btnRef.current) {
+            const rect = btnRef.current.getBoundingClientRect();
+            setFlyoutPos({ x: rect.left, y: rect.top });
+        }
+        setDimFlyoutOpen(!dimFlyoutOpen);
+    };
+
   const renderContent = () => {
     switch (category) {
       case 'Draw':
@@ -119,7 +183,59 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
           <>
             <ToolCircleBtn onClick={() => onCommand('mt')} icon={<AlignLeft />} label="MTEXT" active={activeCommandName === 'MTEXT'} />
             <ToolCircleBtn onClick={() => onCommand('t')} icon={<Type />} label="TEXT" active={activeCommandName === 'TEXT'} />
-            <ToolCircleBtn onClick={() => onCommand('dim')} icon={<Ruler />} label="DIM" active={activeCommandName === 'DIM'} />
+            <div className="relative shrink-0" ref={btnRef}>
+                <ToolCircleBtn 
+                    onClick={() => { if (dimFlyoutOpen) setDimFlyoutOpen(false); else onCommand('dimlinear'); }} 
+                    onLongPress={toggleFlyout}
+                    icon={<div className="relative"><Ruler />{dimFlyoutOpen && <div className="absolute -bottom-1 -right-1 bg-cyan-500 rounded-full w-2 h-2" />}</div>} 
+                    label="DIM"
+                    active={activeCommandName?.startsWith('DIM')} 
+                />
+                {dimFlyoutOpen && (
+                    <>
+                    <div className="fixed inset-0 z-[1050]" onClick={() => setDimFlyoutOpen(false)} />
+                    <div 
+                        className="fixed bg-[#0a0a0c]/98 backdrop-blur-2xl border border-white/10 rounded-2xl p-2 flex flex-col gap-1 shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[1100] animate-in zoom-in-95 fade-in slide-in-from-bottom-4 duration-200 min-w-[180px]"
+                        style={{ 
+                            left: Math.max(10, Math.min(flyoutPos.x - 90, window.innerWidth - 190)), 
+                            bottom: (window.innerHeight - flyoutPos.y) + 8
+                        }}
+                    >
+                        <div className="px-3 py-1.5 border-b border-white/5 mb-1 text-center">
+                            <div className="text-[7.5px] font-black uppercase text-cyan-500 tracking-widest">Dimension Tools</div>
+                        </div>
+                        <button onClick={() => { onCommand('dimlinear'); setDimFlyoutOpen(false); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+                            <ArrowRightLeft size={14} className="text-cyan-500" /> Linear
+                        </button>
+                        <button onClick={() => { onCommand('aligned'); setDimFlyoutOpen(false); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+                            <ArrowUpRight size={14} className="text-cyan-500" /> Aligned
+                        </button>
+                        <button onClick={() => { onCommand('dimradius'); setDimFlyoutOpen(false); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+                            <Radius size={14} className="text-cyan-500" /> Radius
+                        </button>
+                        <button onClick={() => { onCommand('dimdiam'); setDimFlyoutOpen(false); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+                            <Diameter size={14} className="text-cyan-500" /> Diameter
+                        </button>
+                        <button onClick={() => { onCommand('angular'); setDimFlyoutOpen(false); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+                            <RotateCw size={14} className="text-cyan-500" /> Angular
+                        </button>
+                        <button onClick={() => { onCommand('dimarc'); setDimFlyoutOpen(false); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+                            <Activity size={14} className="text-cyan-500" /> Arc Length
+                        </button>
+                        <button onClick={() => { onCommand('dimord'); setDimFlyoutOpen(false); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+                            <Target size={14} className="text-cyan-500" /> Ordinate
+                        </button>
+                        <div className="h-px bg-white/5 my-1" />
+                        <button 
+                            onClick={() => { onAction('toggleDimStyle'); setDimFlyoutOpen(false); }} 
+                            className="w-full flex items-center justify-center gap-2.5 p-3 rounded-xl bg-cyan-500/10 text-cyan-500 text-[9px] font-black uppercase tracking-[0.2em] hover:bg-cyan-500 hover:text-black transition-all active:scale-95"
+                        >
+                            <Settings size={12} /> Dimension Styles
+                        </button>
+                    </div>
+                    </>
+                )}
+            </div>
             <ToolCircleBtn onClick={() => onCommand('lea')} icon={<Navigation className="rotate-[-135deg]" />} label="LEADER" active={activeCommandName === 'LEADER'} />
             <ToolCircleBtn onClick={() => onCommand('dist')} icon={<Target />} label="DIST" active={activeCommandName === 'DIST'} />
             <ToolCircleBtn onClick={() => onCommand('area')} icon={<BoxSelect />} label="AREA" active={activeCommandName === 'AREA'} />
@@ -192,7 +308,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
            <button onClick={() => onAction('cancel')} className="shrink-0 px-3 py-1 rounded-md bg-red-500/10 border border-red-500/30 text-red-500 text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all">Cancel</button>
         </div>
       )}
-      <div className="flex items-center gap-4 px-4 h-[72px] overflow-x-auto scrollbar-none">
+      <div className="w-full flex items-center gap-4 px-4 h-[76px] overflow-x-auto scrollbar-none touch-pan-x overscroll-x-contain">
         {renderContent()}
       </div>
     </div>

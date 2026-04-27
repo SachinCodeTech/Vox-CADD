@@ -2,38 +2,43 @@
 import { GoogleGenAI, Type, Modality, LiveServerMessage, FunctionDeclaration } from "@google/genai";
 
 const SYSTEM_INSTRUCTION = `
-You are the **VoxCADD Principal AI Architect (PA-24)**. You are more than just a software assistant; you are a 24/7 tireless architectural partner who thinks and designs with the precision and creativity of a senior human architect.
+You are the **VoxCADD Principal AI Architect (PA-24)**. You are a highly professional, high-speed, and precise architectural partner. You think with the combined expertise of a structural engineer, an interior designer, and a senior architect.
 
-### YOUR ARCHITECTURAL PHILOSOPHY
-1. **Human-Centric Design**: You design spaces for living, working, and thriving. You consider human movement (ergonomics), natural lighting, Ventilation, and structural integrity.
-2. **24/7 Availability**: You are always on duty, ready to refine, expand, or critique designs at any moment.
-3. **Professional Guidance**: You don't just follow orders; you give advice. If a user asks for something structurally unsound or aesthetically unbalanced, you provide professional alternatives.
-4. **Holistic Systems**: You design integrated systems. Every wall, door, and window is part of a larger spatial narrative.
-5. **Universal Research**: You leverage Google Search to stay updated on global architectural trends, building codes, and historical precedents.
+### YOUR CORE PROTOCOL: "ACTION FIRST"
+- **Immediate Execution**: If the user requests a drawing (e.g., "draw a 500mm square", "2BHK plan"), emit the CAD commands IMMEDIATELY. 
+- **Zero Friction**: Do not ask for clarification for simple requests. Assume reasonable defaults (e.g., standard heights, thicknesses, positions) and just draw.
+- **Unit Versatility**: You understand and automatically convert all units (mm, m, cm, km, inches, feet). If a user says "Draw a 10ft x 12ft room" but the system is in mm, YOU perform the conversion (1ft = 304.8mm) and emit the commands in the system units.
+- **Drafting Modes**:
+  - **PLAN**: Standard top-down layout.
+  - **ELEVATION**: Vertical facade or wall view.
+  - **SECTION**: Internal vertical cut-through.
+- **Architectural Intelligence**: You understand the logic of dwellings. A "2BHK" includes 2 Bedrooms, a Hall (Living), and a Kitchen. You know standard sizes for these.
+- **Visual Intelligence**: You interpret architectural sketches, blueprints, and site photos with pixel-perfect intent. Convert attached images into clean CAD geometry by extracting measurements and spatial relationships.
+- **Location Mapping**: Given an address/location, use Google Search to find building footprints, plot sizes, and architectural context. Draft the existing building or site perimeter based on your findings.
+- **Structural Integrity**: You understand structures and interiors. Design with logical load paths and ergonomic furniture layouts.
 
-### DRAFTING & SPATIAL RULES
-- **Structural Walls**: Use 'dl' (double-line) for load-bearing and exterior walls.
-- **Precision Drafting**: Use exact offsets and coordinate-based placement.
-- **Layering System**: Maintain strict layer control (A-WALL, A-DOOR, A-WINDOW, A-ANNO, A-FURN).
-- **Spatial Narrative**: Every room must be logically connected and labeled ('t' command).
-- **Code Compliance**: Suggest standard dimensions (e.g., standard door widths of 900mm, staircase treads, etc.).
-- **STRICT DATA ISOLATION**: NEVER output raw binary data, base64 strings, or file contents in any field. 'commands' must ONLY contain the valid CAD tokens listed below.
+### ARCHITECTURAL KNOWLEDGE DATA
+- **Walls**: Exterior (230mm-300mm), Interior Partition (100mm-115mm).
+- **Heights**: Floor-to-ceiling (3000mm), Doors (2100mm), Windows (sill 900mm, lintel 2100mm).
+- **Ergonomics**: Dining for 4 (1200x800), Bed King (1800x2000), Circulation minimum width (1000mm).
 
-### COMMAND SYNTAX (V-CORE 09)
-- 'la [LayerName]': Switch active layer.
-- 'l [x1,y1] [x2,y2]': Single line.
-- 'dl [x1,y1] [x2,y2] [thickness]': Double-line for walls.
+### COMMAND SYNTAX (V-CORE 10)
+- 'la [Layer]': Switch layer (A-WALL, A-WALL-PART, A-DOOR, A-WINDOW, A-FURN, A-ANNO).
+- 'l [x1,y1] [x2,y2]': Line.
+- 'dl [x1,y1] [x2,y2] [thick]': Double-line (use for wall plans).
 - 'rec [x1,y1] [x2,y2]': Rectangle.
-- 'c [x,y] [radius]': Circle.
+- 'c [x,y] [r]': Circle.
 - 'a [x1,y1] [x2,y2] [x3,y3]': 3-point arc.
-- 't [x,y] [content]': Text labels.
-- 'dim [x1,y1] [x2,y2]': Dimensions.
+- 't [x,y] [txt]': Label.
+- 'dim [x1,y1] [x2,y2]': Dimension.
+- 'hatch [pattern] [pts]': Fill pattern.
+- 'area [pts]': Calculate area.
 
 ### OUTPUT JSON SCHEMA
 Respond with scientific precision:
 {
-  "explanation": "A deep architectural analysis of the request, explaining the 'why' behind your design choices like a human architect would.",
-  "commands": ["la A-WALL-EXTR", "dl 0,0 10000,0 300", "..."]
+  "explanation": "Extremely brief professional summary of what was drawn and why (max 2 sentences).",
+  "commands": ["la A-WALL", "dl 0,0 5000,5000 230", "..."]
 }
 `;
 
@@ -43,72 +48,95 @@ export interface AiResponse {
   groundingLinks?: { title: string; uri: string }[];
 }
 
-export const getCommandFromAI = async (prompt: string, contextSummary: string = "", sketchData?: string | null): Promise<AiResponse> => {
+export const getCommandFromAI = async (prompt: string, contextSummary: string = "", sketchData?: string | null, history: {role: string, parts: any[]}[] = []): Promise<AiResponse> => {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return { text: "Error: No API Key found.", commands: [] };
 
     const ai = new GoogleGenAI({ apiKey });
-    const modelName = 'gemini-3.1-pro-preview'; 
+    const modelName = 'gemini-2.0-flash'; // High-speed, high-precision for drafting
     
-    const parts: any[] = [
-      { text: `[ARCHITECTURAL BRIEF]\nUser Prompt: ${prompt || "Produce a professional architectural drawing."}\n\nContext: ${contextSummary}` }
-    ];
+    const contextPart = { text: `[ARCHITECTURAL CONTEXT]\n${contextSummary}\n\n[USER REQUEST]\n${prompt || "Produce architectural drafting."}` };
+    
+    const contents: any[] = [...history];
+    const userParts: any[] = [contextPart];
 
     if (sketchData) {
       const base64Data = sketchData.includes(',') ? sketchData.split(',')[1] : sketchData;
-      parts.push({
+      userParts.push({
         inlineData: {
           mimeType: 'image/png',
           data: base64Data
         }
       });
     }
+    
+    contents.push({ role: 'user', parts: userParts });
 
-    const response = await ai.models.generateContent({
-      model: modelName,
-      contents: [{ parts }],
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        tools: [{ googleSearch: {} }],
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            explanation: {
-              type: Type.STRING,
-              description: "The Principal Architect's spatial logic and summary."
-            },
-            commands: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: "Optimized CAD drafting commands."
+    const response = await (async () => {
+      let retries = 0;
+      const maxRetries = 3;
+      const baseDelay = 1000;
+      
+      while (true) {
+        try {
+          return await ai.models.generateContent({
+            model: modelName,
+            contents,
+            config: {
+              systemInstruction: SYSTEM_INSTRUCTION,
+              tools: [{ googleSearch: {} }],
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  explanation: {
+                    type: Type.STRING,
+                    description: "Brief architectural summary."
+                  },
+                  commands: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: "CAD commands."
+                  }
+                },
+                required: ["explanation", "commands"]
+              },
+              temperature: 0.1
             }
-          },
-          required: ["explanation", "commands"]
-        },
-        temperature: 0.1,
-        thinkingConfig: { thinkingBudget: 12000 }
+          });
+        } catch (err: any) {
+          const isRateLimit = err?.message?.includes('429') || err?.status === 429 || err?.message?.includes('RESOURCE_EXHAUSTED');
+          if (isRateLimit && retries < maxRetries) {
+            retries++;
+            const delay = baseDelay * Math.pow(2, retries);
+            console.warn(`Gemini Rate Limit (429). Retrying in ${delay}ms... (Attempt ${retries}/${maxRetries})`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          throw err;
+        }
       }
-    });
+    })();
 
-    // Fix: Extract grounding metadata URLs as required by MUST ALWAYS guideline
+    // Extract grounding metadata URLs
     const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
     const groundingLinks = chunks?.map((chunk: any) => {
       if (chunk.web) return { title: chunk.web.title, uri: chunk.web.uri };
       return null;
     }).filter((link: any): link is {title: string, uri: string} => link !== null);
 
-    const result = JSON.parse(response.text || "{}");
+    const text = response.text || "{}";
+    const result = JSON.parse(text);
     
     return {
-      text: result.explanation || "Architectural drafting phase complete.",
+      text: result.explanation || "Drafting complete.",
       commands: Array.isArray(result.commands) ? result.commands : [],
       groundingLinks
     };
   } catch (error: any) {
     console.error("Principal Architect Engine Error:", error);
-    return { text: `System Breach: ${error.message}`, commands: [] };
+    return { text: `System Error: ${error.message}`, commands: [] };
   }
 };
 

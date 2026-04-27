@@ -174,6 +174,24 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
                         </div>
                     </div>
                     <div className="space-y-3">
+                        <label className="text-[9px] font-black text-neutral-600 uppercase tracking-widest px-1">Display Mode</label>
+                         <button 
+                            onClick={() => onSettingsChange({ showDualUnits: !settings.showDualUnits })} 
+                            className={`w-full flex items-center justify-between p-4 rounded-xl border transition-all ${settings.showDualUnits ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' : 'bg-neutral-900 border-white/5 text-neutral-600'}`}
+                         >
+                            <div className="flex items-center gap-3">
+                                <Maximize size={16} />
+                                <div className="flex flex-col items-start">
+                                    <span className="text-[10px] font-black uppercase tracking-widest">Dual Unit Overlay</span>
+                                    <span className="text-[7px] font-bold opacity-60 uppercase">Shows metric & imperial simultaneously</span>
+                                </div>
+                            </div>
+                            <div className={`w-10 h-5 rounded-full relative transition-all ${settings.showDualUnits ? 'bg-cyan-500' : 'bg-neutral-800'}`}>
+                                <div className={`absolute top-1 w-3 h-3 rounded-full bg-white transition-all ${settings.showDualUnits ? 'right-1' : 'left-1'}`} />
+                            </div>
+                         </button>
+                    </div>
+                    <div className="space-y-3">
                         <label className="text-[9px] font-black text-neutral-600 uppercase tracking-widest px-1">Decimal Precision</label>
                         <select 
                             value={settings.precision}

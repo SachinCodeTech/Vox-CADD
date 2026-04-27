@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 // Fix: Added missing PolyShape import to satisfy type cast on line 154
-import { Shape, AppSettings, LayerConfig, LineType, Point, LineShape, CircleShape, RectShape, ArcShape, TextShape, MTextShape, LeaderShape, PolyShape } from '../types';
-import { X, Sliders, Layers, Target, Maximize2, PenTool, FileEdit, Move, Zap, ChevronDown, ChevronRight, Info, Type, Ruler, Box } from 'lucide-react';
-import { formatLength, parseLength, distance } from '../services/cadService';
+import { Shape, AppSettings, LayerConfig, LineType, Point, LineShape, CircleShape, RectShape, ArcShape, TextShape, MTextShape, LeaderShape, PolyShape, EllipseShape, DonutShape, DimensionShape, DoubleLineShape } from '../types';
+import { X, Sliders, Layers, Target, Maximize2, PenTool, FileEdit, Move, Zap, ChevronDown, ChevronRight, Info, Type, Ruler, Box, Compass, Activity, Hash, Layers2, Square, Copy, Scissors, ExternalLink, RefreshCw } from 'lucide-react';
+import { formatLength, parseLength, distance, calculateArea, calculatePolylineLength, formatDualLength, formatDualArea } from '../services/cadService';
 
 const PropertySection = ({ title, icon: Icon, children, defaultOpen = true }: { title: string, icon: any, children?: React.ReactNode, defaultOpen?: boolean }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -31,10 +31,11 @@ interface PropertiesPanelProps {
   settings: AppSettings;
   onUpdateSettings: (s: Partial<AppSettings>) => void;
   onClose: () => void;
+  onCommand?: (cmd: string) => void;
 }
 
 const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ 
-    selectedShapes, onUpdateShape, layers, settings, onUpdateSettings, onClose 
+    selectedShapes, onUpdateShape, layers, settings, onUpdateSettings, onClose, onCommand
 }) => {
   const isImperial = settings.units === 'imperial';
   const [pos, setPos] = useState({ x: 0, y: 0 });
@@ -84,25 +85,47 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     </div>
   );
 
-  const NumericInput = ({ value, onChange, readOnly = false }: { value: number, onChange: (val: number) => void, readOnly?: boolean }) => {
-    const [local, setLocal] = useState(formatLength(value, isImperial));
-    useEffect(() => { setLocal(formatLength(value, isImperial)); }, [value, isImperial]);
+  const NumericInput = ({ value, onChange, readOnly = false, isArea = false }: { value: number, onChange: (val: number) => void, readOnly?: boolean, isArea?: boolean }) => {
+    const { primary, secondary } = isArea ? formatDualArea(value, isImperial) : formatDualLength(value, isImperial);
+    const [local, setLocal] = useState(primary);
+    useEffect(() => { setLocal(primary); }, [value, isImperial, primary]);
     
-    if (readOnly) return <span className="text-[10px] text-[#00bcd4]/70 font-mono px-3 truncate block">{local}</span>;
+    if (readOnly) return (
+      <div className="w-full bg-[#121214] border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between shadow-inner group-hover/row:bg-white/[0.02] transition-colors">
+        <span className={`text-[11px] font-mono truncate block leading-none ${isArea ? 'text-[#00bcd4]' : 'text-white'}`}>{primary}</span>
+        <span className="text-[9px] text-neutral-600 font-mono tracking-tighter truncate block leading-none ml-2 uppercase opacity-80">{secondary}</span>
+      </div>
+    );
 
     return (
-        <input 
-            type="text"
-            className="w-full bg-[#121214] border border-white/5 text-[10px] text-white font-mono rounded-lg px-3 py-2 outline-none focus:border-[#00bcd4]/50 transition-all uppercase shadow-inner"
-            value={local}
-            onChange={e => setLocal(e.target.value)}
-            onBlur={() => { 
-                const p = parseLength(local, isImperial); 
-                if (!isNaN(p)) onChange(p); 
-                else setLocal(formatLength(value, isImperial)); 
-            }}
-        />
+        <div className="group/input relative">
+            <input 
+                type="text"
+                className="w-full bg-[#121214] border border-white/5 text-[11px] text-white font-mono rounded-xl px-4 py-3 pb-3 outline-none focus:border-[#00bcd4]/50 transition-all uppercase shadow-inner"
+                value={local}
+                onChange={e => setLocal(e.target.value)}
+                onBlur={() => { 
+                    const p = parseLength(local, isImperial); 
+                    if (!isNaN(p)) onChange(p); 
+                    else setLocal(primary); 
+                }}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                        const p = parseLength(local, isImperial);
+                        if (!isNaN(p)) onChange(p);
+                        (e.target as HTMLInputElement).blur();
+                    }
+                }}
+            />
+            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none transition-opacity flex flex-col items-end opacity-100">
+                <span className="text-[9px] text-neutral-600 font-mono uppercase bg-[#121214] px-1 tracking-tighter">{secondary}</span>
+            </div>
+        </div>
     );
+  };
+
+  const DualAreaLabel = ({ value }: { value: number }) => {
+    return <NumericInput value={value} onChange={() => {}} readOnly={true} isArea={true} />;
   };
 
   const lineTypes: { value: LineType; label: string }[] = [
@@ -117,6 +140,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
       case 'line': {
         const l = s as LineShape;
         const len = distance({x: l.x1, y: l.y1}, {x: l.x2, y: l.y2});
+        const angle = Math.atan2(l.y2 - l.y1, l.x2 - l.x1) * 180 / Math.PI;
         return (
           <>
             <PropertyRow label="Start X"><NumericInput value={l.x1} onChange={v => handleShapeChange('x1', v)} /></PropertyRow>
@@ -124,38 +148,49 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             <PropertyRow label="End X"><NumericInput value={l.x2} onChange={v => handleShapeChange('x2', v)} /></PropertyRow>
             <PropertyRow label="End Y"><NumericInput value={l.y2} onChange={v => handleShapeChange('y2', v)} /></PropertyRow>
             <PropertyRow label="Length" readOnly><NumericInput value={len} onChange={() => {}} readOnly /></PropertyRow>
+            <PropertyRow label="Angle" readOnly><span className="text-[10px] text-[#00bcd4]/70 font-mono px-3">{angle.toFixed(2)}°</span></PropertyRow>
           </>
         );
       }
       case 'circle': {
         const c = s as CircleShape;
         const area = Math.PI * c.radius * c.radius;
+        const circ = 2 * Math.PI * c.radius;
         return (
           <>
             <PropertyRow label="Center X"><NumericInput value={c.x} onChange={v => handleShapeChange('x', v)} /></PropertyRow>
             <PropertyRow label="Center Y"><NumericInput value={c.y} onChange={v => handleShapeChange('y', v)} /></PropertyRow>
             <PropertyRow label="Radius"><NumericInput value={c.radius} onChange={v => handleShapeChange('radius', v)} /></PropertyRow>
-            <PropertyRow label="Diameter" readOnly><NumericInput value={c.radius * 2} onChange={() => {}} readOnly /></PropertyRow>
-            <PropertyRow label="Area" readOnly><span className="text-[10px] text-neutral-400 font-mono px-3">{area.toFixed(2)} sq</span></PropertyRow>
+            <PropertyRow label="Diameter"><NumericInput value={c.radius * 2} onChange={v => handleShapeChange('radius', v / 2)} /></PropertyRow>
+            <PropertyRow label="Circumf." readOnly><NumericInput value={circ} onChange={() => {}} readOnly /></PropertyRow>
+            <PropertyRow label="Area" readOnly><DualAreaLabel value={area} /></PropertyRow>
           </>
         );
       }
       case 'rect': {
         const r = s as RectShape;
+        const area = r.width * r.height;
+        const perim = 2 * (r.width + r.height);
         return (
           <>
             <PropertyRow label="Origin X"><NumericInput value={r.x} onChange={v => handleShapeChange('x', v)} /></PropertyRow>
             <PropertyRow label="Origin Y"><NumericInput value={r.y} onChange={v => handleShapeChange('y', v)} /></PropertyRow>
             <PropertyRow label="Width"><NumericInput value={r.width} onChange={v => handleShapeChange('width', v)} /></PropertyRow>
             <PropertyRow label="Height"><NumericInput value={r.height} onChange={v => handleShapeChange('height', v)} /></PropertyRow>
+            <PropertyRow label="Area" readOnly><DualAreaLabel value={area} /></PropertyRow>
+            <PropertyRow label="Perimeter" readOnly><NumericInput value={perim} onChange={() => {}} readOnly /></PropertyRow>
           </>
         );
       }
       case 'pline': case 'spline': case 'polygon': {
           const p = s as PolyShape;
+          const len = calculatePolylineLength(p.points, p.closed);
+          const area = p.closed ? calculateArea(p.points) : 0;
           return (
               <>
-                <PropertyRow label="Points" readOnly><span className="text-[10px] text-neutral-400 font-mono px-3">{p.points.length} nodes</span></PropertyRow>
+                <PropertyRow label="Nodes" readOnly><span className="text-[10px] text-neutral-400 font-mono px-3">{p.points.length} points</span></PropertyRow>
+                <PropertyRow label="Length" readOnly><NumericInput value={len} onChange={() => {}} readOnly /></PropertyRow>
+                {p.closed && <PropertyRow label="Area" readOnly><DualAreaLabel value={area} /></PropertyRow>}
                 <PropertyRow label="Closed">
                     <button onClick={() => handleShapeChange('closed', !p.closed)} className={`px-4 py-1.5 rounded-lg text-[9px] font-black uppercase border transition-all ${p.closed ? 'bg-[#00bcd4]/10 border-[#00bcd4]/30 text-[#00bcd4]' : 'bg-white/5 border-white/5 text-neutral-500'}`}>
                         {p.closed ? 'Yes' : 'No'}
@@ -163,6 +198,81 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 </PropertyRow>
               </>
           );
+      }
+      case 'dline': {
+        const d = s as DoubleLineShape;
+        const len = calculatePolylineLength(d.points, d.closed);
+        return (
+          <>
+            <PropertyRow label="Nodes" readOnly><span className="text-[10px] text-neutral-400 font-mono px-3">{d.points.length} points</span></PropertyRow>
+            <PropertyRow label="Thickness"><NumericInput value={d.thickness} onChange={v => handleShapeChange('thickness', v)} /></PropertyRow>
+            <PropertyRow label="Length" readOnly><NumericInput value={len} onChange={() => {}} readOnly /></PropertyRow>
+            <PropertyRow label="Justify" readOnly><span className="text-[10px] text-neutral-400 font-mono px-3 uppercase">{d.justification}</span></PropertyRow>
+          </>
+        );
+      }
+      case 'arc': {
+        const a = s as ArcShape;
+        const arcLen = a.radius * Math.abs(a.endAngle - a.startAngle);
+        return (
+          <>
+            <PropertyRow label="Center X"><NumericInput value={a.x} onChange={v => handleShapeChange('x', v)} /></PropertyRow>
+            <PropertyRow label="Center Y"><NumericInput value={a.y} onChange={v => handleShapeChange('y', v)} /></PropertyRow>
+            <PropertyRow label="Radius"><NumericInput value={a.radius} onChange={v => handleShapeChange('radius', v)} /></PropertyRow>
+            <PropertyRow label="Start Angle"><NumericInput value={a.startAngle * 180 / Math.PI} onChange={v => handleShapeChange('startAngle', v * Math.PI / 180)} /></PropertyRow>
+            <PropertyRow label="End Angle"><NumericInput value={a.endAngle * 180 / Math.PI} onChange={v => handleShapeChange('endAngle', v * Math.PI / 180)} /></PropertyRow>
+            <PropertyRow label="Arc Length" readOnly><NumericInput value={arcLen} onChange={() => {}} readOnly /></PropertyRow>
+          </>
+        );
+      }
+      case 'ellipse': {
+        const e = s as EllipseShape;
+        const area = Math.PI * e.rx * e.ry;
+        return (
+          <>
+            <PropertyRow label="Center X"><NumericInput value={e.x} onChange={v => handleShapeChange('x', v)} /></PropertyRow>
+            <PropertyRow label="Center Y"><NumericInput value={e.y} onChange={v => handleShapeChange('y', v)} /></PropertyRow>
+            <PropertyRow label="Axis Major"><NumericInput value={e.rx} onChange={v => handleShapeChange('rx', v)} /></PropertyRow>
+            <PropertyRow label="Axis Minor"><NumericInput value={e.ry} onChange={v => handleShapeChange('ry', v)} /></PropertyRow>
+            <PropertyRow label="Rotation"><NumericInput value={e.rotation * 180 / Math.PI} onChange={v => handleShapeChange('rotation', v * Math.PI / 180)} /></PropertyRow>
+            <PropertyRow label="Area" readOnly><DualAreaLabel value={area} /></PropertyRow>
+          </>
+        );
+      }
+      case 'donut': {
+        const d = s as DonutShape;
+        const area = Math.PI * (d.outerRadius * d.outerRadius - d.innerRadius * d.innerRadius);
+        return (
+          <>
+            <PropertyRow label="Center X"><NumericInput value={d.x} onChange={v => handleShapeChange('x', v)} /></PropertyRow>
+            <PropertyRow label="Center Y"><NumericInput value={d.y} onChange={v => handleShapeChange('y', v)} /></PropertyRow>
+            <PropertyRow label="Inner Rad"><NumericInput value={d.innerRadius} onChange={v => handleShapeChange('innerRadius', v)} /></PropertyRow>
+            <PropertyRow label="Outer Rad"><NumericInput value={d.outerRadius} onChange={v => handleShapeChange('outerRadius', v)} /></PropertyRow>
+            <PropertyRow label="Area" readOnly><DualAreaLabel value={area} /></PropertyRow>
+          </>
+        );
+      }
+      case 'dimension': {
+        const d = s as DimensionShape;
+        const actualLen = distance({x: d.x1, y: d.y1}, {x: d.x2, y: d.y2});
+        return (
+          <>
+            <PropertyRow label="Dim Type" readOnly><span className="text-[10px] text-neutral-400 font-mono px-3 uppercase">{d.dimType}</span></PropertyRow>
+            <PropertyRow label="Measured" readOnly><NumericInput value={actualLen} onChange={() => {}} readOnly /></PropertyRow>
+            <PropertyRow label="Point 1 X"><NumericInput value={d.x1} onChange={v => handleShapeChange('x1', v)} /></PropertyRow>
+            <PropertyRow label="Point 1 Y"><NumericInput value={d.y1} onChange={v => handleShapeChange('y1', v)} /></PropertyRow>
+            <PropertyRow label="Point 2 X"><NumericInput value={d.x2} onChange={v => handleShapeChange('x2', v)} /></PropertyRow>
+            <PropertyRow label="Point 2 Y"><NumericInput value={d.y2} onChange={v => handleShapeChange('y2', v)} /></PropertyRow>
+            <PropertyRow label="Override Text">
+                <input 
+                    type="text"
+                    className="w-full bg-[#121214] border border-white/5 text-[10px] text-white font-mono rounded-lg px-3 py-2 outline-none focus:border-[#00bcd4]/50"
+                    value={d.text}
+                    onChange={e => handleShapeChange('text', e.target.value)}
+                />
+            </PropertyRow>
+          </>
+        );
       }
       case 'text': case 'mtext': {
           const t = s as TextShape | MTextShape;
@@ -215,6 +325,60 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                   </div>
                   <Zap size={14} className="text-[#00bcd4]" />
                 </div>
+
+                {selectedShapes.length > 1 && (
+                  <PropertySection title="Selection Statistics" icon={Activity} defaultOpen={true}>
+                    <div className="px-6 py-2">
+                        <div className="flex flex-wrap gap-2">
+                            {Object.entries(selectedShapes.reduce((acc, s) => {
+                                acc[s.type] = (acc[s.type] || 0) + 1;
+                                return acc;
+                            }, {} as Record<string, number>)).map(([type, count]) => (
+                                <div key={type} className="bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 flex items-center gap-2">
+                                    <span className="text-[8px] text-neutral-500 font-black uppercase tracking-tighter">{type}</span>
+                                    <span className="text-[10px] text-[#00bcd4] font-black leading-none">{count}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    {/* Add shared property editing for multiple selection */}
+                    <div className="mt-4 border-t border-white/5 pt-2">
+                        <PropertyRow label="Set All Layers">
+                            <select 
+                                className="w-full bg-[#121214] border border-white/5 text-[10px] text-white rounded-lg px-3 py-2 outline-none uppercase font-black cursor-pointer appearance-none hover:border-[#00bcd4]/30 transition-all" 
+                                value="" 
+                                onChange={(e) => handleShapeChange('layer', e.target.value)}
+                            >
+                                <option value="" disabled>Select Layer...</option>
+                                {Object.values(layers).map((l: LayerConfig) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                            </select>
+                        </PropertyRow>
+                        <PropertyRow label="Set All Colors">
+                             <div className="relative w-8 h-8 rounded-lg overflow-hidden bg-[#121214] border border-white/5 cursor-pointer shrink-0 ml-3">
+                                <div className="absolute inset-[2px] rounded-[6px]" style={{ backgroundColor: selectedShapes.every(s => s.color === selectedShapes[0].color) ? selectedShapes[0].color || '#ffffff' : '#444' }} />
+                                <input 
+                                    type="color" 
+                                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" 
+                                    onChange={(e) => handleShapeChange('color', e.target.value)} 
+                                />
+                             </div>
+                        </PropertyRow>
+                    </div>
+                  </PropertySection>
+                )}
+
+                {selectedShapes.length === 1 && (
+                  <>
+                    <PropertySection title="Entity Identity" icon={Info} defaultOpen={false}>
+                    <PropertyRow label="Entity Type" readOnly>
+                        <span className="text-[10px] text-[#00bcd4] font-black uppercase tracking-wider px-3">{selectedShapes[0].type}</span>
+                    </PropertyRow>
+                    <PropertyRow label="Handle" readOnly>
+                        <span className="text-[10px] text-neutral-500 font-mono px-3">{selectedShapes[0].id}</span>
+                    </PropertyRow>
+                  </PropertySection>
+                  </>
+                )}
                 
                 <PropertySection title="General Appearance" icon={Layers}>
                   <PropertyRow label="Layer">
@@ -228,11 +392,10 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                   </PropertyRow>
 
                   <PropertyRow label="Color">
-                    <div className="flex items-center gap-4">
-                      {/* Refined Color indicator as a thin 2px line */}
-                      <div className="relative flex-1 h-[2px] rounded-full overflow-hidden bg-white/5 cursor-pointer group">
+                    <div className="flex items-center gap-3">
+                      <div className="relative w-8 h-8 rounded-lg overflow-hidden bg-[#121214] border border-white/10 cursor-pointer shadow-lg active:scale-95 transition-transform shrink-0">
                         <div 
-                          className="absolute inset-0 transition-all" 
+                          className="absolute inset-[2px] rounded-[6px] transition-all" 
                           style={{ backgroundColor: selectedShapes.length === 1 ? selectedShapes[0].color || '#ffffff' : '#444' }}
                         />
                         <input 
@@ -242,9 +405,12 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                           onChange={(e) => handleShapeChange('color', e.target.value)} 
                         />
                       </div>
-                      <span className="text-[10px] font-mono text-neutral-500 uppercase shrink-0 min-w-[60px] text-right">
-                        {selectedShapes.length === 1 ? selectedShapes[0].color : 'MIXED'}
-                      </span>
+                      <div className="flex flex-col gap-0">
+                        <span className="text-[10px] font-black font-mono text-[#00bcd4] uppercase tracking-wider leading-none">
+                            {selectedShapes.length === 1 ? selectedShapes[0].color : 'MIXED'}
+                        </span>
+                        <span className="text-[7px] font-black text-neutral-600 uppercase tracking-widest mt-1">Entity Color</span>
+                      </div>
                     </div>
                   </PropertyRow>
 
@@ -261,7 +427,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                   <PropertyRow label="Lineweight">
                       <select 
                         className="w-full bg-[#121214] border border-white/5 text-[10px] text-white rounded-lg px-3 py-2 outline-none uppercase font-black cursor-pointer" 
-                        value={selectedShapes.length === 1 ? selectedShapes[0].thickness?.toString() : ''} 
+                        value={selectedShapes.length === 1 ? (selectedShapes[0].thickness !== undefined ? parseFloat(selectedShapes[0].thickness.toString()).toFixed(2) : "0.00") : ''} 
                         onChange={(e) => handleShapeChange('thickness', parseFloat(e.target.value))}
                       >
                           {["0.00", "0.05", "0.25", "0.50", "1.00", "2.11"].map(v => <option key={v} value={v}>{v} mm</option>)}

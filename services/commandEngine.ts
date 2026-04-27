@@ -1,5 +1,5 @@
 
-import { Shape, Point, AppSettings, LayerConfig, LineShape, CircleShape, RectShape, ArcShape, PolyShape, TextShape, MTextShape, EllipseShape, DimensionShape, AngularDimensionShape, PointShape, InfiniteLineShape, DonutShape, LeaderShape, ViewState, DoubleLineShape, DLineJustification, TextJustification, LineType, BlockDefinition, LayoutDefinition, LayoutViewport } from '../types';
+import { Shape, Point, AppSettings, LayerConfig, LineShape, CircleShape, RectShape, ArcShape, PolyShape, TextShape, MTextShape, EllipseShape, DimensionShape, AngularDimensionShape, PointShape, InfiniteLineShape, DonutShape, LeaderShape, ViewState, DoubleLineShape, DLineJustification, TextJustification, LineType, BlockDefinition, LayoutDefinition, LayoutViewport, DimensionType } from '../types';
 import { generateId, getCircleFrom3Points, formatLength, parseLength, hitTestShape, distance, getTrimmedShapes, moveShape, resolvePointInput, calculateArea, offsetShape, getPolygonPoints, stretchShape, getShapesInRect, rotateShape, scaleShape, mirrorShape, getExtendedShapes, filletLines } from './cadService';
 
 export interface CommandContext {
@@ -22,7 +22,7 @@ export interface CommandContext {
     getLayouts: () => LayoutDefinition[];
     setLayouts: (layouts: LayoutDefinition[]) => void;
     getActiveTab: () => string;
-    onExternalRequest?: (type: string, data: any, callback: (result: any) => void) => void;
+    onExternalRequest?: (type: string, data: any, callback: (result: any, props?: any) => void) => void;
 }
 
 export class ViewportCommand implements CADCommand {
@@ -104,7 +104,9 @@ const getStyleSettings = (ctx: CommandContext) => {
         color: layerConfig?.color || '#FFFFFF',
         thickness: settings.penThickness !== 1 ? settings.penThickness : (layerConfig?.thickness || 0.25),
         lineType: settings.activeLineType !== 'continuous' ? settings.activeLineType : (layerConfig?.lineType || 'continuous'),
-        textSize: settings.textSize || 250
+        textSize: settings.textSize || 250,
+        textRotation: settings.textRotation || 0,
+        textJustification: settings.textJustification || 'left'
     };
 };
 
@@ -195,9 +197,28 @@ export class LineCommand implements CADCommand {
 }
 
 export class DoubleLineCommand implements CADCommand {
-    name = "DLINE"; public pts: Point[] = [];
+    name = "DLINE"; public pts: Point[] = []; public thickness: number = 230;
     constructor(public ctx: CommandContext) {}
-    onStart() { this.ctx.setMessage("DLINE Specify start point:"); }
+    onStart() { 
+        this.ctx.setMessage("DLINE Specify start point or [Thickness]:"); 
+    }
+    onInput(text: string): boolean {
+        const t = text.trim().toLowerCase();
+        if (t === 't' || t === 'thickness') {
+            this.ctx.setMessage("DLINE Specify wall thickness:");
+            return true;
+        }
+        if (!isNaN(parseFloat(t)) && !t.includes(',') && this.pts.length === 0) {
+            this.thickness = parseFloat(t);
+            this.ctx.setMessage("DLINE Thickness set. Specify start point:");
+            return true;
+        }
+
+        const last = this.pts.length > 0 ? this.pts[this.pts.length - 1] : null;
+        const p = resolvePointInput(text, last, this.ctx.getSettings().units === 'imperial', this.ctx.lastMousePoint, this.ctx.getSettings().ortho);
+        if (p) { this.onClick(p, false); return true; }
+        return false;
+    }
     onClick(p: Point, snapped: boolean) {
         if (this.pts.length > 0) {
             const anchor = this.pts[this.pts.length - 1];
@@ -213,13 +234,13 @@ export class DoubleLineCommand implements CADCommand {
             const anchor = this.pts[this.pts.length - 1];
             const finalP = applyOrthoConstraint(p, anchor, this.ctx.getSettings().ortho, snapped);
             const style = getStyleSettings(this.ctx);
-            this.ctx.setPreview([{id:'p', type:'dline', isPreview:true, layer: style.layer, color: style.color, points: [...this.pts, finalP], thickness: 300, justification: 'zero'} as any]);
+            this.ctx.setPreview([{id:'p', type:'dline', isPreview:true, layer: style.layer, color: style.color, points: [...this.pts, finalP], thickness: this.thickness, justification: 'zero'} as any]);
         }
     }
     onEnter() {
         if (this.pts.length > 1) {
             const style = getStyleSettings(this.ctx);
-            const s: DoubleLineShape = { id: generateId(), type: 'dline', layer: style.layer, color: style.color, points: this.pts, thickness: 300, justification: 'zero' };
+            const s: DoubleLineShape = { id: generateId(), type: 'dline', layer: style.layer, color: style.color, points: this.pts, thickness: this.thickness, justification: 'zero' };
             this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
         }
         this.ctx.onFinish();
@@ -1127,35 +1148,228 @@ export class AreaCommand implements CADCommand {
 }
 
 export class DimensionCommand implements CADCommand {
-    name = "DIM"; public p1: Point | null = null; public p2: Point | null = null;
-    constructor(public ctx: CommandContext) {}
-    onStart() { this.ctx.setMessage("DIM Specify first extension line origin:"); }
+    name = "DIM";
+    public p1: Point | null = null;
+    public p2: Point | null = null;
+    private center: Point | null = null;
+    
+    constructor(public ctx: CommandContext, private dimType: DimensionType = 'linear') {
+        this.name = `DIM_${dimType.toUpperCase()}`;
+    }
+
+    onStart() {
+        if (this.dimType === 'radius' || this.dimType === 'diameter') {
+            this.ctx.setMessage(`${this.name} Specify center point:`);
+        } else if (this.dimType === 'ordinate') {
+            this.ctx.setMessage(`${this.name} Specify point of interest (Origin):`);
+        } else {
+            this.ctx.setMessage(`${this.name} Specify first extension line origin:`);
+        }
+    }
+
     onClick(p: Point, snapped: boolean) {
-        if (!this.p1) { this.p1 = p; this.ctx.setMessage("DIM Specify second extension line origin:"); }
-        else if (!this.p2) { 
+        const style = getStyleSettings(this.ctx);
+        const appSettings = this.ctx.getSettings();
+
+        if (this.dimType === 'radius' || this.dimType === 'diameter' || this.dimType === 'angular' || this.dimType === 'arc') {
+            if (!this.center) {
+                this.center = p;
+                if (this.dimType === 'angular') this.ctx.setMessage(`${this.name} Specify first point on angle:`);
+                else if (this.dimType === 'arc') this.ctx.setMessage(`${this.name} Specify first point of arc:`);
+                else this.ctx.setMessage(`${this.name} Specify point on circle/arc:`);
+            } else if (!this.p1 && (this.dimType === 'angular' || this.dimType === 'arc')) {
+                this.p1 = p;
+                this.ctx.setMessage(`${this.name} Specify second point:`);
+            } else {
+                const d = distance(this.center, p);
+                let val = d;
+                let prefix = '';
+                if (this.dimType === 'radius') prefix = 'R';
+                else if (this.dimType === 'diameter') { prefix = 'Ø'; val = d * 2; }
+                else if (this.p1) {
+                   const a1 = Math.atan2(this.p1.y - this.center.y, this.p1.x - this.center.x);
+                   const a2 = Math.atan2(p.y - this.center.y, p.x - this.center.x);
+                   let diff = Math.abs(a2 - a1);
+                   if (diff > Math.PI) diff = 2 * Math.PI - diff;
+                   
+                   if (this.dimType === 'arc') {
+                       prefix = '⌒';
+                       val = d * diff;
+                   } else if (this.dimType === 'angular') {
+                       val = diff * 180 / Math.PI;
+                       prefix = '';
+                       const s: DimensionShape = {
+                           id: generateId(), type: 'dimension', dimType: this.dimType,
+                           layer: style.layer, color: style.color,
+                           x1: this.center.x, y1: this.center.y,
+                           x2: p.x, y2: p.y, dimX: p.x, dimY: p.y,
+                           text: `${formatLength(val, false)}°`,
+                           styleId: appSettings.activeDimStyle
+                       };
+                       this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
+                       this.ctx.onFinish();
+                       return;
+                   }
+                }
+                
+                const s: DimensionShape = {
+                    id: generateId(),
+                    type: 'dimension',
+                    dimType: this.dimType,
+                    layer: style.layer,
+                    color: style.color,
+                    x1: this.center.x, y1: this.center.y,
+                    x2: p.x, y2: p.y,
+                    dimX: p.x, dimY: p.y,
+                    text: `${prefix}${formatLength(val, appSettings.units === 'imperial')}`,
+                    styleId: appSettings.activeDimStyle
+                };
+                this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
+                this.ctx.onFinish();
+            }
+            return;
+        }
+
+        if (!this.p1) {
+            this.p1 = p;
+            this.ctx.setMessage(`${this.name} ${this.dimType === 'ordinate' ? 'Specify leader location:' : 'Specify second extension line origin:'}`);
+        } else if (this.dimType === 'ordinate') {
+            const val = this.calculateDist(this.p1, this.p1, p);
+            const s: DimensionShape = { 
+                id: generateId(), 
+                type: 'dimension', 
+                dimType: this.dimType,
+                layer: style.layer, 
+                color: style.color, 
+                x1: this.p1.x, y1: this.p1.y, 
+                x2: p.x, y2: p.y, 
+                dimX: p.x, dimY: p.y, 
+                text: formatLength(val, appSettings.units === 'imperial'),
+                styleId: appSettings.activeDimStyle
+            };
+            this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
+            this.ctx.onFinish();
+        } else if (!this.p2) { 
             const finalP = applyOrthoConstraint(p, this.p1, this.ctx.getSettings().ortho, snapped);
             this.p2 = finalP; 
-            this.ctx.setMessage("DIM Specify dimension line location:"); 
+            this.ctx.setMessage(`${this.name} Specify dimension line location:`); 
         }
         else {
-            const style = getStyleSettings(this.ctx);
-            const d = distance(this.p1, this.p2);
-            const s: DimensionShape = { id: generateId(), type: 'dimension', layer: style.layer, color: style.color, x1: this.p1.x, y1: this.p1.y, x2: this.p2.x, y2: this.p2.y, dimX: p.x, dimY: p.y, text: formatLength(d, this.ctx.getSettings().units === 'imperial') };
+            const d = this.calculateDist(this.p1, this.p2, p);
+            const s: DimensionShape = { 
+                id: generateId(), 
+                type: 'dimension', 
+                dimType: this.dimType,
+                layer: style.layer, 
+                color: style.color, 
+                x1: this.p1.x, y1: this.p1.y, 
+                x2: this.p2.x, y2: this.p2.y, 
+                dimX: p.x, dimY: p.y, 
+                text: formatLength(d, appSettings.units === 'imperial'),
+                styleId: appSettings.activeDimStyle
+            };
             this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
             this.ctx.onFinish();
         }
     }
+
+    private calculateDist(p1: Point, p2: Point, loc: Point): number {
+        if (this.dimType === 'ordinate') {
+            const dx = Math.abs(loc.x - p1.x);
+            const dy = Math.abs(loc.y - p1.y);
+            return dx > dy ? p1.x : p1.y;
+        }
+        if (this.dimType === 'aligned') return distance(p1, p2);
+        if (this.dimType === 'linear') {
+            const dx = Math.abs(p2.x - p1.x);
+            const dy = Math.abs(p2.y - p1.y);
+            const vdx = Math.abs(loc.x - (p1.x + p2.x)/2);
+            const vdy = Math.abs(loc.y - (p1.y + p2.y)/2);
+            return vdx > vdy ? dy : dx;
+        }
+        return distance(p1, p2);
+    }
     onMove(p: Point, snapped: boolean) {
+        const style = getStyleSettings(this.ctx);
+        const appSettings = this.ctx.getSettings();
+
+        if (this.dimType === 'radius' || this.dimType === 'diameter' || this.dimType === 'angular' || this.dimType === 'arc') {
+            if (this.center) {
+                const d = distance(this.center, p);
+                let val = d;
+                let prefix = '';
+                let text = '';
+                if (this.dimType === 'radius') { prefix = 'R'; text = `${prefix}${formatLength(val, appSettings.units === 'imperial')}`; }
+                else if (this.dimType === 'diameter') { prefix = 'Ø'; val = d * 2; text = `${prefix}${formatLength(val, appSettings.units === 'imperial')}`; }
+                else if (this.p1) {
+                    const a1 = Math.atan2(this.p1.y - this.center.y, this.p1.x - this.center.x);
+                    const a2 = Math.atan2(p.y - this.center.y, p.x - this.center.x);
+                    let diff = Math.abs(a2 - a1);
+                    if (diff > Math.PI) diff = 2 * Math.PI - diff;
+                    if (this.dimType === 'arc') {
+                        prefix = '⌒';
+                        text = `${prefix}${formatLength(d * diff, appSettings.units === 'imperial')}`;
+                    } else if (this.dimType === 'angular') {
+                        text = `${formatLength(diff * 180 / Math.PI, false)}°`;
+                    }
+                } else {
+                    text = this.dimType.toUpperCase();
+                }
+
+                this.ctx.setPreview([{
+                    id: 'p', type: 'dimension', isPreview: true,
+                    dimType: this.dimType,
+                    layer: style.layer, color: style.color,
+                    x1: this.center.x, y1: this.center.y, x2: p.x, y2: p.y,
+                    dimX: p.x, dimY: p.y,
+                    text: text,
+                    styleId: appSettings.activeDimStyle
+                } as any]);
+            }
+            return;
+        }
+
+        if (this.dimType === 'ordinate') {
+            if (this.p1) {
+                const dx = Math.abs(p.x - this.p1.x);
+                const dy = Math.abs(p.y - this.p1.y);
+                const isXType = dx > dy;
+                const val = isXType ? this.p1.x : this.p1.y;
+                this.ctx.setPreview([{
+                    id: 'p', type: 'dimension', isPreview: true,
+                    dimType: this.dimType,
+                    layer: style.layer, color: style.color,
+                    x1: this.p1.x, y1: this.p1.y, x2: p.x, y2: p.y,
+                    dimX: p.x, dimY: p.y,
+                    text: formatLength(val, appSettings.units === 'imperial'),
+                    styleId: appSettings.activeDimStyle
+                } as any]);
+            }
+            return;
+        }
+
         if (this.p1 && !this.p2) {
-            const finalP = applyOrthoConstraint(p, this.p1, this.ctx.getSettings().ortho, snapped);
-            const style = getStyleSettings(this.ctx);
+            const finalP = applyOrthoConstraint(p, this.p1, appSettings.ortho, snapped);
             this.ctx.setPreview([{id:'p', type:'line', isPreview:true, layer: style.layer, color: style.color, x1:this.p1.x, y1:this.p1.y, x2:finalP.x, y2:finalP.y} as any]);
         } else if (this.p1 && this.p2) {
-            const style = getStyleSettings(this.ctx);
-            this.ctx.setPreview([{id:'p', type:'line', isPreview:true, layer: style.layer, color: style.color, x1:p.x, y1:p.y, x2:this.p1.x, y2:this.p1.y} as any]);
+            const d = this.calculateDist(this.p1, this.p2, p);
+            this.ctx.setPreview([{
+                id: 'p', 
+                type: 'dimension', 
+                dimType: this.dimType,
+                isPreview: true, 
+                layer: style.layer, 
+                color: style.color, 
+                x1: this.p1.x, y1: this.p1.y, 
+                x2: this.p2.x, y2: this.p2.y, 
+                dimX: p.x, dimY: p.y, 
+                text: formatLength(d, appSettings.units === 'imperial'),
+                styleId: appSettings.activeDimStyle
+            } as any]);
         }
     }
-    onEnter() {} onCancel() {}
+    onEnter() {}
+    onCancel() { this.ctx.onFinish(); }
 }
 
 export class TextCommand implements CADCommand {
@@ -1187,10 +1401,22 @@ export class MTextCommand implements CADCommand {
         if (!this.point) { this.point = p; this.ctx.setMessage("MTEXT Specify opposite corner:"); }
         else {
             if (this.ctx.onExternalRequest) {
-                this.ctx.onExternalRequest('mtext_editor', {}, (content) => {
+                this.ctx.onExternalRequest('mtext_editor', "", (content, props) => {
                     if (content) {
                         const style = getStyleSettings(this.ctx);
-                        const s: MTextShape = { id: generateId(), type: 'mtext', layer: style.layer, color: style.color, x: Math.min(this.point!.x, p.x), y: Math.max(this.point!.y, p.y), width: Math.abs(p.x - this.point!.x), size: style.textSize, content };
+                        const s: MTextShape = { 
+                            id: generateId(), 
+                            type: 'mtext', 
+                            layer: style.layer, 
+                            color: style.color, 
+                            x: Math.min(this.point!.x, p.x), 
+                            y: Math.max(this.point!.y, p.y), 
+                            width: Math.abs(p.x - this.point!.x), 
+                            size: props?.size || style.textSize, 
+                            rotation: props?.rotation || style.textRotation,
+                            justification: props?.justification || style.textJustification as any,
+                            content 
+                        };
                         this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
                     }
                     this.ctx.onFinish();
@@ -1657,9 +1883,46 @@ export class StretchCommand implements CADCommand {
 }
 
 export class HatchCommand implements CADCommand {
-    name = "HATCH"; constructor(public ctx: CommandContext) {}
-    onStart() { this.ctx.setMessage("HATCH [Internal point]:"); }
-    onClick() { this.ctx.onFinish(); } onMove() {} onEnter() {} onCancel() {}
+    name = "HATCH"; selecting = true;
+    constructor(public ctx: CommandContext) {}
+    onStart() { 
+        if (this.ctx.getSelectedIds().length > 0) {
+            this.applyHatch();
+        } else {
+            this.ctx.setMessage("HATCH Select closed shapes to fill:"); 
+        }
+    }
+    onClick(p: Point) {
+        if (this.selecting) {
+            const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
+            const all = Object.values(this.ctx.getLayers()).flat();
+            const hit = all.find(s => ['rect', 'circle', 'pline', 'polygon', 'ellipse'].includes(s.type) && hitTestShape(p.x, p.y, s, 15/ts));
+            if (hit) {
+                this.ctx.setSelectedIds(prev => prev.includes(hit.id) ? prev : [...prev, hit.id]);
+                this.ctx.setMessage(`HATCH ${this.ctx.getSelectedIds().length} selected. <Enter> to fill:`);
+            }
+        }
+    }
+    onMove() {}
+    onEnter() {
+        if (this.selecting && this.ctx.getSelectedIds().length > 0) {
+            this.applyHatch();
+        } else {
+            this.ctx.onFinish();
+        }
+    }
+    applyHatch() {
+        const ids = this.ctx.getSelectedIds();
+        this.ctx.setLayers(prev => {
+            const next = { ...prev };
+            Object.keys(next).forEach(l => {
+                next[l] = next[l].map(s => ids.includes(s.id) ? { ...s, filled: true } : s);
+            });
+            return next;
+        });
+        this.ctx.onFinish();
+    }
+    onCancel() { this.ctx.onFinish(); }
 }
 
 export class RotateCommand implements CADCommand {

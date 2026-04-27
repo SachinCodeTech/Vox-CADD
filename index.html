@@ -33,14 +33,12 @@
           background-color: var(--cad-bg); 
           overflow: hidden; 
           overscroll-behavior: none; 
-          touch-action: none;
+          touch-action: manipulation;
           -webkit-user-select: none;
           user-select: none;
           font-family: 'Inter', sans-serif;
           -webkit-font-smoothing: antialiased;
           height: 100dvh;
-          /* Avoid safe area on iOS/Android */
-          padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
         }
         #root { 
           width: 100vw; 
