@@ -9,7 +9,7 @@ interface NewFileDialogProps {
 }
 
 const NewFileDialog: React.FC<NewFileDialogProps> = ({ onSelect, onClose }) => {
-  const [name, setName] = useState('DRAUGHT_01');
+  const [name, setName] = useState('DRAWING_01');
   const [standard, setStandard] = useState<UnitType>('metric');
   const [subUnit, setSubUnit] = useState('mm');
   const [precision, setPrecision] = useState('0.0000');

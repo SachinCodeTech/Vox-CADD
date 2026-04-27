@@ -212,6 +212,9 @@ const CommandBar: React.FC<CommandBarProps> = ({
                     className="flex-1 bg-transparent text-white font-mono outline-none text-[11px] uppercase tracking-widest placeholder:text-neutral-900 select-text"
                     placeholder="COMMAND..."
                     autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck="false"
                 />
                 <button type="submit" className={`w-7 h-7 rounded-lg transition-all flex items-center justify-center active:scale-90 shadow-lg ${!value && isCommandActive ? 'bg-emerald-500 text-black shadow-emerald-900/20' : 'bg-[#00bcd4] text-black shadow-cyan-900/20'}`}>
                     {!value && isCommandActive ? <Check size={14} strokeWidth={4} /> : <Send size={12} strokeWidth={3} />}
@@ -234,6 +237,10 @@ const CommandBar: React.FC<CommandBarProps> = ({
                     onChange={e => onChange(e.target.value)}
                     className="flex-1 bg-transparent text-white outline-none text-[10px] sm:text-[11px] placeholder:text-neutral-800 tracking-tight disabled:opacity-50 select-text font-medium"
                     placeholder={isAiThinking ? "PRINCIPAL ARCHITECT IS THINKING..." : "CONSULT ARCHITECT (E.G. 'DESIGN A 2BHK APARTMENT', 'CALCULATE LIVING AREA')..."}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck="false"
                 />
                 <div className="flex items-center gap-2">
                     <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => {

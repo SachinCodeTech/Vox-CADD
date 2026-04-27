@@ -2488,7 +2488,7 @@ export class FindCommand implements CADCommand {
             this.ctx.setView({ scale: 0.1, originX: -f.x, originY: -f.y });
             this.ctx.addLog(`FOUND: ${found.length} items`);
         } else {
-            this.ctx.addLog("TEXT_NOT_FOUND");
+            this.ctx.addLog("NO_MATCHING_TEXT_FOUND");
         }
         this.ctx.onFinish();
         return true;

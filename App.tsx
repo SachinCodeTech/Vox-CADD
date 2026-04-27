@@ -89,6 +89,37 @@ type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 
 const STORAGE_PREFIX = 'voxcadd_file_v1_';
 const REGISTRY_KEY = 'voxcadd_recent_files';
 
+const Toast: React.FC<{ message: string, onClear: () => void }> = ({ message, onClear }) => {
+  useEffect(() => {
+    const timer = setTimeout(onClear, message.startsWith('ERR:') ? 5000 : 3000);
+    return () => clearTimeout(timer);
+  }, [message, onClear]);
+
+  // Clean up message for display
+  const displayMessage = message.startsWith('ERR:') 
+    ? message.replace('ERR:', '').trim() 
+    : message.replace(/_/g, ' ').split('\n')[0].toUpperCase();
+  
+  const isError = message.startsWith('ERR:');
+  const isWarning = message.startsWith('WARN:');
+  const isInfo = message.startsWith('INFO:');
+
+  let bgColor = 'bg-cyan-500/90 border-white/20 text-black';
+  if (isError) bgColor = 'bg-red-500/90 border-red-400/50 text-white';
+  else if (isWarning) bgColor = 'bg-amber-500/90 border-amber-400/50 text-black';
+  else if (isInfo) bgColor = 'bg-neutral-800/95 border-white/10 text-white';
+
+  return (
+    <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[3000] pointer-events-none animate-in fade-in slide-in-from-top-4 duration-300">
+      <div className={`px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border backdrop-blur-xl ${bgColor}`}>
+        {!isError && !isWarning && !isInfo && <div className="w-2 h-2 rounded-full animate-pulse bg-black" />}
+        {isError && <span className="text-xs">⚠️</span>}
+        <span className="text-[10px] font-black tracking-[0.1em] whitespace-normal text-center max-w-xs">{displayMessage}</span>
+      </div>
+    </div>
+  );
+};
+
 const App: React.FC = () => {
   const [layers, setLayers] = useState<Record<string, Shape[]>>({ '0': [], 'defpoints': [] });
   const [blocks, setBlocks] = useState<Record<string, BlockDefinition>>({});
@@ -98,7 +129,7 @@ const App: React.FC = () => {
   const [layerConfig, setLayerConfig] = useState<Record<string, LayerConfig>>(INITIAL_LAYERS_CONFIG);
   const [settings, setSettings] = useState<AppSettings>(INITIAL_SETTINGS);
   const [activeTab, setActiveTab] = useState<string>('model');
-  const [currentFileName, setCurrentFileName] = useState('Draught 1');
+  const [currentFileName, setCurrentFileName] = useState('Drawing 1.vox');
   const [recentFiles, setRecentFiles] = useState<{name: string, date: number}[]>([]);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
   const [fileNameMenuOpen, setFileNameMenuOpen] = useState(false);
@@ -144,6 +175,15 @@ const App: React.FC = () => {
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [aiConversation, setAiConversation] = useState<{role: string, parts: any[]}[]>([]);
   const [logMessage, _setLogMessage] = useState<string | null>(null);
+  const [loadingFile, setLoadingFile] = useState(false);
+  const [loadingStatus, setLoadingStatus] = useState<string>("");
+
+  const withTimeout = useCallback(<T,>(promise: Promise<T>, ms: number = 20000): Promise<T> => {
+    return Promise.race([
+      promise,
+      new Promise<T>((_, reject) => setTimeout(() => reject(new Error("OPERATION_TIMEOUT")), ms))
+    ]);
+  }, []);
   const setLogMessage = useCallback((msg: string | null) => {
     _setLogMessage(msg);
     if (msg) setCommandHistory(prev => {
@@ -704,148 +744,177 @@ const App: React.FC = () => {
             return;
         }
         
-        // Save current work before switching safely
-        const oldState = {
-          layers: JSON.parse(JSON.stringify(layersRef.current)),
-          layerConfig: layerConfigRef.current,
-          settings: settingsRef.current,
-          fileName: currentFileName
-        };
-        localStorage.setItem(`${STORAGE_PREFIX}${currentFileName}`, JSON.stringify(oldState));
-        localStorage.setItem('voxcadd_active_workspace', JSON.stringify(oldState));
+        if (loadingFile) return;
+        setLoadingFile(true);
+        setLoadingStatus("PREPARING WORKSPACE...");
 
-        setLogMessage(`LOADING: ${payload}...`);
-        const savedData = localStorage.getItem(`${STORAGE_PREFIX}${payload}`);
-        if (savedData) {
-            try {
-                const data = JSON.parse(savedData);
-                // Ensure all keys are present
-                const newLayers = data.layers || { '0': [], 'defpoints': [] };
-                const newConfig = data.layerConfig || INITIAL_LAYERS_CONFIG;
-                const newSettings = data.settings ? { ...INITIAL_SETTINGS, ...data.settings } : INITIAL_SETTINGS;
+        setTimeout(async () => {
+          try {
+            setLoadingStatus("SAVING CURRENT STATE...");
+            // Save current work before switching safely
+            const oldState = {
+              layers: JSON.parse(JSON.stringify(layersRef.current)),
+              layerConfig: layerConfigRef.current,
+              settings: settingsRef.current,
+              fileName: currentFileName
+            };
+            localStorage.setItem(`${STORAGE_PREFIX}${currentFileName}`, JSON.stringify(oldState));
+            localStorage.setItem('voxcadd_active_workspace', JSON.stringify(oldState));
 
-                setLayers(newLayers);
-                setLayerConfig(newConfig);
-                setSettings(newSettings);
-                setCurrentFileName(payload);
-                setFileHandle(null); 
-                updateRecentFiles(payload);
-                setView(INITIAL_VIEW); // Reset view to ensure content is visible
-                setLogMessage(`OPENED: ${payload}`);
-                setActivePanel('none');
-                
-                // Force a view reset or small nudge if needed, but standard prop change should trigger redraw
-                // No need for nudges if CADCanvas is robust
-            } catch (e) {
-                console.error("Load failed", e);
-                setLogMessage("LOAD_ERR: CORRUPT_DATA");
-            }
-        } else {
-            setLogMessage("LOAD_ERR: FILE_MISSING");
-        }
+            setLoadingStatus(`OPENING ${payload}...`);
+            await new Promise(r => setTimeout(r, 50)); // Allow UI to breathe
+
+            const savedData = localStorage.getItem(`${STORAGE_PREFIX}${payload}`);
+            if (!savedData) throw new Error("FILE_MISSING");
+
+            const data = JSON.parse(savedData);
+            setLoadingStatus("PARSING GEOMETRY...");
+            await new Promise(r => setTimeout(r, 50));
+
+            // Ensure all keys are present
+            const newLayers = data.layers || { '0': [], 'defpoints': [] };
+            const newConfig = data.layerConfig || INITIAL_LAYERS_CONFIG;
+            const newSettings = data.settings ? { ...INITIAL_SETTINGS, ...data.settings } : INITIAL_SETTINGS;
+
+            setLayers(newLayers);
+            setLayerConfig(newConfig);
+            setSettings(newSettings);
+            setCurrentFileName(payload);
+            setFileHandle(null); 
+            updateRecentFiles(payload);
+            setView(INITIAL_VIEW); // Reset view to ensure content is visible
+            
+            setLogMessage(`INFO: OPENED_${payload}`);
+            setActivePanel('none');
+          } catch (e) {
+            console.error("Load failed", e);
+            setLogMessage(`ERR: LOAD_FAILED_${(e as Error).message}`);
+          } finally {
+            setLoadingFile(false);
+            setLoadingStatus("");
+          }
+        }, 50);
         break;
       }
 
       case 'save':
       case 'saveAs':
       case 'saveas':
-        // Ensure local storage is updated first
-        commitToHistory();
-        
-        setLogMessage(`${act.toUpperCase()}_INITIATED...`);
-        const isDxfExport = payload === 'dxf';
-        const finalExt = isDxfExport ? '.dxf' : '.vox';
-        const isSaveAs = act.toLowerCase() === 'saveas';
-        
-        let content: string = "";
-        try {
-            content = shapesToDXF(Object.values(layers).flat() as Shape[], layerConfig, settings);
-            if (!content || content.length < 10) {
-                content = shapesToVox(Object.values(layers).flat() as Shape[], layerConfig, settings);
-            }
-        } catch (err) {
-            console.error("Save content generation failed:", err);
-            content = shapesToVox(Object.values(layers).flat() as Shape[], layerConfig, settings);
-        }
+        if (loadingFile) return;
+        setLoadingFile(true);
+        setLoadingStatus("PREPARING DATA...");
 
-        // Native File System Access
-        let usePicker = 'showSaveFilePicker' in window;
-        if (usePicker) {
-            try {
-                let handle = (!isSaveAs && fileHandle) ? fileHandle : null;
-                if (!handle) {
-                    handle = await (window as any).showSaveFilePicker({
-                        suggestedName: currentFileName.replace(/\.[^/.]+$/, "") + finalExt,
-                        types: [{
-                            description: isDxfExport ? 'AutoCAD DXF' : 'VoxCADD Project',
-                            accept: { [isDxfExport ? 'application/dxf' : 'application/vnd.voxcadd.project']: [finalExt] }
-                        }]
-                    });
-                }
-                
-                const writable = await handle.createWritable();
-                await writable.write(content);
-                await writable.close();
-                
-                setFileHandle(handle);
-                setCurrentFileName(handle.name);
-                updateRecentFiles(handle.name);
-                setLogMessage(`SUCCESS:_${handle.name}_SAVED`);
-            } catch (e: any) {
-                console.warn("Save cancelled or failed", e);
-                // If it's a security error or similar (often in iframes), try fallback
-                if (e.name === 'SecurityError' || e.name === 'NotAllowedError') {
-                    usePicker = false;
-                } else {
-                    setLogMessage("SAVE_CANCELLED_OR_ERR");
-                }
-            }
-        }
-
-        if (!usePicker) {
-            // Fallback for browsers without File System Access API
-            let downloadName = currentFileName.replace(/\.[^/.]+$/, "") + finalExt;
+        setTimeout(async () => {
+          try {
+            // Ensure local storage is updated first
+            commitToHistory();
             
-            const performDownload = (name: string) => {
-                const mimeType = isDxfExport ? 'application/dxf' : 'application/vnd.voxcadd.project';
-                const blob = new Blob([content], { type: mimeType });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = name;
-                document.body.appendChild(a); 
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                
-                if (isSaveAs) {
-                  setCurrentFileName(name);
-                  updateRecentFiles(name);
-                } else {
-                  updateRecentFiles(currentFileName);
-                }
-                setLogMessage(`DOWNLOADED:_${finalExt.toUpperCase()}`);
-            };
+            setLogMessage(`INFO:_${act.toUpperCase()}_INITIATED`);
+            const isDxfExport = payload === 'dxf';
+            const finalExt = isDxfExport ? '.dxf' : '.vox';
+            const isSaveAs = act.toLowerCase() === 'saveas';
+            
+            setLoadingStatus("ENCODING GEOMETRY...");
+            await new Promise(r => setTimeout(r, 50));
 
-            if (isSaveAs) {
-                setPromptDialog({
-                  title: 'Save As',
-                  message: 'Enter filename:',
-                  initialValue: downloadName,
-                  type: 'prompt',
-                  onConfirm: (newName) => {
-                    if (newName) {
-                      const finalName = newName.toLowerCase().endsWith(finalExt) ? newName : newName + finalExt;
-                      performDownload(finalName);
-                    } else {
-                      setLogMessage("SAVE_AS_CANCELLED");
-                    }
-                  }
-                });
-            } else {
-                performDownload(downloadName);
+            let content: string = "";
+            try {
+                content = shapesToDXF(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current);
+                if (!content || content.length < 10) {
+                    content = shapesToVox(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current);
+                }
+            } catch (err) {
+                console.error("Save content generation failed:", err);
+                content = shapesToVox(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current);
             }
-        }
+
+            // Native File System Access
+            let usePicker = 'showSaveFilePicker' in window;
+            if (usePicker) {
+                try {
+                    let handle = (!isSaveAs && fileHandle) ? fileHandle : null;
+                    if (!handle) {
+                        setLoadingStatus("WAITING FOR USER...");
+                        handle = await (window as any).showSaveFilePicker({
+                            suggestedName: currentFileName.replace(/\.[^/.]+$/, "") + finalExt,
+                            types: [{
+                                description: isDxfExport ? 'AutoCAD DXF' : 'VoxCADD Project',
+                                accept: { [isDxfExport ? 'application/dxf' : 'application/vnd.voxcadd.project']: [finalExt] }
+                            }]
+                        });
+                    }
+                    
+                    setLoadingStatus("WRITING TO DISK...");
+                    const writable = await handle.createWritable();
+                    await writable.write(content);
+                    await writable.close();
+                    
+                    setFileHandle(handle);
+                    setCurrentFileName(handle.name);
+                    updateRecentFiles(handle.name);
+                    setLogMessage(`INFO:_${handle.name}_SAVED`);
+                } catch (e: any) {
+                    if (e.name === 'AbortError') {
+                      setLogMessage("INFO: SAVE_CANCELLED");
+                    } else if (e.name === 'SecurityError' || e.name === 'NotAllowedError') {
+                        usePicker = false;
+                    } else {
+                        setLogMessage("ERR: SAVE_FAILED");
+                    }
+                }
+            }
+
+            if (!usePicker) {
+                // Fallback for browsers without File System Access API
+                let downloadName = currentFileName.replace(/\.[^/.]+$/, "") + finalExt;
+                
+                const performDownload = (name: string) => {
+                    const mimeType = isDxfExport ? 'application/dxf' : 'application/vnd.voxcadd.project';
+                    const blob = new Blob([content], { type: mimeType });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = name;
+                    document.body.appendChild(a); 
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    
+                    if (isSaveAs) {
+                      setCurrentFileName(name);
+                      updateRecentFiles(name);
+                    } else {
+                      updateRecentFiles(currentFileName);
+                    }
+                    setLogMessage(`INFO: DOWNLOADED_${finalExt.toUpperCase()}`);
+                };
+
+                if (isSaveAs) {
+                    setPromptDialog({
+                      title: 'Save As',
+                      message: 'Enter filename:',
+                      initialValue: downloadName,
+                      type: 'prompt',
+                      onConfirm: (newName) => {
+                        if (newName) {
+                          const finalName = newName.toLowerCase().endsWith(finalExt) ? newName : newName + finalExt;
+                          performDownload(finalName);
+                        } else {
+                          setLogMessage("INFO: SAVE_AS_CANCELLED");
+                        }
+                      }
+                    });
+                } else {
+                    performDownload(downloadName);
+                }
+            }
+          } catch (e) {
+            setLogMessage("ERR: SAVE_OPERATION_FAILED");
+          } finally {
+            setLoadingFile(false);
+            setLoadingStatus("");
+          }
+        }, 50);
         break;
       case 'saveImage': {
         if (canvasHandleRef.current) {
@@ -859,40 +928,108 @@ const App: React.FC = () => {
         break;
       }
       case 'share': {
-        setLogMessage("GENERATING_SHARE_PKG...");
-        const isDxfExport = payload === 'dxf';
-        const finalExt = isDxfExport ? '.dxf' : '.vox';
-        const content = isDxfExport ? shapesToDXF(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current) : shapesToVox(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current);
-        const fileName = (currentFileName.replace(/\.[^/.]+$/, "") + finalExt).replace(/[^a-zA-Z0-9.\-_]/g, '_');
-        const blob = new Blob([content], { type: isDxfExport ? 'application/dxf' : 'application/vnd.voxcadd.project' });
+        if (loadingFile) return; // Prevent double trigger
+        setLoadingFile(true);
+        setLoadingStatus("GENERATING EXPORT...");
         
-        try {
-            if (navigator.share) {
-                const file = new File([blob], fileName, { type: blob.type });
-                // Attempt file share if supported
-                if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                    await navigator.share({
-                        files: [file],
-                        title: 'VoxCADD Project',
-                        text: `Sharing project: ${currentFileName}`
-                    });
-                    setLogMessage("SHARE_SENT");
-                } else {
-                    // Fallback to link + text share
-                    await navigator.share({ 
-                        title: 'VoxCADD Professional Design', 
-                        text: `Sharing Project: ${currentFileName}`, 
-                        url: window.location.href 
-                    });
-                    setLogMessage("SHARE_LINK_SENT");
+        // Safety timeout for loading state handled by finally + withTimeout pattern or local timeout
+        const loadingTimeout = setTimeout(() => {
+          if (loadingFile) {
+            setLoadingFile(false);
+            setLogMessage("ERR: OPERATION_TIMEOUT");
+          }
+        }, 30000);
+
+        setTimeout(async () => {
+          try {
+            const isDxfExport = payload === 'dxf';
+            const finalExt = isDxfExport ? '.dxf' : '.vox';
+            
+            setLoadingStatus(`COMPILING ${finalExt.substring(1).toUpperCase()} DATA...`);
+            await new Promise(r => setTimeout(r, 50));
+
+            const content = isDxfExport 
+              ? shapesToDXF(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current) 
+              : shapesToVox(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current);
+            
+            const fileName = (currentFileName.replace(/\.[^/.]+$/, "") + finalExt).replace(/[^a-zA-Z0-9.\-_]/g, '_');
+            const blob = new Blob([content], { type: isDxfExport ? 'application/dxf' : 'application/octet-stream' });
+            
+            const shareData = {
+              title: 'VoxCADD Project',
+              text: `VoxCADD Design: ${currentFileName}`,
+              url: window.location.href
+            };
+
+            const executeDownload = () => {
+              try {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                setLogMessage("INFO: FILE_DOWNLOADED_SUCCESSFULLY");
+              } catch (err) {
+                setLogMessage("ERR: DOWNLOAD_BLOCKED_BY_BROWSER");
+              }
+            };
+
+            setLoadingStatus("INITIATING SHARE...");
+            // Priority 1: Native File Sharing
+            if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([blob], fileName, { type: blob.type })] })) {
+                try {
+                  await navigator.share({
+                      ...shareData,
+                      files: [new File([blob], fileName, { type: blob.type })]
+                  });
+                  setLogMessage("INFO: PROJECT_SHARED");
+                } catch (se) {
+                  if ((se as Error).name === 'AbortError') {
+                    setLogMessage("INFO: SHARE_CANCELLED");
+                  } else {
+                    setLogMessage("WARN: NATIVE_SHARE_FAILED_USING_LINK");
+                    await navigator.share(shareData);
+                  }
                 }
-            } else {
-                setLogMessage("ERR: SHARING_NOT_SUPPORTED");
+            } 
+            // Priority 2: Web Share API (Links)
+            else if (navigator.share) {
+                try {
+                  await navigator.share(shareData);
+                  setLogMessage("INFO: SHARE_LINK_SENT");
+                } catch (se) {
+                  if ((se as Error).name === 'AbortError') {
+                    setLogMessage("INFO: SHARE_CANCELLED");
+                  } else {
+                    setLogMessage("WARN: LINK_SHARE_FAILED_USING_CLIPBOARD");
+                    await navigator.clipboard.writeText(window.location.href);
+                    setLogMessage("INFO: LINK_COPIED_TO_CLIPBOARD");
+                  }
+                }
             }
-        } catch (e) {
-            console.warn("Sharing failed", e);
-            setLogMessage("SHARE_CANCELLED_OR_FAILED");
-        }
+            // Priority 3: Clipboard + Download
+            else {
+                try {
+                  await navigator.clipboard.writeText(window.location.href);
+                  setLogMessage("INFO: LINK_COPIED_DOWNLOADING_FILE");
+                  setTimeout(executeDownload, 500);
+                } catch (ce) {
+                  setLogMessage("WARN: CLIPBOARD_DENIED_DOWNLOADING_DIRECTLY");
+                  executeDownload();
+                }
+            }
+          } catch (e) {
+              console.warn("Complete share failure", e);
+              setLogMessage("ERR: SHARE_FAILED");
+          } finally {
+              clearTimeout(loadingTimeout);
+              setLoadingFile(false);
+              setLoadingStatus("");
+          }
+        }, 50);
         break;
       }
       case 'openFileManager': setActivePanel('file'); break;
@@ -1747,6 +1884,9 @@ const App: React.FC = () => {
             <button onClick={() => deleteLayout(layoutContextMenu.layoutId)} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-red-500/80 hover:bg-red-500 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
               <X size={14} /> Delete
             </button>
+            <button onClick={deleteAllLayouts} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-red-500/50 hover:bg-red-600 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <XCircle size={14} /> Delete All
+            </button>
           </div>
         </>
       )}
@@ -1821,6 +1961,25 @@ const App: React.FC = () => {
           onChange={setCommandInput} 
         />
       </footer>
+      
+      {logMessage && <Toast message={logMessage} onClear={() => setLogMessage(null)} />}
+
+      {loadingFile && (
+        <div className="fixed inset-0 bg-black/90 flex flex-col items-center justify-center z-[1000] backdrop-blur-xl transition-all duration-500">
+           <div className="relative mb-8">
+             <div className="loader-spinner" style={{ width: '64px', height: '64px', borderWidth: '4px' }} />
+             <div className="absolute inset-0 flex items-center justify-center">
+               <div className="w-8 h-8 rounded-full bg-cyan-500/10 animate-ping" />
+             </div>
+           </div>
+           <div className="text-cyan-400 font-mono text-[10px] tracking-[0.4em] font-black animate-pulse uppercase px-8 text-center">{loadingStatus || "PROCESSING DATA..."}</div>
+           <div className="mt-6 flex items-center gap-3">
+             <div className="h-[1px] w-8 bg-gradient-to-r from-transparent to-white/10" />
+             <div className="text-white/20 font-mono text-[8px] uppercase tracking-widest italic">VoxCADD Kernel v4.0.1</div>
+             <div className="h-[1px] w-8 bg-gradient-to-l from-transparent to-white/10" />
+           </div>
+        </div>
+      )}
       {promptDialog && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4">
            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setPromptDialog(null)} />
@@ -1842,6 +2001,10 @@ const App: React.FC = () => {
                     }
                   }}
                   id="prompt-input"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck="false"
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-xs font-bold focus:outline-none focus:border-cyan-500/50 transition-all mb-6"
                 />
               )}
