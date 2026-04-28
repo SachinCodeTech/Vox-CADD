@@ -1,6 +1,6 @@
 
-import { Shape, Point, AppSettings, LayerConfig, LineShape, CircleShape, RectShape, ArcShape, PolyShape, TextShape, MTextShape, EllipseShape, DimensionShape, AngularDimensionShape, PointShape, InfiniteLineShape, DonutShape, LeaderShape, ViewState, DoubleLineShape, DLineJustification, TextJustification, LineType, BlockDefinition, LayoutDefinition, LayoutViewport, DimensionType } from '../types';
-import { generateId, getCircleFrom3Points, formatLength, parseLength, hitTestShape, distance, getTrimmedShapes, moveShape, resolvePointInput, calculateArea, offsetShape, getPolygonPoints, stretchShape, getShapesInRect, rotateShape, scaleShape, mirrorShape, getExtendedShapes, filletLines } from './cadService';
+import { Shape, Point, AppSettings, LayerConfig, LineShape, CircleShape, RectShape, ArcShape, PolyShape, TextShape, MTextShape, EllipseShape, DimensionShape, AngularDimensionShape, PointShape, InfiniteLineShape, DonutShape, LeaderShape, ViewState, DoubleLineShape, DLineJustification, TextJustification, LineType, BlockDefinition, LayoutDefinition, LayoutViewport, DimensionType, BlockShape, HatchShape } from '../types';
+import { generateId, getCircleFrom3Points, formatLength, parseLength, hitTestShape, distance, getTrimmedShapes, moveShape, resolvePointInput, calculateArea, offsetShape, getPolygonPoints, stretchShape, getShapesInRect, rotateShape, scaleShape, mirrorShape, getExtendedShapes, filletLines, modifyShapeByGrip } from './cadService';
 
 export interface CommandContext {
     getSettings: () => AppSettings;
@@ -279,7 +279,7 @@ export class PolyCommand implements CADCommand {
     onEnter() {
         if (this.pts.length > 1) {
             const style = getStyleSettings(this.ctx);
-            const s: PolyShape = { id: generateId(), type: 'pline', layer: style.layer, color: style.color, points: this.pts, closed: false, thickness: style.thickness, lineType: style.lineType };
+            const s: PolyShape = { id: generateId(), type: 'pline', layer: style.layer, color: style.color, points: [...this.pts], closed: false, thickness: style.thickness, lineType: style.lineType };
             this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
         }
         this.ctx.onFinish();
@@ -1140,7 +1140,40 @@ export class AreaCommand implements CADCommand {
     onEnter() {
         if (this.pts.length > 2) {
             const a = calculateArea(this.pts);
-            this.ctx.addLog(`AREA: ${a.toFixed(2)} sq units`);
+            const settings = this.ctx.getSettings();
+            const isMetric = settings.units === 'metric';
+            const subUnit = settings.unitSubtype; // mm, cm, m
+            
+            let displayArea = a;
+            let unitStr = "sq units";
+
+            if (isMetric) {
+                if (subUnit === 'mm') {
+                    // Convert sq mm to sq cm or sq m if large
+                    if (a > 1000000) {
+                        displayArea = a / 1000000;
+                        unitStr = "sq. m";
+                    } else if (a > 10000) {
+                        displayArea = a / 100;
+                        unitStr = "sq. cm";
+                    } else {
+                        unitStr = "sq. mm";
+                    }
+                } else if (subUnit === 'cm') {
+                    if (a > 10000) {
+                        displayArea = a / 10000;
+                        unitStr = "sq. m";
+                    } else {
+                        unitStr = "sq. cm";
+                    }
+                } else if (subUnit === 'm') {
+                    unitStr = "sq. m";
+                }
+            } else {
+                unitStr = "sq. ft"; // assuming feet for imperial for now
+            }
+
+            this.ctx.addLog(`AREA: ${displayArea.toFixed(4)} ${unitStr}`);
         }
         this.ctx.onFinish();
     }
@@ -1882,49 +1915,6 @@ export class StretchCommand implements CADCommand {
     onCancel() { this.ctx.onFinish(); }
 }
 
-export class HatchCommand implements CADCommand {
-    name = "HATCH"; selecting = true;
-    constructor(public ctx: CommandContext) {}
-    onStart() { 
-        if (this.ctx.getSelectedIds().length > 0) {
-            this.applyHatch();
-        } else {
-            this.ctx.setMessage("HATCH Select closed shapes to fill:"); 
-        }
-    }
-    onClick(p: Point) {
-        if (this.selecting) {
-            const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
-            const all = Object.values(this.ctx.getLayers()).flat();
-            const hit = all.find(s => ['rect', 'circle', 'pline', 'polygon', 'ellipse'].includes(s.type) && hitTestShape(p.x, p.y, s, 15/ts));
-            if (hit) {
-                this.ctx.setSelectedIds(prev => prev.includes(hit.id) ? prev : [...prev, hit.id]);
-                this.ctx.setMessage(`HATCH ${this.ctx.getSelectedIds().length} selected. <Enter> to fill:`);
-            }
-        }
-    }
-    onMove() {}
-    onEnter() {
-        if (this.selecting && this.ctx.getSelectedIds().length > 0) {
-            this.applyHatch();
-        } else {
-            this.ctx.onFinish();
-        }
-    }
-    applyHatch() {
-        const ids = this.ctx.getSelectedIds();
-        this.ctx.setLayers(prev => {
-            const next = { ...prev };
-            Object.keys(next).forEach(l => {
-                next[l] = next[l].map(s => ids.includes(s.id) ? { ...s, filled: true } : s);
-            });
-            return next;
-        });
-        this.ctx.onFinish();
-    }
-    onCancel() { this.ctx.onFinish(); }
-}
-
 export class RotateCommand implements CADCommand {
     name = "ROTATE"; base: Point | null = null; selecting = true;
     constructor(public ctx: CommandContext) {}
@@ -2217,52 +2207,6 @@ export class PointCommand implements CADCommand {
     onMove() {} onEnter() { this.ctx.onFinish(); } onCancel() { this.ctx.onFinish(); }
 }
 
-export class ExplodeCommand implements CADCommand {
-    name = "EXPLODE"; selecting = true;
-    constructor(public ctx: CommandContext) {}
-    onStart() { 
-        if (this.ctx.getSelectedIds().length > 0) { this.applyExplode(); }
-        else { this.ctx.setMessage("EXPLODE Select objects:"); }
-    }
-    onClick(p: Point) {
-        const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
-        const all = Object.values(this.ctx.getLayers()).flat();
-        const hit = all.find(s => hitTestShape(p.x, p.y, s, 15/ts));
-        if (hit) {
-            this.ctx.setSelectedIds(prev => prev.includes(hit.id) ? prev : [...prev, hit.id]);
-            this.applyExplode();
-        }
-    }
-    applyExplode() {
-        const ids = this.ctx.getSelectedIds();
-        this.ctx.setLayers(prev => {
-            const next = { ...prev };
-            Object.keys(next).forEach(l => {
-                const layerShapes = next[l];
-                const exploded: Shape[] = [];
-                const filtered = layerShapes.filter(s => {
-                    if (ids.includes(s.id)) {
-                        if (s.type === 'pline' || s.type === 'polygon' || s.type === 'rect') {
-                            const pts = s.type === 'rect' ? [{x:s.x, y:s.y}, {x:s.x+s.width, y:s.y}, {x:s.x+s.width, y:s.y+s.height}, {x:s.x, y:s.y+s.height}] : s.points;
-                            const closed = (s as any).closed || s.type === 'polygon' || s.type === 'rect';
-                            for (let i=0; i<(closed ? pts.length : pts.length-1); i++) {
-                                const p1 = pts[i], p2 = pts[(i+1)%pts.length];
-                                exploded.push({ id: generateId(), type: 'line', layer: s.layer, color: s.color, x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y } as any);
-                            }
-                            return false;
-                        }
-                    }
-                    return true;
-                });
-                next[l] = [...filtered, ...exploded];
-            });
-            return next;
-        });
-        this.ctx.onFinish();
-    }
-    onMove() {} onEnter() {} onCancel() {}
-}
-
 export class ArrayCommand implements CADCommand {
     name = "ARRAY"; selecting = true;
     public rows: number = 2; public cols: number = 2;
@@ -2323,42 +2267,215 @@ export class BlockCommand implements CADCommand {
     public blockName: string = ""; public basePoint: Point | null = null;
     constructor(public ctx: CommandContext) {}
     onStart() { 
-        if (this.ctx.getSelectedIds().length === 0) this.ctx.setMessage("BLOCK Select objects:");
-        else this.ctx.setMessage("BLOCK Enter name:");
+        if (this.ctx.getSelectedIds().length > 0) {
+            this.selecting = false;
+            this.ctx.setMessage("BLOCK Objects selected. Enter block name:");
+        } else {
+            this.ctx.setMessage("BLOCK Select objects to include in block:");
+        }
     }
     onInput(text: string): boolean {
-        if (this.ctx.getSelectedIds().length === 0) return false;
         if (!this.blockName) {
-            this.blockName = text.trim();
-            this.ctx.setMessage("BLOCK Specify base point:");
+            const name = text.trim();
+            if (!name) return false;
+            this.blockName = name;
+            this.ctx.setMessage(`BLOCK [${this.blockName}] Specify base point:`);
+            this.selecting = false;
             return true;
         }
         return false;
     }
     onClick(p: Point) {
-        if (this.ctx.getSelectedIds().length === 0) {
+        if (this.selecting) {
+            const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
             const all = Object.values(this.ctx.getLayers()).flat();
-            const hit = all.find(s => hitTestShape(p.x, p.y, s, 10/this.ctx.getViewState().scale, this.ctx.getBlocks()));
-            if (hit) this.ctx.setSelectedIds(prev => [...prev, hit.id]);
-        } else if (!this.blockName) {
-            this.ctx.addLog("Please enter block name first");
+            const hit = all.find(s => hitTestShape(p.x, p.y, s, 15/ts, this.ctx.getBlocks()));
+            if (hit) {
+                this.ctx.setSelectedIds(prev => prev.includes(hit.id) ? prev : [...prev, hit.id]);
+                this.ctx.setMessage(`BLOCK ${this.ctx.getSelectedIds().length} objects. <Enter> to name block:`);
+            }
         } else if (!this.basePoint) {
             this.basePoint = p;
             this.createBlock();
         }
     }
+    onEnter() {
+        if (this.selecting) {
+            if (this.ctx.getSelectedIds().length > 0) {
+                this.selecting = false;
+                this.ctx.setMessage("BLOCK Enter block name:");
+            } else {
+                this.ctx.addLog("No objects selected for block.");
+                this.ctx.onFinish();
+            }
+        } else if (!this.blockName) {
+            // Already handled by onInput, but just in case
+        }
+    }
     createBlock() {
         const ids = this.ctx.getSelectedIds();
         const selectedShapes = Object.values(this.ctx.getLayers()).flat().filter(s => ids.includes(s.id));
+        if (selectedShapes.length === 0 || !this.blockName || !this.basePoint) return;
+
         const block: BlockDefinition = {
             id: generateId(),
             name: this.blockName,
             basePoint: this.basePoint!,
             shapes: selectedShapes.map(s => moveShape(JSON.parse(JSON.stringify(s)), -this.basePoint!.x, -this.basePoint!.y))
         };
+        
+        const style = getStyleSettings(this.ctx);
+        const instance: Shape = {
+            id: generateId(),
+            type: 'block',
+            blockId: this.blockName,
+            x: this.basePoint.x,
+            y: this.basePoint.y,
+            scaleX: 1,
+            scaleY: 1,
+            rotation: 0,
+            layer: style.layer,
+            color: style.color
+        } as any;
+
         this.ctx.setBlocks(prev => ({ ...prev, [this.blockName]: block }));
+        
+        // Remove original shapes and add block instance
+        this.ctx.setLayers(prev => {
+            const next = { ...prev };
+            Object.keys(next).forEach(l => {
+                next[l] = next[l].filter(s => !ids.includes(s.id));
+            });
+            next[style.layer] = [...(next[style.layer] || []), instance];
+            return next;
+        });
+
         this.ctx.addLog(`BLOCK_CREATED: ${this.blockName}`);
         this.ctx.onFinish();
+    }
+    onMove() {}
+    onEnter() { 
+        if (this.selecting && this.ctx.getSelectedIds().length > 0) {
+            this.selecting = false;
+            this.ctx.setMessage("BLOCK Enter name:");
+        }
+    }
+    onCancel() { this.ctx.onFinish(); }
+}
+
+export class ExplodeCommand implements CADCommand {
+    name = "EXPLODE"; selecting = true;
+    constructor(public ctx: CommandContext) {}
+    onStart() { 
+        if (this.ctx.getSelectedIds().length > 0) {
+            this.explodeSelected();
+        } else {
+            this.ctx.setMessage("EXPLODE Select blocks to explode:"); 
+        }
+    }
+    onClick(p: Point) {
+        const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
+        const all = Object.values(this.ctx.getLayers()).flat();
+        const hit = all.find(s => s.type === 'block' && hitTestShape(p.x, p.y, s, 15/ts, this.ctx.getBlocks()));
+        if (hit && hit.type === 'block') {
+            this.explode(hit as BlockShape);
+        }
+    }
+    explodeSelected() {
+        const ids = this.ctx.getSelectedIds();
+        const all = Object.values(this.ctx.getLayers()).flat();
+        const targets = all.filter(s => s.type === 'block' && ids.includes(s.id)) as BlockShape[];
+        if (targets.length > 0) {
+            targets.forEach(t => this.explode(t, false));
+            this.ctx.onFinish();
+        }
+    }
+    explode(s: BlockShape, finish: boolean = true) {
+        const block = this.ctx.getBlocks()[s.blockId];
+        if (!block) return;
+        const explodedShapes = block.shapes.map(bs => moveShape(JSON.parse(JSON.stringify(bs)), s.x, s.y));
+        this.ctx.setLayers(prev => {
+            const next = { ...prev };
+            Object.keys(next).forEach(l => {
+                next[l] = next[l].filter(sh => sh.id !== s.id);
+            });
+            explodedShapes.forEach(es => {
+                const l = es.layer || '0';
+                next[l] = [...(next[l] || []), es];
+            });
+            return next;
+        });
+        this.ctx.addLog("BLOCK_EXPLODED");
+        if (finish) this.ctx.onFinish();
+    }
+    onMove() {} onEnter() { this.ctx.onFinish(); } onCancel() { this.ctx.onFinish(); }
+}
+
+export class ImportCommand implements CADCommand {
+    name = "IMPORT";
+    constructor(public ctx: CommandContext) {}
+    onStart() { this.ctx.setMessage("IMPORT Paste JSON block definitions:"); }
+    onInput(text: string): boolean {
+        try {
+            const data = JSON.parse(text);
+            if (data.blocks) {
+                this.ctx.setBlocks(prev => ({ ...prev, ...data.blocks }));
+                this.ctx.addLog(`Imported ${Object.keys(data.blocks).length} blocks.`);
+            } else if (data.shapes) {
+                // Import as a new block maybe?
+                const name = "IMPORTED_" + Date.now();
+                this.ctx.setBlocks(prev => ({ ...prev, [name]: { id: generateId(), name, basePoint: {x:0, y:0}, shapes: data.shapes } }));
+                this.ctx.addLog(`Imported shapes as block: ${name}`);
+            }
+            this.ctx.onFinish();
+            return true;
+        } catch (e) {
+            this.ctx.setMessage("Invalid JSON. Try again or Cancel:");
+            return false;
+        }
+    }
+    onClick() {} onMove() {} onEnter() { this.ctx.onFinish(); } onCancel() { this.ctx.onFinish(); }
+}
+
+export class HatchCommand implements CADCommand {
+    name = "HATCH"; 
+    constructor(public ctx: CommandContext) {}
+    onStart() {
+        this.ctx.setMessage("HATCH: Click inside a closed boundary:");
+    }
+    onClick(p: Point) {
+        const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
+        const all = Object.values(this.ctx.getLayers()).flat();
+        const boundary = all.find(s => (s as any).points && (s as any).closed && hitTestShape(p.x, p.y, s, 5/ts, this.ctx.getBlocks()));
+        
+        if (boundary && (boundary as any).points) {
+            if (this.ctx.onExternalRequest) {
+                this.ctx.onExternalRequest('hatch_selector', null, (pattern) => {
+                    if (pattern) {
+                        const style = getStyleSettings(this.ctx);
+                        const hatch: HatchShape = {
+                            id: generateId(), type: 'hatch', pattern: pattern, points: [...(boundary as any).points],
+                            layer: style.layer, color: style.color, scale: 1, rotation: 0
+                        };
+                        this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), hatch]}));
+                        this.ctx.onFinish();
+                    } else {
+                        this.ctx.onFinish();
+                    }
+                });
+            } else {
+                // Fallback if no external request handler
+                const style = getStyleSettings(this.ctx);
+                const hatch: HatchShape = {
+                    id: generateId(), type: 'hatch', pattern: 'ansi31', points: [...(boundary as any).points],
+                    layer: style.layer, color: style.color, scale: 1, rotation: 0
+                };
+                this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), hatch]}));
+                this.ctx.onFinish();
+            }
+        } else {
+            this.ctx.setMessage("HATCH: No closed boundary found. Click again.");
+        }
     }
     onMove() {} onEnter() {} onCancel() { this.ctx.onFinish(); }
 }
@@ -2436,6 +2553,55 @@ export class FilterCommand implements CADCommand {
         return true;
     }
     onClick() {} onMove() {} onEnter() {} onCancel() { this.ctx.onFinish(); }
+}
+
+export class GripEditCommand implements CADCommand {
+    name = "GRIP_EDIT";
+    shape: Shape | null = null;
+    gripIndex: number = -1;
+    
+    constructor(public ctx: CommandContext, params: { shapeId: string, gripIndex: number }) {
+        const all = Object.values(this.ctx.getLayers()).flat();
+        this.shape = all.find(s => s.id === params.shapeId) || null;
+        this.gripIndex = params.gripIndex;
+    }
+    
+    onStart() { 
+        this.ctx.setMessage("GRIP EDIT: Drag to stretch object:"); 
+    }
+    
+    onMove(p: Point, snapped: boolean) {
+        if (!this.shape) return;
+        const pts = (this.shape as any).points;
+        const origin = (this.gripIndex === -1 || !pts) ? {x:0, y:0} : pts[this.gripIndex];
+        const finalP = applyOrthoConstraint(p, origin, this.ctx.getSettings().ortho, snapped);
+        const newShape = modifyShapeByGrip(this.shape, this.gripIndex, finalP);
+        this.ctx.setPreview([newShape]);
+    }
+    
+    onClick(p: Point, snapped: boolean) {
+        if (!this.shape) return;
+        const pts = (this.shape as any).points;
+        const origin = (this.gripIndex === -1 || !pts) ? {x:0, y:0} : pts[this.gripIndex];
+        const finalP = applyOrthoConstraint(p, origin, this.ctx.getSettings().ortho, snapped);
+        this.applyGrip(finalP);
+    }
+    
+    onEnter() { this.ctx.onFinish(); }
+    onCancel() { this.ctx.onFinish(); }
+    
+    applyGrip(p: Point) {
+        if (!this.shape) { this.ctx.onFinish(); return; }
+        const newShape = modifyShapeByGrip(this.shape, this.gripIndex, p);
+        this.ctx.setLayers(prev => {
+            const next = { ...prev };
+            Object.keys(next).forEach(l => {
+                next[l] = next[l].map(s => s.id === this.shape!.id ? newShape : s);
+            });
+            return next;
+        });
+        this.ctx.onFinish();
+    }
 }
 
 export class LayoutCommand implements CADCommand {

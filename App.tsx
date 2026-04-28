@@ -13,10 +13,11 @@ import DraftingSettings from './components/DraftingSettings';
 import DrawingProperties from './components/DrawingProperties';
 import InfoPanel from './components/InfoPanel';
 import NewFileDialog from './components/NewFileDialog';
+import HatchPatternSelector from './components/HatchPatternSelector';
 import MTextEditor from './components/MTextEditor';
 import DimStyleManager from './components/DimStyleManager';
 import LoadingScreen from './components/LoadingScreen';
-import { generateId } from './services/cadService';
+import { generateId, hitTestGrip } from './services/cadService';
 import { getCommandFromAI, connectLiveAgent } from './services/geminiService';
 import { shapesToDXF, dxfToShapes } from './services/dxfService';
 import { shapesToVox, voxToShapes } from './services/voxService';
@@ -31,7 +32,7 @@ import {
   HatchCommand, LeaderCommand, PanCommand, OffsetCommand, TrimCommand, FilletCommand, EllipseCommand, PolygonCommand,
   DonutCommand, PointCommand,
   SelectAllCommand, CopyClipCommand, CutClipCommand, PasteClipCommand, SplineCommand, SketchCommand, StretchCommand, SelectCommand,
-  ArrayCommand, BlockCommand, InsertCommand, FilterCommand, FindCommand, ViewportCommand, LayoutCommand
+  ArrayCommand, BlockCommand, InsertCommand, FilterCommand, FindCommand, ViewportCommand, LayoutCommand, GripEditCommand, ImportCommand
 } from './services/commandEngine';
 import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType, BlockDefinition, LayoutDefinition } from './types';
 import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive } from 'lucide-react';
@@ -180,7 +181,10 @@ const App: React.FC = () => {
   const [previewShapes, setPreviewShapes] = useState<Shape[] | null>(null);
   const [mtextEditor, setMtextEditor] = useState<{ 
     initialValue: string, 
-    callback: (text: string, props?: { size: number, rotation: number, justification: string }) => void 
+    callback: (text: string, props?: any) => void 
+  } | null>(null);
+  const [hatchSelector, setHatchSelector] = useState<{ 
+    callback: (pattern: string) => void 
   } | null>(null);
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [lastAiCommandTime, setLastAiCommandTime] = useState(0);
@@ -617,8 +621,10 @@ const App: React.FC = () => {
         engineRef.current?.cancel(); 
         setCommandInput(''); 
         setSelectedIds([]); 
+        setPreviewShapes(null);
         setIsCommandActive(false); 
         setActiveCommandName(undefined);
+        setCommandPrompt("COMMAND:");
         setShowCircleOptions(false);
         setShowArcOptions(false);
         setShowEllipseOptions(false);
@@ -1143,6 +1149,7 @@ const App: React.FC = () => {
       'i': InsertCommand, 'insert': InsertCommand,
       'fi': FilterCommand, 'filter': FilterCommand,
       'find': FindCommand, 'vports': ViewportCommand, 'viewport': ViewportCommand, 'layout': LayoutCommand,
+      'import': ImportCommand, 'import_blocks': ImportCommand,
     };
     
     const CommandClass = commandMap[cmdKey];
@@ -1293,6 +1300,8 @@ const App: React.FC = () => {
             }
             if (type === 'mtext_editor') {
                 setMtextEditor({ initialValue: data || "", callback: cb });
+            } else if (type === 'hatch_selector') {
+                setHatchSelector({ callback: cb });
             } else if (type === 'interpret_sketch') {
                 // Handle sketch interpretation
                 const handleSketch = async () => {
@@ -1320,6 +1329,23 @@ const App: React.FC = () => {
   }, [setView, commitToHistory]);
 
   const onCanvasClick = (x: number, y: number, snapped: boolean) => {
+    // If no command is active and we have a selection, check for grips first
+    if (engineRef.current && !engineRef.current.active && selectedIds.length > 0) {
+        const ts = view.scale * settings.drawingScale;
+        const threshold = 12 / ts;
+        const allShapes = Object.values(layers).flat() as Shape[];
+        const selectedShapes = allShapes.filter(s => selectedIds.includes(s.id));
+        
+        for (const s of selectedShapes) {
+            const gripIdx = hitTestGrip({x, y}, s, threshold);
+            if (gripIdx !== -1) {
+                if (navigator.vibrate) navigator.vibrate(20);
+                engineRef.current.start(new GripEditCommand(engineRef.current.ctx, { shapeId: s.id, gripIndex: gripIdx }));
+                return;
+            }
+        }
+    }
+
     if(engineRef.current) engineRef.current.click({x,y}, snapped);
   };
 
@@ -1358,113 +1384,91 @@ const App: React.FC = () => {
   return (
     <div className="flex flex-col h-[100dvh] w-full bg-black text-neutral-300 overflow-hidden select-none">
       {isAppLoading && <LoadingScreen onComplete={() => setIsAppLoading(false)} />}
-      <header className="h-14 flex items-center justify-between px-4 shrink-0 bg-black border-b border-white/5 z-[110]">
-        <div className="flex items-center gap-3">
-          <VoxIcon size={32} className="shrink-0" />
-          <div className="flex flex-col h-[32px] justify-between pt-[1px]">
-            <div className="flex items-baseline gap-3 leading-none">
-              <div className="flex items-baseline">
-                <span className="font-black text-[14.5px] uppercase tracking-tighter text-white">VOX</span>
-                <span className="font-normal text-[14.5px] uppercase tracking-tighter text-cyan-500 ml-1.5">CADD</span>
-              </div>
-              <span className="text-neutral-700 font-bold text-[8px] uppercase tracking-[0.2em] leading-none">V-1.0.1</span>
+      <header className="h-10 flex items-center justify-between px-4 shrink-0 bg-black border-b border-white/5 z-[110]">
+        <div className="flex items-center gap-3 shrink-0">
+          <VoxIcon size={22} className="text-cyan-400" />
+          <div className="flex items-center gap-2">
+            <div className="flex items-baseline gap-1 leading-none">
+              <span className="font-black text-[12px] uppercase tracking-tighter text-white">VOX</span>
+              <span className="font-normal text-[12px] uppercase tracking-tighter text-cyan-500">CADD</span>
             </div>
-            
-            <div className="flex items-center gap-1.5 text-[8.5px] font-bold uppercase tracking-wide leading-none mb-0.5">
-              <div className="relative">
-                <button 
-                  onClick={() => { setFileMenuOpen(!fileMenuOpen); setFileNameMenuOpen(false); }}
-                  className={`transition-colors flex items-center gap-0.5 ${fileMenuOpen ? 'text-cyan-400' : 'text-neutral-600 hover:text-neutral-400'}`}
-                >
-                  File: {fileMenuOpen ? <RotateCw size={8} className="animate-spin-slow" /> : null}
-                </button>
-                {fileMenuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-[200]" onClick={() => setFileMenuOpen(false)} />
-                    <div className="absolute top-full left-0 mt-3 bg-[#0a0a0c]/98 backdrop-blur-2xl border border-white/10 rounded-2xl p-2 flex flex-col gap-1 shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[201] min-w-[180px] animate-in zoom-in-95 fade-in slide-in-from-top-4 duration-200">
-                      <div className="px-3 py-1.5 border-b border-white/5 mb-1 text-center">
-                        <div className="text-[7.5px] font-black uppercase text-cyan-500 tracking-widest">Recent Files</div>
-                      </div>
-                      {recentFiles.length > 0 ? recentFiles.map(file => {
-                        const fileName = typeof file === 'string' ? file : file.name;
-                        return (
-                          <button 
-                            key={fileName}
-                            onClick={() => {
-                              handleAction('openRecent', fileName);
-                              setFileMenuOpen(false);
-                            }}
-                            className={`w-full text-left px-3 py-2.5 rounded-xl text-[10px] font-bold uppercase transition-all flex items-center justify-between group active:scale-95 ${fileName === currentFileName ? 'text-cyan-400 bg-cyan-400/5' : 'text-neutral-400 hover:bg-white/5 hover:text-white'}`}
-                          >
-                            <span className="truncate">{fileName}</span>
-                            {fileName === currentFileName && <div className="w-1.5 h-1.5 rounded-full bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.6)]" />}
-                          </button>
-                        );
-                      }) : (
-                        <div className="px-3 py-4 text-[9px] text-neutral-600 uppercase text-center font-bold tracking-tighter">No recent files</div>
-                      )}
-                      <div className="h-px bg-white/5 my-1" />
-                      <button 
-                        onClick={() => { handleAction('open'); setFileMenuOpen(false); }}
-                        className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
-                      >
-                        <FolderOpen size={14} className="text-cyan-500" /> Browse...
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-              
-              <div className="relative">
-                <button 
-                  ref={fileNameBtnRef}
-                  onClick={() => { if(navigator.vibrate) navigator.vibrate(5); toggleFileNameMenu(); }}
-                  onMouseDown={(e) => {
-                    longPressTimer.current = setTimeout(() => {
-                        blockNextClick.current = true;
-                        setFileNameMenuOpen(true);
-                        setFileMenuOpen(false);
-                        if (fileNameBtnRef.current) {
-                            const rect = fileNameBtnRef.current.getBoundingClientRect();
-                            setFileNameMenuPos({ x: rect.left + rect.width / 2, y: rect.bottom });
-                        }
-                        if(navigator.vibrate) navigator.vibrate([30, 50]);
-                    }, 500);
-                  }}
-                  onMouseUp={cancelLongPress}
-                  onMouseLeave={cancelLongPress}
-                  onTouchStart={(e) => {
-                    longPressTimer.current = setTimeout(() => {
-                        blockNextClick.current = true;
-                        setFileNameMenuOpen(true);
-                        setFileMenuOpen(false);
-                        if (fileNameBtnRef.current) {
-                            const rect = fileNameBtnRef.current.getBoundingClientRect();
-                            setFileNameMenuPos({ x: rect.left + rect.width / 2, y: rect.bottom });
-                        }
-                        if(navigator.vibrate) navigator.vibrate([30, 50]);
-                    }, 500);
-                  }}
-                  onTouchMove={cancelLongPress}
-                  onTouchEnd={cancelLongPress}
-                  onTouchCancel={cancelLongPress}
-                  className={`transition-colors no-tap ${fileNameMenuOpen ? 'text-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.2)]' : 'text-neutral-400 hover:text-cyan-400 underline decoration-cyan-500/30 underline-offset-2'}`}
-                >
-                  {currentFileName}
-                </button>
-              </div>
-            </div>
+            <div className="text-[7px] font-black text-neutral-600 uppercase tracking-[0.2em] bg-white/5 px-1.5 py-0.5 rounded-sm border border-white/5">V-1.0.1</div>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <button onClick={() => handleAction('toggleMainMenu')} className="p-1 transition-all text-neutral-500 hover:text-white no-tap">
-            <Menu size={24} />
-          </button>
-        </div>
+        <button onClick={() => handleAction('toggleMainMenu')} className="p-2 transition-all text-white no-tap hover:text-cyan-400">
+          <Menu size={18} />
+        </button>
       </header>
 
-      <div className="h-9 sm:h-8 bg-black border-b border-white/5 flex items-center px-4 z-[100] shrink-0 gap-1 overflow-x-auto scrollbar-none">
+      <div className="h-6.5 bg-[#0a0a0c] border-b border-white/5 flex items-center px-4 z-[100] shrink-0 gap-3">
+          <div className="relative h-full flex items-center">
+            <button 
+              onClick={() => { setFileMenuOpen(!fileMenuOpen); setFileNameMenuOpen(false); }}
+              className={`text-[9px] font-black uppercase transition-colors flex items-center gap-1.5 ${fileMenuOpen ? 'text-cyan-400' : 'text-neutral-500 hover:text-neutral-300'}`}
+            >
+              FILE: {fileMenuOpen ? <RotateCw size={9} className="animate-spin-slow" /> : <FolderOpen size={9} />}
+            </button>
+            {fileMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-[200]" onClick={() => setFileMenuOpen(false)} />
+                <div className="absolute top-full left-0 mt-2 bg-[#0a0a0c]/98 backdrop-blur-2xl border border-white/10 rounded-2xl p-2 flex flex-col gap-1 shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[201] min-w-[220px] animate-in zoom-in-95 fade-in slide-in-from-top-3 duration-200">
+                  <div className="px-3 py-1.5 border-b border-white/5 mb-1">
+                    <div className="text-[7.5px] font-black uppercase text-cyan-500 tracking-widest">Recent Documents</div>
+                  </div>
+                  <div className="max-h-[240px] overflow-y-auto overflow-x-hidden scrollbar-none flex flex-col gap-1">
+                    {recentFiles.length > 0 ? recentFiles.map(file => {
+                      const fileName = typeof file === 'string' ? file : file.name;
+                      return (
+                        <div key={fileName} className="flex items-center gap-1">
+                            <button 
+                              onClick={() => {
+                                handleAction('openRecent', fileName);
+                                setFileMenuOpen(false);
+                              }}
+                              className={`flex-1 text-left px-3 py-2.5 rounded-xl text-[10.5px] font-bold uppercase transition-all truncate group active:scale-95 ${fileName === currentFileName ? 'text-cyan-400 bg-cyan-400/5' : 'text-neutral-400 hover:bg-white/5 hover:text-white'}`}
+                            >
+                              {fileName}
+                            </button>
+                            <button 
+                              onClick={() => handleAction('downloadRecent', fileName)}
+                              className="p-2 text-neutral-600 hover:text-cyan-400 transition-colors"
+                            >
+                              <Save size={14} />
+                            </button>
+                        </div>
+                      );
+                    }) : (
+                      <div className="px-3 py-4 text-[9px] text-neutral-600 uppercase text-center font-bold tracking-tighter">No Recent Files</div>
+                    )}
+                  </div>
+                  <div className="h-px bg-white/5 my-1" />
+                  <button 
+                    onClick={() => { handleAction('open'); setFileMenuOpen(false); }}
+                    className="w-full text-left px-3 py-3 rounded-xl text-[10px] text-neutral-400 hover:bg-white/10 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                  >
+                    <FolderOpen size={16} className="text-cyan-500" /> Open External...
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="w-px h-3 bg-white/5" />
+
+          <button 
+            ref={fileNameBtnRef}
+            onClick={() => { 
+              if (blockNextClick.current) { blockNextClick.current = false; return; }
+              if(navigator.vibrate) navigator.vibrate(5); toggleFileNameMenu(); 
+            }}
+            className={`text-[10px] font-mono tracking-tight transition-colors no-tap font-bold ${fileNameMenuOpen ? 'text-cyan-400' : 'text-neutral-600 hover:text-cyan-400'}`}
+          >
+            {currentFileName}
+          </button>
+      </div>
+
+      <div className="h-7 bg-black border-b border-white/5 flex items-center px-1 z-[99] shrink-0 gap-0 overflow-x-auto scrollbar-none">
           {['FILE', 'EDIT', 'VIEW', 'DRAW', 'MODIFY', 'ANNO', 'TOOLS'].map((item) => {
             const isSelected = 
               (item === 'FILE' && (activePanel === 'drawing_props' || activePanel === 'file')) ||
@@ -1476,8 +1480,8 @@ const App: React.FC = () => {
             return (
               <button 
                 key={item} 
-                id={`tab-${item.toLowerCase()}`}
                 onClick={() => { 
+                  if (blockNextClick.current) { blockNextClick.current = false; return; }
                   if (navigator.vibrate) navigator.vibrate(5);
                   if (item === 'FILE') handleAction('openFileManager'); 
                   else if (item === 'EDIT') setActiveCategory('Edit'); 
@@ -1487,14 +1491,21 @@ const App: React.FC = () => {
                   else if (item === 'ANNO') setActiveCategory('Anno'); 
                   else if (item === 'TOOLS') setActiveCategory('Tools'); 
                 }} 
-                className={`text-[9.5px] font-black tracking-[0.12em] transition-all no-tap whitespace-nowrap px-2.5 h-full flex items-center relative ${
+                className={`text-[9.5px] font-black tracking-widest transition-all no-tap whitespace-nowrap px-3 h-full flex items-center relative active:bg-white/5 ${
                   isSelected 
-                    ? 'text-cyan-400 font-black' 
+                    ? 'text-cyan-400' 
                     : 'text-neutral-600 hover:text-neutral-400'
                 }`}
               >
-                {item}
-                {isSelected && <div className="absolute inset-x-2 bottom-[1.5px] h-[1.5px] bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.5)]"></div>}
+                <div className="h-full flex flex-col justify-center items-center px-1">
+                  <span className="mt-1">{item}</span>
+                  {isSelected && (
+                    <motion.div 
+                      layoutId="tab-underline"
+                      className="w-full h-[1.5px] bg-cyan-400 mt-0.5 rounded-full shadow-[0_0_8px_rgba(0,188,212,0.6)]"
+                    />
+                  )}
+                </div>
               </button>
             );
           })}
@@ -1550,6 +1561,7 @@ const App: React.FC = () => {
             activeCommandName={activeCommandName} 
             isAiThinking={isAiThinking}
             lastAiCommandTime={lastAiCommandTime}
+            setLogMessage={setLogMessage}
           />
         </motion.div>
         
@@ -1656,7 +1668,12 @@ const App: React.FC = () => {
                 ...s, 
                 textSize: props.size, 
                 textRotation: props.rotation,
-                textJustification: props.justification
+                textJustification: props.justification,
+                textBold: props.bold,
+                textItalic: props.italic,
+                textUnderline: props.underline,
+                textHighlight: props.highlight,
+                fontFamily: props.fontFamily
               }));
               // Pass values to callback for current command
               mtextEditor.callback(text, props);
@@ -1665,6 +1682,18 @@ const App: React.FC = () => {
             onCancel={() => {
               mtextEditor.callback("");
               setMtextEditor(null);
+            }}
+          />
+        )}
+        {hatchSelector && (
+          <HatchPatternSelector 
+            onSelect={(pattern) => {
+              hatchSelector.callback(pattern);
+              setHatchSelector(null);
+            }}
+            onCancel={() => {
+              hatchSelector.callback("");
+              setHatchSelector(null);
             }}
           />
         )}
@@ -1710,7 +1739,12 @@ const App: React.FC = () => {
               key={l.id}
               draggable
               onDragStart={() => handleDragStart(l.id)}
-              onDragOver={(e) => { e.preventDefault(); handleDragOverTab(l.id); }}
+              onDragOver={(e) => { 
+                e.preventDefault(); 
+                // Requirement: listen for drag operations on layout tabs
+                handleDragOverTab(l.id); 
+              }}
+              onDrop={() => setDraggedLayoutId(null)}
               onClick={() => {
                 if (blockNextClick.current) {
                   blockNextClick.current = false;

@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { X, Check, Type, AlignLeft, AlignCenter, AlignRight, RotateCcw, Maximize } from 'lucide-react';
+import { X, Check, Type, AlignLeft, AlignCenter, AlignRight, RotateCcw, Maximize, Bold, Italic, Underline, Highlighter } from 'lucide-react';
 
 interface MTextEditorProps {
   initialValue: string;
@@ -8,8 +8,22 @@ interface MTextEditorProps {
     size?: number;
     rotation?: number;
     justification?: 'left' | 'center' | 'right';
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+    highlight?: boolean;
+    fontFamily?: string;
   };
-  onSave: (text: string, settings: { size: number; rotation: number; justification: 'left' | 'center' | 'right' }) => void;
+  onSave: (text: string, settings: { 
+    size: number; 
+    rotation: number; 
+    justification: 'left' | 'center' | 'right';
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+    highlight?: boolean;
+    fontFamily?: string;
+  }) => void;
   onCancel: () => void;
 }
 
@@ -18,107 +32,159 @@ const MTextEditor: React.FC<MTextEditorProps> = ({ initialValue, initialSettings
   const [size, setSize] = useState(initialSettings?.size || 250);
   const [rotation, setRotation] = useState(initialSettings?.rotation || 0);
   const [justification, setJustification] = useState<'left' | 'center' | 'right'>(initialSettings?.justification || 'left');
+  const [bold, setBold] = useState(initialSettings?.bold || false);
+  const [italic, setItalic] = useState(initialSettings?.italic || false);
+  const [underline, setUnderline] = useState(initialSettings?.underline || false);
+  const [highlight, setHighlight] = useState(initialSettings?.highlight || false);
+  const [fontFamily, setFontFamily] = useState(initialSettings?.fontFamily || 'monospace');
+
+  const fonts = [
+    { name: 'Regular', value: 'monospace' },
+    { name: 'Arial', value: 'Arial, sans-serif' },
+    { name: 'Sans-Serif', value: 'Inter, system-ui, sans-serif' },
+    { name: 'JetBrains', value: '"JetBrains Mono", monospace' },
+    { name: 'Serif', value: 'serif' }
+  ];
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className="w-full max-w-2xl bg-[#0d0d0f] rounded-[2rem] overflow-hidden shadow-[0_60px_150px_rgba(0,0,0,1)] border border-white/10 animate-in zoom-in-95 duration-400 flex flex-col max-h-[80vh]">
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="w-full max-w-lg bg-[#0d0d0f] rounded-[1.5rem] overflow-hidden shadow-[0_40px_100px_rgba(0,0,0,0.8)] border border-white/10 animate-in zoom-in-95 duration-200 flex flex-col h-[70vh] max-h-[90vh]">
         
-        {/* Header */}
-        <div className="p-6 border-b border-white/5 flex justify-between items-center bg-[#121214]">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 flex items-center justify-center text-cyan-400">
-              <Type size={20} />
-            </div>
-            <div>
-              <h2 className="text-lg font-black text-white uppercase tracking-tight">Annotation Properties</h2>
-              <p className="text-[9px] text-neutral-500 font-bold uppercase tracking-[0.2em] mt-0.5">Multi-line Text Processor</p>
-            </div>
+        {/* Header - 1st line: t annotation property */}
+        <div className="px-4 py-2 border-b border-white/5 flex justify-between items-center bg-[#121214]">
+          <div className="flex items-center gap-2">
+            <Type size={14} className="text-cyan-400" />
+            <h2 className="text-[10px] font-black text-white uppercase tracking-[0.2em]">T ANNOTATION PROPERTY</h2>
           </div>
-          <button onClick={onCancel} className="w-10 h-10 flex items-center justify-center hover:bg-white/5 rounded-full text-neutral-600 transition-colors">
-            <X size={24} />
+          <button onClick={onCancel} className="p-1 hover:bg-white/5 rounded-full text-neutral-600 transition-colors">
+            <X size={16} />
           </button>
         </div>
 
-        {/* Toolbar */}
-        <div className="px-6 py-3 bg-[#0a0a0c] border-b border-white/5 flex items-center gap-4 flex-wrap">
-            <div className="flex items-center gap-1 bg-white/5 p-1 rounded-lg">
-                <button 
-                  onClick={() => setJustification('left')}
-                  className={`p-2 rounded-lg transition-all ${justification === 'left' ? 'bg-cyan-500 text-black' : 'text-neutral-500 hover:bg-white/5'}`}
-                >
-                  <AlignLeft size={16} />
-                </button>
-                <button 
-                  onClick={() => setJustification('center')}
-                  className={`p-2 rounded-lg transition-all ${justification === 'center' ? 'bg-cyan-500 text-black' : 'text-neutral-500 hover:bg-white/5'}`}
-                >
-                  <AlignCenter size={16} />
-                </button>
-                <button 
-                  onClick={() => setJustification('right')}
-                  className={`p-2 rounded-lg transition-all ${justification === 'right' ? 'bg-cyan-500 text-black' : 'text-neutral-500 hover:bg-white/5'}`}
-                >
-                  <AlignRight size={16} />
-                </button>
+        {/* 2nd line - Justification tool and text style */}
+        <div className="px-4 py-1.5 bg-[#0a0a0c] border-b border-white/10 flex items-center gap-4">
+            <div className="flex items-center gap-0.5 bg-white/5 p-0.5 rounded-lg border border-white/5">
+                {[
+                  { id: 'left', icon: <AlignLeft size={16} /> },
+                  { id: 'center', icon: <AlignCenter size={16} /> },
+                  { id: 'right', icon: <AlignRight size={16} /> }
+                ].map((btn) => (
+                  <button 
+                    key={btn.id}
+                    onClick={() => setJustification(btn.id as any)}
+                    className={`p-1.5 rounded-md transition-all ${justification === btn.id ? 'bg-cyan-500 text-black shadow-[0_0_10px_rgba(6,182,212,0.4)]' : 'text-neutral-500 hover:text-neutral-300'}`}
+                  >
+                    {btn.icon}
+                  </button>
+                ))}
             </div>
 
-            <div className="flex items-center gap-2">
-                <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
-                    <Maximize size={12} className="text-neutral-500" />
-                    <span className="text-[8px] font-black uppercase text-neutral-600">Height</span>
+            <div className="flex items-center gap-0.5 bg-white/5 p-0.5 rounded-lg border border-white/5">
+                {[
+                  { active: bold, setter: setBold, icon: <Bold size={16} />, title: "Bold" },
+                  { active: italic, setter: setItalic, icon: <Italic size={16} />, title: "Italic" },
+                  { active: underline, setter: setUnderline, icon: <Underline size={16} />, title: "Underline" },
+                ].map((btn, idx) => (
+                  <button 
+                    key={idx}
+                    onClick={() => btn.setter(!btn.active)}
+                    className={`p-1.5 rounded-md transition-all ${btn.active ? 'bg-cyan-500 text-black shadow-[0_0_10px_rgba(6,182,212,0.4)]' : 'text-neutral-500 hover:text-neutral-300'}`}
+                    title={btn.title}
+                  >
+                    {btn.icon}
+                  </button>
+                ))}
+                <button 
+                  onClick={() => setHighlight(!highlight)}
+                  className={`p-1.5 rounded-md transition-all ${highlight ? 'bg-yellow-500 text-black shadow-[0_0_10px_rgba(234,179,8,0.4)]' : 'text-neutral-500 hover:text-neutral-300'}`}
+                  title="Highlight"
+                >
+                  <Highlighter size={16} />
+                </button>
+            </div>
+        </div>
+
+        {/* 3rd line - Text type , height angle */}
+        <div className="px-4 py-2 bg-[#0a0a0c] border-b border-white/10 flex items-center gap-3 overflow-x-auto scrollbar-none">
+            <div className="flex flex-col gap-0.5 shrink-0">
+                <span className="text-[7.5px] font-black uppercase text-neutral-600 tracking-tighter">Text Type</span>
+                <select 
+                  value={fontFamily}
+                  onChange={(e) => setFontFamily(e.target.value)}
+                  className="bg-white/5 text-white font-bold text-[10px] outline-none border border-white/5 px-2 py-1 rounded-md cursor-pointer min-w-[100px]"
+                >
+                  {fonts.map(f => (
+                    <option key={f.value} value={f.value} className="bg-[#0d0d0f]">{f.name}</option>
+                  ))}
+                </select>
+            </div>
+
+            <div className="flex flex-col gap-0.5 shrink-0">
+                <span className="text-[7.5px] font-black uppercase text-neutral-600 tracking-tighter">Height</span>
+                <div className="flex items-center gap-1 bg-white/5 px-2 py-1 rounded-md border border-white/5">
+                    <Maximize size={10} className="text-neutral-500" />
                     <input 
                       type="number" 
                       value={size} 
                       onChange={(e) => setSize(Number(e.target.value))}
-                      className="w-16 bg-transparent text-white font-mono text-[10px] outline-none"
+                      className="w-14 bg-transparent text-white font-mono text-[10px] outline-none"
                     />
                 </div>
-                <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
-                    <RotateCcw size={12} className="text-neutral-500" />
-                    <span className="text-[8px] font-black uppercase text-neutral-600">Rotate</span>
+            </div>
+
+            <div className="flex flex-col gap-0.5 shrink-0">
+                <span className="text-[7.5px] font-black uppercase text-neutral-600 tracking-tighter">Angle</span>
+                <div className="flex items-center gap-1 bg-white/5 px-2 py-1 rounded-md border border-white/5">
+                    <RotateCcw size={10} className="text-neutral-500" />
                     <input 
                       type="number" 
                       value={rotation} 
                       onChange={(e) => setRotation(Number(e.target.value))}
-                      className="w-16 bg-transparent text-white font-mono text-[10px] outline-none"
+                      className="w-12 bg-transparent text-white font-mono text-[10px] outline-none"
                     />
                     <span className="text-[8px] font-black text-neutral-600">°</span>
                 </div>
             </div>
         </div>
         
-        {/* Editor Area */}
-        <div className="flex-1 p-6 overflow-hidden">
+        {/* 4th line - Text area */}
+        <div className="flex-1 p-0 overflow-hidden bg-neutral-900/10">
           <textarea 
             autoFocus
             value={text}
             onChange={(e) => setText(e.target.value)}
-            className="w-full h-full bg-transparent text-white font-sans text-base outline-none resize-none placeholder:text-neutral-800 leading-relaxed"
-            placeholder="Enter architectural notes or text content..."
+            className="w-full h-full min-h-[400px] bg-transparent text-white p-4 outline-none resize-none placeholder:text-neutral-800 leading-relaxed scrollbar-thin scrollbar-thumb-white/10"
+            placeholder="TYPE CONTENT HERE..."
             style={{ 
                 textAlign: justification,
-                fontSize: `${Math.min(24, Math.max(12, size / 10))}px`
+                fontSize: `${Math.min(24, Math.max(12, size / 10))}px`,
+                fontWeight: bold ? 'bold' : 'normal',
+                fontStyle: italic ? 'italic' : 'normal',
+                textDecoration: underline ? 'underline' : 'none',
+                backgroundColor: highlight ? 'rgba(255, 230, 0, 0.1)' : 'transparent',
+                fontFamily: fontFamily
             }}
           />
         </div>
 
-        {/* Footer */}
-        <div className="p-6 bg-[#0a0a0c] border-t border-white/5 flex justify-end gap-3">
+        {/* 5th line - Discard and place content */}
+        <div className="px-4 py-1.5 bg-[#121214] border-t border-white/10 flex justify-between items-center">
           <button 
             onClick={onCancel}
-            className="px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-white transition-all"
+            className="px-4 py-1 rounded-xl text-[10px] font-black uppercase tracking-widest text-neutral-600 hover:text-red-500 transition-all active:scale-95"
           >
-            Discard
+            DISCARD
           </button>
           <button 
-            onClick={() => onSave(text, { size, rotation, justification })}
-            className="px-8 py-3 bg-cyan-600 text-black rounded-xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-cyan-950/20 active:scale-95 transition-all flex items-center gap-2"
+            onClick={() => onSave(text, { size, rotation, justification, bold, italic, underline, highlight, fontFamily })}
+            className="px-6 py-1.5 bg-cyan-500 text-black rounded-xl text-[10px] font-black uppercase tracking-widest shadow-[0_10px_20px_rgba(6,182,212,0.3)] active:scale-95 transition-all flex items-center gap-2"
           >
-            <Check size={16} strokeWidth={3} /> Place Content
+            <Check size={14} strokeWidth={4} /> PLACE CONTENT
           </button>
         </div>
       </div>
     </div>
+
   );
 };
 

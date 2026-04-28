@@ -212,19 +212,19 @@ const CommandBar: React.FC<CommandBarProps> = ({
                             onChange(e.target.value); 
                             setShowSuggestions(true);
                             e.target.style.height = 'auto';
-                            e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+                            e.target.style.height = `${Math.max(40, Math.min(e.target.scrollHeight, 150))}px`;
                         }}
                         onKeyDown={e => {
                           if (e.key === 'Enter' && !e.shiftKey) {
                             e.preventDefault();
                             handleSubmit(e as any);
-                            (e.target as HTMLTextAreaElement).style.height = 'auto';
+                            (e.target as HTMLTextAreaElement).style.height = '40px';
                           } else {
                             handleKeyDown(e as any);
                           }
                         }}
-                        className="w-full bg-transparent text-white font-mono outline-none text-[11px] uppercase tracking-widest placeholder:text-neutral-900 select-text resize-none py-2.5 h-[40px] max-h-[120px] scrollbar-none block focus:ring-0"
-                        placeholder="COMMAND..."
+                        className="w-full bg-transparent text-white font-mono outline-none text-[11px] uppercase tracking-widest placeholder:text-neutral-900 select-text resize-none py-2.5 h-[40px] max-h-[150px] scrollbar-thin scrollbar-thumb-white/10 block focus:ring-0"
+                        placeholder="ENTER COMMAND..."
                         autoComplete="off-vox"
                         autoCorrect="off"
                         autoCapitalize="off"
@@ -236,9 +236,9 @@ const CommandBar: React.FC<CommandBarProps> = ({
                 <div className="flex items-center self-stretch py-1.5 pl-2 shrink-0">
                     <button 
                         type="submit" 
-                        className={`w-7 h-7 rounded-lg transition-all flex items-center justify-center active:scale-90 shadow-lg ${!value && isCommandActive ? 'bg-emerald-500 text-black shadow-emerald-900/20' : 'bg-[#00bcd4] text-black shadow-cyan-900/20'}`}
+                        className={`w-8 h-8 rounded-lg transition-all flex items-center justify-center active:scale-90 shadow-lg ${!value && isCommandActive ? 'bg-emerald-500 text-black shadow-emerald-900/20' : 'bg-cyan-500 text-black shadow-cyan-900/20'}`}
                     >
-                        {!value && isCommandActive ? <Check size={14} strokeWidth={4} /> : <Send size={12} strokeWidth={3} />}
+                        {!value && isCommandActive ? <Check size={16} strokeWidth={4} /> : <Send size={14} strokeWidth={3} />}
                     </button>
                 </div>
             </form>

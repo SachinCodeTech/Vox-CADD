@@ -13,9 +13,9 @@ export interface Point {
   y: number;
 }
 
-export type ShapeType = 'line' | 'dline' | 'circle' | 'rect' | 'text' | 'mtext' | 'arc' | 'pline' | 'spline' | 'dimension' | 'dimang' | 'ellipse' | 'polygon' | 'point' | 'ray' | 'xline' | 'donut' | 'leader' | 'block';
+export type ShapeType = 'line' | 'dline' | 'circle' | 'rect' | 'text' | 'mtext' | 'arc' | 'pline' | 'spline' | 'dimension' | 'dimang' | 'ellipse' | 'polygon' | 'point' | 'ray' | 'xline' | 'donut' | 'leader' | 'block' | 'hatch';
 
-export type LineType = 'continuous' | 'dashed' | 'dotted' | 'center';
+export type LineType = 'continuous' | 'dashed' | 'dotted' | 'center' | 'dashdot' | 'border' | 'divide' | 'phantom' | 'zigzag' | 'hotwater';
 
 export type TextJustification = 'left' | 'center' | 'right';
 
@@ -93,6 +93,11 @@ export interface TextShape extends BaseShape {
   content: string;
   rotation?: number; 
   justification?: TextJustification;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  highlight?: boolean;
+  fontFamily?: string;
 }
 
 export interface MTextShape extends BaseShape {
@@ -105,6 +110,11 @@ export interface MTextShape extends BaseShape {
   lineHeight?: number;
   rotation?: number;
   justification?: TextJustification;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  highlight?: boolean;
+  fontFamily?: string;
 }
 
 export interface ArcShape extends BaseShape {
@@ -175,6 +185,16 @@ export interface LeaderShape extends BaseShape {
   size: number;
 }
 
+export type HatchPattern = 'solid' | 'ansi31' | 'ansi32' | 'ansi37' | 'dots' | 'cross' | 'net' | 'honey' | 'clay' | 'cork' | 'grass' | 'gravel' | 'stars';
+
+export interface HatchShape extends BaseShape {
+  type: 'hatch';
+  pattern: HatchPattern;
+  points: Point[]; 
+  scale?: number;
+  rotation?: number;
+}
+
 export interface BlockShape extends BaseShape {
   type: 'block';
   blockId: string;
@@ -208,7 +228,7 @@ export interface LayoutDefinition {
   viewports: LayoutViewport[];
 }
 
-export type Shape = LineShape | DoubleLineShape | DimensionShape | CircleShape | RectShape | TextShape | MTextShape | ArcShape | PolyShape | EllipseShape | PointShape | LeaderShape | InfiniteLineShape | AngularDimensionShape | DonutShape | BlockShape;
+export type Shape = LineShape | DoubleLineShape | DimensionShape | CircleShape | RectShape | TextShape | MTextShape | ArcShape | PolyShape | EllipseShape | PointShape | LeaderShape | InfiniteLineShape | AngularDimensionShape | DonutShape | BlockShape | HatchShape;
 
 export interface ViewState {
   scale: number;
@@ -217,7 +237,7 @@ export interface ViewState {
 }
 
 export type UnitType = 'metric' | 'imperial';
-export type MetricSubUnit = 'm' | 'mm';
+export type MetricSubUnit = 'm' | 'mm' | 'cm';
 export type ImperialSubUnit = 'ft' | 'ft-in';
 
 export interface LayerConfig {

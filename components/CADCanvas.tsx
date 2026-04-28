@@ -28,6 +28,7 @@ interface CADCanvasProps {
   lastAiCommandTime?: number;
   onAction?: (action: string, payload?: any) => void;
   onCommand?: (cmd: string) => void;
+  setLogMessage?: (msg: string | null) => void;
 }
 
 export interface CADCanvasHandle {
@@ -38,7 +39,8 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     layers, blocks, layouts, layerConfig, view, setView, settings, isCommandActive, activeTab, 
     isViewportActive = false, onViewportToggle,
     onMouseMove, onClick, selectedIds = [], highlightIds = [], onSelectionChange, previewShapes,
-    activePrompt, basePoint = null, activeCommandName, isAiThinking, lastAiCommandTime, onAction, onCommand
+    activePrompt, basePoint = null, activeCommandName, isAiThinking, lastAiCommandTime, onAction, onCommand,
+    setLogMessage
 }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
@@ -300,7 +302,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
 
     visibleShapes.forEach(s => drawShape(ctx, s, ts));
     if (activeSnapRef.current) drawSnapMarker(ctx, activeSnapRef.current, ts);
-    if (previewShapes) previewShapes.forEach(s => drawShape(ctx, s, ts));
+    if (isCommandActive && previewShapes) previewShapes.forEach(s => drawShape(ctx, s, ts));
     
     visibleShapes.filter(s => selectedIds.includes(s.id)).forEach(s => drawGrips(ctx, s, ts));
     ctx.restore();
@@ -388,17 +390,26 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   }, [view, layers, previewShapes, selectedIds, highlightIds, settings, layerConfig, activeTab, isViewportActive, isCommandActive, selectionRect]);
 
   const drawGrips = (ctx: CanvasRenderingContext2D, s: Shape, ts: number) => {
-    const size = 6 / ts;
+    const size = 7 / ts;
     ctx.fillStyle = "#3b82f6";
-    const drawBox = (px: number, py: number) => { ctx.fillRect(px - size/2, py - size/2, size, size); };
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 1.5 / ts;
+    const drawBox = (px: number, py: number) => { 
+        ctx.beginPath();
+        ctx.rect(px - size/2, py - size/2, size, size);
+        ctx.fill();
+        ctx.stroke();
+    };
 
+    ctx.save();
     switch (s.type) {
         case 'line': drawBox(s.x1, s.y1); drawBox(s.x2, s.y2); drawBox((s.x1+s.x2)/2, (s.y1+s.y2)/2); break;
-        case 'circle': drawBox(s.x, s.y); drawBox(s.x + s.radius, s.y); drawBox(s.x - s.radius, s.y); break;
-        case 'rect': drawBox(s.x, s.y); drawBox(s.x+s.width, s.y); drawBox(s.x+s.width, s.y+s.height); drawBox(s.x, s.y+s.height); break;
+        case 'circle': drawBox(s.x, s.y); drawBox(s.x + s.radius, s.y); drawBox(s.x, s.y + s.radius); drawBox(s.x - s.radius, s.y); drawBox(s.x, s.y - s.radius); break;
+        case 'rect': drawBox(s.x, s.y); drawBox(s.x+s.width, s.y); drawBox(s.x+s.width, s.y+s.height); drawBox(s.x, s.y+s.height); drawBox(s.x + s.width/2, s.y); drawBox(s.x + s.width, s.y + s.height/2); break;
         case 'pline': case 'polygon': case 'spline': s.points.forEach(p => drawBox(p.x, p.y)); break;
-        case 'arc': drawBox(s.x, s.y); drawBox(s.x + s.radius * Math.cos(s.startAngle), s.y + s.radius * Math.sin(s.startAngle)); drawBox(s.x + s.radius * Math.cos(s.endAngle), s.y + s.radius * Math.sin(s.endAngle)); break;
+        case 'arc': drawBox(s.x, s.y); drawBox(s.x + s.radius * Math.cos(s.startAngle), s.y + s.radius * Math.sin(s.startAngle)); drawBox(s.x + s.radius * Math.cos(s.endAngle), s.y + s.radius * Math.sin(s.endAngle)); drawBox(s.x + s.radius * Math.cos((s.startAngle+s.endAngle)/2), s.y + s.radius * Math.sin((s.startAngle+s.endAngle)/2)); break;
     }
+    ctx.restore();
   };
 
   const drawShape = (ctx: CanvasRenderingContext2D, s: Shape, ts: number) => {
@@ -422,8 +433,19 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     const currentLineType = s.lineType || conf?.lineType || 'continuous';
     if (!s.isPreview && !isH && !isS) {
         if (currentLineType === 'dashed') ctx.setLineDash([12/ts, 8/ts]);
-        else if (currentLineType === 'dotted') ctx.setLineDash([1.5/ts, 5/ts]);
-        else if (currentLineType === 'center') ctx.setLineDash([20/ts, 6/ts, 4/ts, 6/ts]);
+        else if (currentLineType === 'dotted') ctx.setLineDash([2/ts, 5/ts]);
+        else if (currentLineType === 'center') ctx.setLineDash([25/ts, 8/ts, 5/ts, 8/ts]);
+        else if (currentLineType === 'dashdot') ctx.setLineDash([20/ts, 6/ts, 3/ts, 6/ts]);
+        else if (currentLineType === 'border') ctx.setLineDash([25/ts, 5/ts, 10/ts, 5/ts]);
+        else if (currentLineType === 'divide') ctx.setLineDash([18/ts, 5/ts, 3/ts, 5/ts, 3/ts, 5/ts]);
+        else if (currentLineType === 'phantom') ctx.setLineDash([30/ts, 6/ts, 6/ts, 6/ts, 6/ts, 6/ts]);
+        else if (currentLineType === 'zigzag') {
+          // Zigzag approximation
+          ctx.setLineDash([10/ts, 5/ts, 2/ts, 5/ts]); 
+        }
+        else if (currentLineType === 'hotwater') {
+          ctx.setLineDash([25/ts, 6/ts, 5/ts, 6/ts, 5/ts, 6/ts]); 
+        }
         else ctx.setLineDash([]);
     }
 
@@ -437,6 +459,19 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         ctx.arc(s.x, s.y, s.outerRadius, 0, Math.PI * 2);
         ctx.moveTo(s.x + s.innerRadius, s.y);
         ctx.arc(s.x, s.y, s.innerRadius, 0, Math.PI * 2, true);
+        break;
+      case 'hatch':
+        if (s.points && s.points.length > 2) {
+          ctx.save();
+          const region = new Path2D();
+          region.moveTo(s.points[0].x, s.points[0].y);
+          s.points.forEach(p => region.lineTo(p.x, p.y));
+          region.closePath();
+          ctx.clip(region);
+          
+          drawHatchPattern(ctx, s.pattern, s.points, s.scale || 1, s.rotation || 0, ts);
+          ctx.restore();
+        }
         break;
       case 'ray': {
           const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
@@ -583,14 +618,64 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         ctx.translate(s.x, s.y); 
         if (s.rotation) ctx.rotate(-s.rotation * Math.PI / 180); 
         ctx.scale(1,-1); 
-        ctx.font=`400 ${s.size}px monospace`; 
+        
+        const weight = (s as any).bold ? 'bold' : '400';
+        const style = (s as any).italic ? 'italic' : 'normal';
+        const font = (s as any).fontFamily || 'monospace';
+        
+        ctx.font=`${style} ${weight} ${s.size}px ${font}`; 
         ctx.fillStyle=ctx.strokeStyle; 
         ctx.textAlign = s.justification || 'left';
+        
         if (s.type === 'mtext') {
             const lines = s.content.split('\n');
             const xOffset = (s.justification === 'center' ? s.width/2 : s.justification === 'right' ? s.width : 0);
-            lines.forEach((line, i) => ctx.fillText(line, xOffset, (i + 1) * s.size * 1.2));
-        } else ctx.fillText(s.content, 0, 0);
+            lines.forEach((line, i) => {
+                const ly = (i + 1) * s.size * 1.2;
+                
+                if ((s as any).highlight) {
+                    const tw = ctx.measureText(line).width;
+                    let hx = xOffset;
+                    if (s.justification === 'center') hx -= tw/2;
+                    else if (s.justification === 'right') hx -= tw;
+                    ctx.save();
+                    ctx.fillStyle = 'rgba(255, 230, 0, 0.4)';
+                    // Fix highlighter size to fit text bounds only
+                    ctx.fillRect(hx - 2, ly - s.size * 0.85, tw + 4, s.size * 1.1);
+                    ctx.restore();
+                }
+                
+                ctx.fillText(line, xOffset, ly);
+                
+                if ((s as any).underline) {
+                    const tw = ctx.measureText(line).width;
+                    let ux = xOffset;
+                    if (s.justification === 'center') ux -= tw/2;
+                    else if (s.justification === 'right') ux -= tw;
+                    ctx.fillRect(ux, ly + 2, tw, s.size/10);
+                }
+            });
+        } else {
+            if ((s as any).highlight) {
+                const tw = ctx.measureText(s.content).width;
+                let hx = 0;
+                if (s.justification === 'center') hx -= tw/2;
+                else if (s.justification === 'right') hx -= tw;
+                ctx.save();
+                ctx.fillStyle = 'rgba(255, 230, 0, 0.4)';
+                // Fix highlighter size to fit text bounds only
+                ctx.fillRect(hx - 2, -s.size * 0.85, tw + 4, s.size * 1.1);
+                ctx.restore();
+            }
+            ctx.fillText(s.content, 0, 0);
+            if ((s as any).underline) {
+                const tw = ctx.measureText(s.content).width;
+                let ux = 0;
+                if (s.justification === 'center') ux -= tw/2;
+                else if (s.justification === 'right') ux -= tw;
+                ctx.fillRect(ux, 4, tw, s.size/10);
+            }
+        }
         ctx.restore(); break;
       case 'block':
         const block = blocks[s.blockId];
@@ -606,6 +691,73 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     }
     if(s.filled && !isS && !isH) { ctx.fillStyle = ctx.strokeStyle; ctx.globalAlpha = 0.25; ctx.fill(); ctx.globalAlpha = 1.0; }
     ctx.stroke(); ctx.restore();
+  };
+
+  const drawHatchPattern = (ctx: CanvasRenderingContext2D, pattern: string, points: Point[], scale: number, rotation: number, ts: number) => {
+    // Calculate bounds of the hatch
+    const xMin = Math.min(...points.map(p => p.x));
+    const xMax = Math.max(...points.map(p => p.x));
+    const yMin = Math.min(...points.map(p => p.y));
+    const yMax = Math.max(...points.map(p => p.y));
+    
+    const width = xMax - xMin;
+    const height = yMax - yMin;
+    
+    const spacing = (scale || 1) * (pattern === 'dots' ? 20 : 40) / ts;
+    const angle = (rotation || 0) * Math.PI / 180;
+    
+    ctx.save();
+    
+    // REQUIREMENT: Correctly implement Hatch clip to prevent overflow
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    points.forEach((p, i) => i > 0 && ctx.lineTo(p.x, p.y));
+    ctx.closePath();
+    ctx.clip();
+
+    ctx.lineWidth = 1/ts;
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 0.6;
+    
+    if (pattern === 'solid') {
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.fill(); // Fill the current path which is the boundary
+    } else {
+        // Simple line-based hatch generator
+        const diagonal = Math.sqrt(width*width + height*height) * 4; // Increased factor for safety
+        const count = Math.ceil(diagonal / spacing);
+        const startX = (xMin + xMax) / 2;
+        const startY = (yMin + yMax) / 2;
+        
+        ctx.translate(startX, startY);
+        ctx.rotate(angle);
+        
+        ctx.beginPath();
+        for (let i = -count; i <= count; i++) {
+           const offset = i * spacing;
+           
+           if (pattern.startsWith('ansi3') || pattern === 'cross' || pattern === 'net') {
+               // Diagonal lines
+               ctx.moveTo(-diagonal, offset);
+               ctx.lineTo(diagonal, offset);
+           }
+           
+           if (pattern === 'cross' || pattern === 'net' || pattern === 'ansi37') {
+               // Perpendicular lines
+               ctx.moveTo(offset, -diagonal);
+               ctx.lineTo(offset, diagonal);
+           }
+           
+           if (pattern === 'dots') {
+               for (let j = -count; j <= count; j++) {
+                   ctx.rect(i * spacing, j * spacing, 1/ts, 1/ts);
+               }
+           }
+        }
+        ctx.stroke();
+    }
+    ctx.restore();
   };
 
   const drawSnapMarker = (ctx: CanvasRenderingContext2D, snap: SnapPoint, ts: number) => {
@@ -653,6 +805,9 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     ctx.stroke(); ctx.restore();
   };
 
+  const selectionTimer = useRef<NodeJS.Timeout | null>(null);
+  const isMultiSelecting = useRef<boolean>(false);
+
   const handlePointerDown = (e: React.PointerEvent) => {
       const canvas = canvasRef.current; if (!canvas) return;
       const rect = canvas.getBoundingClientRect(), x = e.clientX-rect.left, y = e.clientY-rect.top;
@@ -662,8 +817,21 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       if (count === 1) {
           touchStartTime.current = Date.now();
           touchStartCount.current = 1;
+
+          // REQUIREMENT: Long press for multi object selection
+          if (!isCommandActive) {
+            selectionTimer.current = setTimeout(() => {
+                isMultiSelecting.current = true;
+                if(navigator.vibrate) navigator.vibrate(30);
+                if (setLogMessage) setLogMessage("MULTI_SELECT_ACTIVE (LONG PRESS)");
+            }, 600);
+          }
       } else if (count === 2) {
           touchStartCount.current = 2;
+          if (selectionTimer.current) {
+            clearTimeout(selectionTimer.current);
+            selectionTimer.current = null;
+          }
       }
 
       if (count === 2) {
@@ -697,6 +865,12 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       activePointers.current.set(e.pointerId, {x, y});
       
       if (activePointers.current.size === 1) {
+          const dx_p = x - pointerStartPos.current.x, dy_p = y - pointerStartPos.current.y;
+          if (Math.hypot(dx_p, dy_p) > 10 && selectionTimer.current) {
+            clearTimeout(selectionTimer.current);
+            selectionTimer.current = null;
+          }
+
           if (isPanning) {
               const dx = x - lastPos.current.x, dy = y - lastPos.current.y;
               if (Math.hypot(x - pointerStartPos.current.x, y - pointerStartPos.current.y) > 2) {
@@ -742,6 +916,13 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       const canvas = canvasRef.current; if (!canvas) return;
       const rect = canvas.getBoundingClientRect(), x = e.clientX-rect.left, y = e.clientY-rect.top;
       
+      if (selectionTimer.current) {
+        clearTimeout(selectionTimer.current);
+        selectionTimer.current = null;
+      }
+      const multi = isMultiSelecting.current;
+      isMultiSelecting.current = false;
+
       if (e.button === 2) {
           // Right-click: Send Enter to command engine
           if (isCommandActive && onAction) {
@@ -775,7 +956,9 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               else if (activeCommandName !== 'PAN') {
                 const ts = view.scale * settings.drawingScale, selectableShapes = getAllShapesForSelection();
                 const hit = selectableShapes.find(s => hitTestShape(finalP.x, finalP.y, s, 20/ts, blocks));
-                if (onSelectionChange) onSelectionChange(hit ? [hit.id] : [], false);
+                
+                // Requirement: Single tap -> single object, Long press -> multi object selection
+                if (onSelectionChange) onSelectionChange(hit ? [hit.id] : [], multi || e.shiftKey);
               }
           }
       }

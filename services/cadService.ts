@@ -53,6 +53,80 @@ export const projectPointOnLine = (p: Point, a: Point, b: Point): Point => {
     return { x: a.x + t * atob.x, y: a.y + t * atob.y };
 };
 
+export const hitTestGrip = (p: Point, s: Shape, threshold: number): number => {
+    const isNear = (x: number, y: number) => distance(p, {x, y}) < threshold;
+    switch (s.type) {
+        case 'line':
+            if (isNear(s.x1, s.y1)) return 0;
+            if (isNear(s.x2, s.y2)) return 1;
+            if (isNear((s.x1+s.x2)/2, (s.y1+s.y2)/2)) return 2;
+            break;
+        case 'circle':
+            if (isNear(s.x, s.y)) return 0;
+            if (isNear(s.x + s.radius, s.y)) return 1;
+            if (isNear(s.x, s.y + s.radius)) return 2;
+            if (isNear(s.x - s.radius, s.y)) return 3;
+            if (isNear(s.x, s.y - s.radius)) return 4;
+            break;
+        case 'rect':
+            if (isNear(s.x, s.y)) return 0;
+            if (isNear(s.x + s.width, s.y)) return 1;
+            if (isNear(s.x + s.width, s.y + s.height)) return 2;
+            if (isNear(s.x, s.y + s.height)) return 3;
+            if (isNear(s.x + s.width/2, s.y)) return 4;
+            if (isNear(s.x + s.width, s.y + s.height/2)) return 5;
+            break;
+        case 'pline': case 'polygon': case 'spline':
+            for (let i=0; i<s.points.length; i++) {
+                if (isNear(s.points[i].x, s.points[i].y)) return i;
+            }
+            break;
+        case 'arc':
+            if (isNear(s.x, s.y)) return 0;
+            if (isNear(s.x + s.radius * Math.cos(s.startAngle), s.y + s.radius * Math.sin(s.startAngle))) return 1;
+            if (isNear(s.x + s.radius * Math.cos(s.endAngle), s.y + s.radius * Math.sin(s.endAngle))) return 2;
+            if (isNear(s.x + s.radius * Math.cos((s.startAngle+s.endAngle)/2), s.y + s.radius * Math.sin((s.startAngle+s.endAngle)/2))) return 3;
+            break;
+    }
+    return -1;
+};
+
+export const modifyShapeByGrip = (s: Shape, gripIndex: number, newP: Point): Shape => {
+    const ns = JSON.parse(JSON.stringify(s));
+    switch (ns.type) {
+        case 'line':
+            if (gripIndex === 0) { ns.x1 = newP.x; ns.y1 = newP.y; }
+            else if (gripIndex === 1) { ns.x2 = newP.x; ns.y2 = newP.y; }
+            else if (gripIndex === 2) { 
+                const dx = newP.x - (ns.x1 + ns.x2)/2, dy = newP.y - (ns.y1 + ns.y2)/2;
+                ns.x1 += dx; ns.y1 += dy; ns.x2 += dx; ns.y2 += dy;
+            }
+            break;
+        case 'circle':
+            if (gripIndex === 0) { ns.x = newP.x; ns.y = newP.y; }
+            else { ns.radius = distance({x: ns.x, y: ns.y}, newP); }
+            break;
+        case 'rect':
+            if (gripIndex === 0) { ns.width += (ns.x - newP.x); ns.height += (ns.y - newP.y); ns.x = newP.x; ns.y = newP.y; }
+            else if (gripIndex === 1) { ns.width = newP.x - ns.x; ns.height += (ns.y - newP.y); ns.y = newP.y; }
+            else if (gripIndex === 2) { ns.width = newP.x - ns.x; ns.height = newP.y - ns.y; }
+            else if (gripIndex === 3) { ns.width += (ns.x - newP.x); ns.x = newP.x; ns.height = newP.y - ns.y; }
+            else if (gripIndex === 4) { ns.height += (ns.y - newP.y); ns.y = newP.y; }
+            else if (gripIndex === 5) { ns.width = newP.x - ns.x; }
+            break;
+        case 'pline': case 'polygon': case 'spline':
+            ns.points[gripIndex] = newP;
+            break;
+        case 'arc':
+            if (gripIndex === 0) { ns.x = newP.x; ns.y = newP.y; }
+            else if (gripIndex === 1) { ns.startAngle = Math.atan2(newP.y - ns.y, newP.x - ns.x); }
+            else if (gripIndex === 2) { ns.endAngle = Math.atan2(newP.y - ns.y, newP.x - ns.x); }
+            else if (gripIndex === 3) { ns.radius = distance({x: ns.x, y: ns.y}, newP); }
+            break;
+    }
+    return ns;
+};
+
 export const hitTestShape = (x: number, y: number, s: Shape, threshold: number, blocks?: Record<string, BlockDefinition>): boolean => {
   switch (s.type) {
     case 'line': return distToSegment(x, y, s.x1, s.y1, s.x2, s.y2) < threshold;

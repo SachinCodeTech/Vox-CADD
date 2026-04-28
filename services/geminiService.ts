@@ -58,7 +58,7 @@ export const getCommandFromAI = async (prompt: string, contextSummary: string = 
     
     const contextPart = { text: `[ARCHITECTURAL CONTEXT]\n${contextSummary}\n\n[USER REQUEST]\n${prompt || "Produce architectural drafting."}` };
     
-    const contents: any[] = [...history];
+    const contents: any[] = history.slice(-10);
     const userParts: any[] = [contextPart];
 
     if (sketchData) {
