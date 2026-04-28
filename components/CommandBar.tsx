@@ -189,7 +189,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
       {activeTab && (
         <div className="bg-black px-3 pb-2 pt-1 animate-in slide-in-from-bottom-2 duration-150">
           {activeTab === 'cli' ? (
-            <form onSubmit={handleSubmit} className="flex items-center gap-2 bg-[#0a0a0c] border border-white/10 rounded-xl px-3 h-10 focus-within:border-[#00bcd4]/50 transition-all relative">
+            <form onSubmit={handleSubmit} className="flex items-start gap-2 bg-[#0a0a0c] border border-white/10 rounded-xl px-3 min-h-10 focus-within:border-[#00bcd4]/50 transition-all relative">
                 {showSuggestions && suggestions.length > 0 && (
                     <div className="absolute bottom-full left-0 mb-2 w-full bg-[#111] border border-white/10 rounded-xl shadow-2xl z-[200] overflow-hidden backdrop-blur-xl">
                         {suggestions.map((s, i) => (
@@ -200,49 +200,85 @@ const CommandBar: React.FC<CommandBarProps> = ({
                         ))}
                     </div>
                 )}
-                <div className="text-[8px] font-black text-[#00bcd4] uppercase tracking-widest shrink-0 font-mono pr-2 border-r border-white/5">
+                <div className="text-[8px] font-black text-[#00bcd4] uppercase tracking-widest shrink-0 font-mono pr-2 border-r border-white/5 pt-3">
                     {prompt}
                 </div>
-                <input 
-                    autoFocus
-                    type="text"
-                    value={value}
-                    onChange={e => { onChange(e.target.value); setShowSuggestions(true); }}
-                    onKeyDown={handleKeyDown}
-                    className="flex-1 bg-transparent text-white font-mono outline-none text-[11px] uppercase tracking-widest placeholder:text-neutral-900 select-text"
-                    placeholder="COMMAND..."
-                    autoComplete="off"
-                    autoCorrect="off"
-                    autoCapitalize="off"
-                    spellCheck="false"
-                />
-                <button type="submit" className={`w-7 h-7 rounded-lg transition-all flex items-center justify-center active:scale-90 shadow-lg ${!value && isCommandActive ? 'bg-emerald-500 text-black shadow-emerald-900/20' : 'bg-[#00bcd4] text-black shadow-cyan-900/20'}`}>
-                    {!value && isCommandActive ? <Check size={14} strokeWidth={4} /> : <Send size={12} strokeWidth={3} />}
-                </button>
+                <div className="flex-1 min-w-0 h-full">
+                    <textarea 
+                        autoFocus
+                        name={`vox-cmd-${Date.now()}`}
+                        value={value}
+                        onChange={e => { 
+                            onChange(e.target.value); 
+                            setShowSuggestions(true);
+                            e.target.style.height = 'auto';
+                            e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+                        }}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSubmit(e as any);
+                            (e.target as HTMLTextAreaElement).style.height = 'auto';
+                          } else {
+                            handleKeyDown(e as any);
+                          }
+                        }}
+                        className="w-full bg-transparent text-white font-mono outline-none text-[11px] uppercase tracking-widest placeholder:text-neutral-900 select-text resize-none py-2.5 h-[40px] max-h-[120px] scrollbar-none block focus:ring-0"
+                        placeholder="COMMAND..."
+                        autoComplete="off-vox"
+                        autoCorrect="off"
+                        autoCapitalize="off"
+                        spellCheck={false}
+                        data-lpignore="true"
+                        role="presentation"
+                    />
+                </div>
+                <div className="flex items-center self-stretch py-1.5 pl-2 shrink-0">
+                    <button 
+                        type="submit" 
+                        className={`w-7 h-7 rounded-lg transition-all flex items-center justify-center active:scale-90 shadow-lg ${!value && isCommandActive ? 'bg-emerald-500 text-black shadow-emerald-900/20' : 'bg-[#00bcd4] text-black shadow-cyan-900/20'}`}
+                    >
+                        {!value && isCommandActive ? <Check size={14} strokeWidth={4} /> : <Send size={12} strokeWidth={3} />}
+                    </button>
+                </div>
             </form>
           ) : (
-            <form onSubmit={handleSubmit} className={`flex items-center gap-2 bg-[#0a0a0c] border rounded-xl px-3 h-10 transition-all ${isAiThinking ? 'border-indigo-500 shadow-[0_0_20px_rgba(99,102,241,0.3)]' : 'border-white/10 focus-within:border-indigo-500/50'}`}>
-                <div className="flex items-center gap-2 shrink-0">
+            <form onSubmit={handleSubmit} className={`flex items-start gap-2 bg-[#0a0a0c] border rounded-xl px-3 min-h-10 transition-all ${isAiThinking ? 'border-indigo-500 shadow-[0_0_20px_rgba(99,102,241,0.3)]' : 'border-white/10 focus-within:border-indigo-500/50'}`}>
+                <div className="flex items-center gap-2 shrink-0 pt-3">
                   <div className="relative">
                     <Bot size={14} className={isAiThinking ? 'text-indigo-400 animate-pulse' : 'text-indigo-500'} />
                     {isAiThinking && <div className="absolute inset-0 bg-indigo-500/20 blur-sm animate-ping rounded-full" />}
                   </div>
-                  <span className="text-[7px] font-black text-indigo-500/50 tracking-tighter uppercase hidden sm:inline">PA-24</span>
                 </div>
-                <input 
-                    autoFocus
-                    disabled={isAiThinking}
-                    type="text"
-                    value={value}
-                    onChange={e => onChange(e.target.value)}
-                    className="flex-1 bg-transparent text-white outline-none text-[10px] sm:text-[11px] placeholder:text-neutral-800 tracking-tight disabled:opacity-50 select-text font-medium"
-                    placeholder={isAiThinking ? "PRINCIPAL ARCHITECT IS THINKING..." : "CONSULT ARCHITECT (E.G. 'DESIGN A 2BHK APARTMENT', 'CALCULATE LIVING AREA')..."}
-                    autoComplete="off"
-                    autoCorrect="off"
-                    autoCapitalize="off"
-                    spellCheck="false"
-                />
-                <div className="flex items-center gap-2">
+                <div className="flex-1 min-w-0 h-full">
+                    <textarea 
+                        autoFocus
+                        disabled={isAiThinking}
+                        name={`vox-ai-${Date.now()}`}
+                        value={value}
+                        onChange={e => {
+                            onChange(e.target.value);
+                            e.target.style.height = 'auto';
+                            e.target.style.height = `${Math.min(e.target.scrollHeight, 150)}px`;
+                        }}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && !e.shiftKey && !isAiThinking) {
+                            e.preventDefault();
+                            handleSubmit(e as any);
+                            (e.target as HTMLTextAreaElement).style.height = 'auto';
+                          }
+                        }}
+                        className="w-full bg-transparent text-white outline-none text-[10px] sm:text-[11px] placeholder:text-neutral-800 tracking-tight disabled:opacity-50 select-text font-medium resize-none py-2.5 h-[40px] max-h-[150px] scrollbar-none block focus:ring-0 ring-offset-0 ring-0"
+                        placeholder={isAiThinking ? "PRINCIPAL ARCHITECT IS THINKING..." : "CONSULT ARCHITECT (E.G. 'DESIGN A 2BHK APARTMENT', 'CALCULATE LIVING AREA')..."}
+                        autoComplete="new-ai-query"
+                        autoCorrect="off"
+                        autoCapitalize="off"
+                        spellCheck={false}
+                        data-lpignore="true"
+                        role="presentation"
+                    />
+                </div>
+                <div className="flex items-center gap-1.5 self-stretch py-2 shrink-0 pl-1">
                     <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => {
                         const f = e.target.files?.[0];
                         if (f) {
@@ -255,8 +291,8 @@ const CommandBar: React.FC<CommandBarProps> = ({
                     <button type="button" disabled={isAiThinking} onClick={onLiveToggle} className={`p-1.5 rounded-lg flex items-center justify-center transition-all ${isLiveActive ? 'text-white bg-red-600 animate-pulse' : 'text-neutral-600 hover:bg-white/5'}`}>
                         {isLiveActive ? <MicOff size={14} /> : <Mic size={14} />}
                     </button>
-                    <button type="submit" disabled={isAiThinking || (!value && !attachment)} className={`w-7 h-7 rounded-lg text-white flex items-center justify-center shadow-lg active:scale-95 transition-all ${isAiThinking ? 'bg-neutral-800' : 'bg-[#6366f1]'}`}>
-                        {isAiThinking ? <div className="w-3 h-3 border-2 border-white/20 border-t-white rounded-full animate-spin" /> : <Send size={12} />}
+                    <button type="submit" disabled={isAiThinking || (!value.trim() && !attachment)} className={`w-8 h-8 rounded-xl text-white flex items-center justify-center shadow-lg active:scale-95 transition-all shrink-0 ${isAiThinking ? 'bg-neutral-800' : 'bg-indigo-600 shadow-indigo-900/20'}`}>
+                        {isAiThinking ? <div className="w-3 h-3 border-2 border-white/20 border-t-white rounded-full animate-spin" /> : <Send size={14} strokeWidth={3} />}
                     </button>
                 </div>
             </form>

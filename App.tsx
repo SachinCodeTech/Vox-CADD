@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import CADCanvas, { CADCanvasHandle } from './components/CADCanvas';
 import Toolbar from './components/Toolbar';
 import CommandBar from './components/CommandBar';
@@ -89,37 +90,6 @@ type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 
 const STORAGE_PREFIX = 'voxcadd_file_v1_';
 const REGISTRY_KEY = 'voxcadd_recent_files';
 
-const Toast: React.FC<{ message: string, onClear: () => void }> = ({ message, onClear }) => {
-  useEffect(() => {
-    const timer = setTimeout(onClear, message.startsWith('ERR:') ? 5000 : 3000);
-    return () => clearTimeout(timer);
-  }, [message, onClear]);
-
-  // Clean up message for display
-  const displayMessage = message.startsWith('ERR:') 
-    ? message.replace('ERR:', '').trim() 
-    : message.replace(/_/g, ' ').split('\n')[0].toUpperCase();
-  
-  const isError = message.startsWith('ERR:');
-  const isWarning = message.startsWith('WARN:');
-  const isInfo = message.startsWith('INFO:');
-
-  let bgColor = 'bg-cyan-500/90 border-white/20 text-black';
-  if (isError) bgColor = 'bg-red-500/90 border-red-400/50 text-white';
-  else if (isWarning) bgColor = 'bg-amber-500/90 border-amber-400/50 text-black';
-  else if (isInfo) bgColor = 'bg-neutral-800/95 border-white/10 text-white';
-
-  return (
-    <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[3000] pointer-events-none animate-in fade-in slide-in-from-top-4 duration-300">
-      <div className={`px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border backdrop-blur-xl ${bgColor}`}>
-        {!isError && !isWarning && !isInfo && <div className="w-2 h-2 rounded-full animate-pulse bg-black" />}
-        {isError && <span className="text-xs">⚠️</span>}
-        <span className="text-[10px] font-black tracking-[0.1em] whitespace-normal text-center max-w-xs">{displayMessage}</span>
-      </div>
-    </div>
-  );
-};
-
 const App: React.FC = () => {
   const [layers, setLayers] = useState<Record<string, Shape[]>>({ '0': [], 'defpoints': [] });
   const [blocks, setBlocks] = useState<Record<string, BlockDefinition>>({});
@@ -175,6 +145,14 @@ const App: React.FC = () => {
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [aiConversation, setAiConversation] = useState<{role: string, parts: any[]}[]>([]);
   const [logMessage, _setLogMessage] = useState<string | null>(null);
+  
+  useEffect(() => {
+    if (logMessage) {
+      const timer = setTimeout(() => _setLogMessage(null), logMessage.startsWith('ERR:') ? 5000 : 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [logMessage]);
+
   const [loadingFile, setLoadingFile] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState<string>("");
 
@@ -928,11 +906,10 @@ const App: React.FC = () => {
         break;
       }
       case 'share': {
-        if (loadingFile) return; // Prevent double trigger
+        if (loadingFile) return; 
         setLoadingFile(true);
         setLoadingStatus("GENERATING EXPORT...");
         
-        // Safety timeout for loading state handled by finally + withTimeout pattern or local timeout
         const loadingTimeout = setTimeout(() => {
           if (loadingFile) {
             setLoadingFile(false);
@@ -940,96 +917,66 @@ const App: React.FC = () => {
           }
         }, 30000);
 
-        setTimeout(async () => {
-          try {
-            const isDxfExport = payload === 'dxf';
-            const finalExt = isDxfExport ? '.dxf' : '.vox';
-            
-            setLoadingStatus(`COMPILING ${finalExt.substring(1).toUpperCase()} DATA...`);
-            await new Promise(r => setTimeout(r, 50));
+        try {
+          const isDxfExport = payload === 'dxf';
+          const finalExt = isDxfExport ? '.dxf' : '.vox';
+          
+          setLoadingStatus(`COMPILING ${finalExt.substring(1).toUpperCase()} DATA...`);
+          
+          const content = isDxfExport 
+            ? shapesToDXF(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current) 
+            : shapesToVox(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current);
+          
+          const fileName = (currentFileName.replace(/\.[^/.]+$/, "") + finalExt).replace(/[^a-zA-Z0-9.\-_]/g, '_');
+          const blob = new Blob([content], { type: isDxfExport ? 'application/dxf' : 'application/octet-stream' });
+          
+          const shareData = {
+            title: 'VoxCADD Project',
+            text: `Project: ${currentFileName}`,
+            url: window.location.href
+          };
 
-            const content = isDxfExport 
-              ? shapesToDXF(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current) 
-              : shapesToVox(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current);
-            
-            const fileName = (currentFileName.replace(/\.[^/.]+$/, "") + finalExt).replace(/[^a-zA-Z0-9.\-_]/g, '_');
-            const blob = new Blob([content], { type: isDxfExport ? 'application/dxf' : 'application/octet-stream' });
-            
-            const shareData = {
-              title: 'VoxCADD Project',
-              text: `VoxCADD Design: ${currentFileName}`,
-              url: window.location.href
-            };
+          const executeDownload = () => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            setLogMessage("INFO: DOWNLOAD_STARTED");
+          };
 
-            const executeDownload = () => {
-              try {
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = fileName;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                setLogMessage("INFO: FILE_DOWNLOADED_SUCCESSFULLY");
-              } catch (err) {
-                setLogMessage("ERR: DOWNLOAD_BLOCKED_BY_BROWSER");
+          setLoadingStatus("INITIATING SHARE...");
+          
+          if (navigator.share) {
+              const file = new File([blob], fileName, { type: blob.type });
+              if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                try {
+                   await navigator.share({ ...shareData, files: [file] });
+                   setLogMessage("INFO: PROJECT_SHARED");
+                } catch (se: any) {
+                  if (se.name === 'AbortError') setLogMessage("INFO: SHARE_CANCELLED");
+                  else await navigator.share(shareData);
+                }
+              } else {
+                 await navigator.share(shareData);
+                 setLogMessage("INFO: LINK_SHARED_DOWNLOADING");
+                 executeDownload();
               }
-            };
-
-            setLoadingStatus("INITIATING SHARE...");
-            // Priority 1: Native File Sharing
-            if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([blob], fileName, { type: blob.type })] })) {
-                try {
-                  await navigator.share({
-                      ...shareData,
-                      files: [new File([blob], fileName, { type: blob.type })]
-                  });
-                  setLogMessage("INFO: PROJECT_SHARED");
-                } catch (se) {
-                  if ((se as Error).name === 'AbortError') {
-                    setLogMessage("INFO: SHARE_CANCELLED");
-                  } else {
-                    setLogMessage("WARN: NATIVE_SHARE_FAILED_USING_LINK");
-                    await navigator.share(shareData);
-                  }
-                }
-            } 
-            // Priority 2: Web Share API (Links)
-            else if (navigator.share) {
-                try {
-                  await navigator.share(shareData);
-                  setLogMessage("INFO: SHARE_LINK_SENT");
-                } catch (se) {
-                  if ((se as Error).name === 'AbortError') {
-                    setLogMessage("INFO: SHARE_CANCELLED");
-                  } else {
-                    setLogMessage("WARN: LINK_SHARE_FAILED_USING_CLIPBOARD");
-                    await navigator.clipboard.writeText(window.location.href);
-                    setLogMessage("INFO: LINK_COPIED_TO_CLIPBOARD");
-                  }
-                }
-            }
-            // Priority 3: Clipboard + Download
-            else {
-                try {
-                  await navigator.clipboard.writeText(window.location.href);
-                  setLogMessage("INFO: LINK_COPIED_DOWNLOADING_FILE");
-                  setTimeout(executeDownload, 500);
-                } catch (ce) {
-                  setLogMessage("WARN: CLIPBOARD_DENIED_DOWNLOADING_DIRECTLY");
-                  executeDownload();
-                }
-            }
-          } catch (e) {
-              console.warn("Complete share failure", e);
-              setLogMessage("ERR: SHARE_FAILED");
-          } finally {
-              clearTimeout(loadingTimeout);
-              setLoadingFile(false);
-              setLoadingStatus("");
+          } else {
+              await navigator.clipboard.writeText(window.location.href);
+              setLogMessage("INFO: LINK_COPIED_DOWNLOADING");
+              executeDownload();
           }
-        }, 50);
+        } catch (e) {
+            setLogMessage("ERR: SHARE_FAILED");
+        } finally {
+            clearTimeout(loadingTimeout);
+            setLoadingFile(false);
+            setLoadingStatus("");
+        }
         break;
       }
       case 'openFileManager': setActivePanel('file'); break;
@@ -1517,7 +1464,7 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <div className="h-10 sm:h-8 bg-black border-b border-white/5 flex items-center px-4 z-[100] shrink-0 gap-5 sm:gap-4 overflow-x-auto scrollbar-none">
+      <div className="h-9 sm:h-8 bg-black border-b border-white/5 flex items-center px-4 z-[100] shrink-0 gap-1 overflow-x-auto scrollbar-none">
           {['FILE', 'EDIT', 'VIEW', 'DRAW', 'MODIFY', 'ANNO', 'TOOLS'].map((item) => {
             const isSelected = 
               (item === 'FILE' && (activePanel === 'drawing_props' || activePanel === 'file')) ||
@@ -1540,14 +1487,14 @@ const App: React.FC = () => {
                   else if (item === 'ANNO') setActiveCategory('Anno'); 
                   else if (item === 'TOOLS') setActiveCategory('Tools'); 
                 }} 
-                className={`text-[9px] font-black tracking-widest transition-all no-tap whitespace-nowrap px-1 h-full flex items-center relative ${
+                className={`text-[9.5px] font-black tracking-[0.12em] transition-all no-tap whitespace-nowrap px-2.5 h-full flex items-center relative ${
                   isSelected 
-                    ? 'text-cyan-400' 
-                    : 'text-neutral-600 hover:text-neutral-300'
+                    ? 'text-cyan-400 font-black' 
+                    : 'text-neutral-600 hover:text-neutral-400'
                 }`}
               >
                 {item}
-                {isSelected && <div className="absolute inset-x-0 bottom-0 h-[1.5px] bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.5)]"></div>}
+                {isSelected && <div className="absolute inset-x-2 bottom-[1.5px] h-[1.5px] bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.5)]"></div>}
               </button>
             );
           })}
@@ -1555,58 +1502,77 @@ const App: React.FC = () => {
 
 
       <main className="flex-1 relative bg-black overflow-hidden border border-neutral-800/40">
-        <CADCanvas 
-          ref={canvasHandleRef} 
-          layers={layers} 
-          blocks={blocks}
-          layouts={layouts}
-          layerConfig={layerConfig} 
-          view={view} 
-          setView={setView as any} 
-          settings={settings} 
-          isCommandActive={isCommandActive} 
-          activeTab={activeTab} 
-          isViewportActive={isViewportActive} 
-          onViewportToggle={() => setIsViewportActive(!isViewportActive)} 
-          onClick={onCanvasClick} 
-          onMouseMove={(x,y,s) => { if(engineRef.current) engineRef.current.move({x,y}, s); }} 
-          selectedIds={selectedIds} 
-          onSelectionChange={(ids, additive) => {
-            if (additive) {
-              setSelectedIds(prev => {
-                const combined = [...prev];
-                ids.forEach(id => {
-                  if (combined.includes(id)) {
-                    const idx = combined.indexOf(id);
-                    combined.splice(idx, 1);
-                  } else {
-                    combined.push(id);
-                  }
+        <motion.div 
+          animate={{ 
+            scale: loadingFile ? 0.98 : 1, 
+            opacity: loadingFile ? 0.3 : 1, 
+            filter: loadingFile ? 'blur(10px)' : 'blur(0px)' 
+          }}
+          transition={{ duration: 0.8, ease: "easeInOut" }}
+          className="w-full h-full"
+        >
+          <CADCanvas 
+            ref={canvasHandleRef} 
+            layers={layers} 
+            blocks={blocks}
+            layouts={layouts}
+            layerConfig={layerConfig} 
+            view={view} 
+            setView={setView as any} 
+            settings={settings} 
+            isCommandActive={isCommandActive} 
+            activeTab={activeTab} 
+            isViewportActive={isViewportActive} 
+            onViewportToggle={() => setIsViewportActive(!isViewportActive)} 
+            onClick={onCanvasClick} 
+            onMouseMove={(x,y,s) => { if(engineRef.current) engineRef.current.move({x,y}, s); }} 
+            selectedIds={selectedIds} 
+            onSelectionChange={(ids, additive) => {
+              if (additive) {
+                setSelectedIds(prev => {
+                  const combined = [...prev];
+                  ids.forEach(id => {
+                    if (combined.includes(id)) {
+                      const idx = combined.indexOf(id);
+                      combined.splice(idx, 1);
+                    } else {
+                      combined.push(id);
+                    }
+                  });
+                  return combined;
                 });
-                return combined;
-              });
-            } else {
-              setSelectedIds(ids);
-            }
-          }} 
-          onCommand={executeCommand}
-          previewShapes={previewShapes} 
-          activeCommandName={activeCommandName} 
-          isAiThinking={isAiThinking}
-          lastAiCommandTime={lastAiCommandTime}
-        />
+              } else {
+                setSelectedIds(ids);
+              }
+            }} 
+            onCommand={executeCommand}
+            previewShapes={previewShapes} 
+            activeCommandName={activeCommandName} 
+            isAiThinking={isAiThinking}
+            lastAiCommandTime={lastAiCommandTime}
+          />
+        </motion.div>
         
-        <div className="absolute top-3 left-3 pointer-events-none">
-            <div className="bg-black/40 backdrop-blur-md border border-white/5 rounded-md px-2 py-0.5 flex gap-2">
-                <span className="text-[7px] font-mono text-neutral-500 uppercase tracking-widest">PRECISION: <span className="text-[#00bcd4]">{settings.precision}</span></span>
+        <div className="absolute top-3 left-3 pointer-events-none flex items-center gap-3">
+            <div className="bg-black/40 backdrop-blur-md border border-white/5 rounded-md px-2 py-0.5 flex items-center gap-1.5">
+                <span className="text-[7px] font-mono text-neutral-500 uppercase tracking-widest flex items-center">PRECISION: <span className="text-[#00bcd4] ml-1">{settings.precision}</span></span>
                 <span className="w-[1px] h-2.5 bg-white/10" />
-                <span className="text-[7px] font-mono text-neutral-500 uppercase tracking-widest">SNAP: <span className={settings.snap ? 'text-[#00bcd4]' : 'text-neutral-600'}>{settings.snap ? 'ON' : 'OFF'}</span></span>
+                <span className="text-[7px] font-mono text-neutral-500 uppercase tracking-widest flex items-center">SNAP: <span className={settings.snap ? 'text-[#00bcd4] ml-1' : 'text-neutral-600 ml-1'}>{settings.snap ? 'ON' : 'OFF'}</span></span>
             </div>
+            {logMessage && (
+                <span className={`text-[7px] font-mono uppercase tracking-widest font-black whitespace-nowrap animate-in fade-in slide-in-from-left-2 duration-300 ${
+                  logMessage.startsWith('ERR:') ? 'text-red-500' : 
+                  logMessage.startsWith('WARN:') ? 'text-amber-500' : 
+                  'text-[#00bcd4]'
+                }`}>
+                  {logMessage.replace(/^(ERR:|WARN:|INFO:)/, '').replace(/_/g, ' ')}
+                </span>
+            )}
         </div>
 
         <div className="absolute right-3 top-3 flex flex-col gap-2 z-10">
           {sidebarButtons.map(p => (
-            <button key={p.id} onClick={() => { if(navigator.vibrate) navigator.vibrate(5); handleAction(p.action); }} className={`w-9 h-9 rounded-full flex items-center justify-center transition-all border no-tap ${activePanel === p.activeOn ? 'bg-[#00bcd4] text-black border-[#00bcd4]' : 'bg-black/60 backdrop-blur-sm border-white/10 text-neutral-400 hover:text-white'}`}><p.icon size={16} /></button>
+            <button key={p.id} onClick={() => { if(navigator.vibrate) navigator.vibrate(5); handleAction(p.action); }} className={`w-9 h-9 rounded-full flex items-center justify-center transition-all border no-tap shadow-lg ${activePanel === p.activeOn ? 'bg-[#00bcd4] text-black border-[#00bcd4] shadow-[0_0_15px_rgba(0,188,212,0.5)]' : 'bg-black/60 backdrop-blur-sm border-white/10 text-neutral-400 hover:text-[#00bcd4] hover:border-[#00bcd4] hover:bg-[#00bcd4]/5 hover:shadow-[0_0_10px_rgba(0,188,212,0.2)]'}`}><p.icon size={16} /></button>
           ))}
         </div>
 
@@ -1961,25 +1927,45 @@ const App: React.FC = () => {
           onChange={setCommandInput} 
         />
       </footer>
-      
-      {logMessage && <Toast message={logMessage} onClear={() => setLogMessage(null)} />}
-
-      {loadingFile && (
-        <div className="fixed inset-0 bg-black/90 flex flex-col items-center justify-center z-[1000] backdrop-blur-xl transition-all duration-500">
-           <div className="relative mb-8">
-             <div className="loader-spinner" style={{ width: '64px', height: '64px', borderWidth: '4px' }} />
-             <div className="absolute inset-0 flex items-center justify-center">
-               <div className="w-8 h-8 rounded-full bg-cyan-500/10 animate-ping" />
+      <AnimatePresence>
+        {loadingFile && (
+          <motion.div 
+            key="vox-loader"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/95 flex flex-col items-center justify-center z-[1000] backdrop-blur-2xl transition-all duration-700"
+          >
+             <div className="relative mb-10 overflow-hidden">
+               <motion.div 
+                 animate={{ rotate: 360 }}
+                 transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
+                 className="w-20 h-20 rounded-full border-2 border-white/5 border-t-cyan-500 shadow-[0_0_30px_rgba(34,211,238,0.2)]"
+               />
+               <div className="absolute inset-0 flex items-center justify-center">
+                  <motion.div 
+                    animate={{ scale: [1, 1.2, 1] }} 
+                    transition={{ repeat: Infinity, duration: 1.5 }}
+                    className="w-2 h-2 bg-cyan-500 rounded-full shadow-[0_0_15px_cyan]" 
+                  />
+               </div>
              </div>
-           </div>
-           <div className="text-cyan-400 font-mono text-[10px] tracking-[0.4em] font-black animate-pulse uppercase px-8 text-center">{loadingStatus || "PROCESSING DATA..."}</div>
-           <div className="mt-6 flex items-center gap-3">
-             <div className="h-[1px] w-8 bg-gradient-to-r from-transparent to-white/10" />
-             <div className="text-white/20 font-mono text-[8px] uppercase tracking-widest italic">VoxCADD Kernel v4.0.1</div>
-             <div className="h-[1px] w-8 bg-gradient-to-l from-transparent to-white/10" />
-           </div>
-        </div>
-      )}
+             <motion.div 
+               initial={{ opacity: 0, y: 20 }}
+               animate={{ opacity: 1, y: 0 }}
+               transition={{ delay: 0.2 }}
+               className="text-cyan-400 font-mono text-[10px] tracking-[0.5em] font-black uppercase px-8 text-center"
+             >
+               {loadingStatus || "INITIALIZING PROJECT..."}
+             </motion.div>
+             <div className="mt-8 flex items-center gap-3">
+               <div className="h-[1px] w-8 bg-gradient-to-r from-transparent to-white/10" />
+               <div className="text-white/10 font-mono text-[7px] uppercase tracking-widest font-black italic">VoxCADD Kernel Phase 4</div>
+               <div className="h-[1px] w-8 bg-gradient-to-l from-transparent to-white/10" />
+             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {promptDialog && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4">
            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setPromptDialog(null)} />
@@ -1991,6 +1977,7 @@ const App: React.FC = () => {
                 <input 
                   type="text" 
                   autoFocus
+                  name={`vox-prompt-${Date.now()}`}
                   defaultValue={promptDialog.initialValue}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
@@ -2001,10 +1988,12 @@ const App: React.FC = () => {
                     }
                   }}
                   id="prompt-input"
-                  autoComplete="off"
+                  autoComplete="one-time-code"
                   autoCorrect="off"
                   autoCapitalize="off"
                   spellCheck="false"
+                  data-lpignore="true"
+                  data-form-type="other"
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-xs font-bold focus:outline-none focus:border-cyan-500/50 transition-all mb-6"
                 />
               )}

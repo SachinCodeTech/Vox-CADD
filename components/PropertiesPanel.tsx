@@ -101,13 +101,16 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
         <div className="group/input relative">
             <input 
                 type="text"
+                name={`vox-props-${Math.random()}`}
                 className="w-full bg-[#121214] border border-white/5 text-[11px] text-white font-mono rounded-xl px-4 py-3 pb-3 outline-none focus:border-[#00bcd4]/50 transition-all uppercase shadow-inner"
                 value={local}
                 onChange={e => setLocal(e.target.value)}
-                autoComplete="off"
+                autoComplete="one-time-code"
                 autoCorrect="off"
                 autoCapitalize="off"
                 spellCheck="false"
+                data-lpignore="true"
+                data-form-type="other"
                 onBlur={() => { 
                     const p = parseLength(local, isImperial); 
                     if (!isNaN(p)) onChange(p); 

@@ -96,16 +96,16 @@ const ToolCircleBtn: React.FC<{
             onTouchEnd={handleMouseUp}
             onTouchCancel={handleMouseUp}
             disabled={disabled}
-            className={`flex-shrink-0 flex flex-col items-center justify-center active:scale-95 no-tap py-1 px-1 ${disabled ? 'opacity-20 grayscale' : ''}`}
+            className={`flex-shrink-0 flex flex-col items-center justify-center active:scale-95 no-tap py-0.5 px-0.5 ${disabled ? 'opacity-20 grayscale' : ''}`}
         >
-            <div className={`w-12 h-12 rounded-full border flex items-center justify-center transition-all duration-300
-                ${active ? 'bg-[#00bcd4] text-black border-[#00bcd4] shadow-[0_0_15px_rgba(0,188,212,0.5)] scale-105' : 
-                  danger ? 'bg-red-950/20 border-red-900/40 text-red-500 hover:border-red-500 hover:bg-red-500/10 hover:shadow-[0_0_10px_rgba(239,68,68,0.2)]' :
-                  'bg-[#121214] border-white/5 text-neutral-500 hover:text-[#00bcd4] hover:border-[#00bcd4] hover:bg-[#00bcd4]/5 hover:shadow-[0_0_10px_rgba(0,188,212,0.2)]'}`}
+            <div className={`w-[40px] h-[40px] rounded-full border flex items-center justify-center transition-all duration-300 shadow-sm
+                ${active ? 'bg-[#00bcd4] text-black border-[#00bcd4] shadow-[0_0_20px_rgba(34,211,238,0.6)] scale-110 z-10' : 
+                  danger ? 'bg-red-950/20 border-red-900/40 text-red-500 hover:border-red-500 hover:bg-red-500/10 hover:shadow-[0_0_15px_rgba(239,68,68,0.3)]' :
+                  'bg-[#121214] border-white/5 text-neutral-500 hover:text-[#00bcd4] hover:border-[#00bcd4] hover:bg-[#00bcd4]/10 hover:shadow-[0_0_15px_rgba(0,188,212,0.4)] hover:scale-105 active:scale-95'}`}
             >
-                {React.cloneElement(icon as React.ReactElement, { size: 20 })}
+                {React.cloneElement(icon as React.ReactElement, { size: 18 })}
             </div>
-            <span className={`text-[8px] font-black uppercase mt-1 tracking-widest ${active ? 'text-[#00bcd4]' : 'text-neutral-600'}`}>{label}</span>
+            <span className={`text-[7.5px] font-black uppercase mt-1 tracking-widest leading-none ${active ? 'text-[#00bcd4]' : 'text-neutral-600'}`}>{label}</span>
         </button>
     );
 };
@@ -308,7 +308,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
            <button onClick={() => onAction('cancel')} className="shrink-0 px-3 py-1 rounded-md bg-red-500/10 border border-red-500/30 text-red-500 text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all">Cancel</button>
         </div>
       )}
-      <div className="w-full flex items-center gap-4 px-4 h-[76px] overflow-x-auto scrollbar-none touch-pan-x overscroll-x-contain">
+      <div className="w-full flex items-center gap-1 px-4 h-[64px] overflow-x-auto scrollbar-none touch-pan-x overscroll-x-contain">
         {renderContent()}
       </div>
     </div>
