@@ -127,6 +127,99 @@ export const modifyShapeByGrip = (s: Shape, gripIndex: number, newP: Point): Sha
     return ns;
 };
 
+export const isShapeClosed = (s: Shape): boolean => {
+    switch (s.type) {
+        case 'rect':
+        case 'circle':
+        case 'ellipse':
+        case 'polygon':
+        case 'donut':
+        case 'hatch':
+            return true;
+        case 'pline':
+        case 'spline':
+            return !!s.closed;
+        default:
+            return false;
+    }
+};
+
+export const getShapeBoundaryPoints = (s: Shape): Point[] => {
+    const points: Point[] = [];
+    switch (s.type) {
+        case 'rect':
+            return [
+                { x: s.x, y: s.y },
+                { x: s.x + s.width, y: s.y },
+                { x: s.x + s.width, y: s.y + s.height },
+                { x: s.x, y: s.y + s.height }
+            ];
+        case 'circle': {
+            const steps = 256;
+            for (let i = 0; i < steps; i++) {
+                const a = (i / steps) * Math.PI * 2;
+                points.push({ x: s.x + s.radius * Math.cos(a), y: s.y + s.radius * Math.sin(a) });
+            }
+            return points;
+        }
+        case 'ellipse': {
+            const steps = 256;
+            for (let i = 0; i < steps; i++) {
+                const a = (i / steps) * Math.PI * 2;
+                const dx = s.rx * Math.cos(a), dy = s.ry * Math.sin(a);
+                const cos = Math.cos(s.rotation), sin = Math.sin(s.rotation);
+                points.push({ x: s.x + dx * cos - dy * sin, y: s.y + dx * sin + dy * cos });
+            }
+            return points;
+        }
+        case 'donut': {
+            const steps = 128;
+            // Outer ring
+            for (let i = 0; i < steps; i++) {
+                const a = (i / steps) * Math.PI * 2;
+                points.push({ x: s.x + s.outerRadius * Math.cos(a), y: s.y + s.outerRadius * Math.sin(a) });
+            }
+            // Transition to inner ring (this is a bit of a hack for a single polygon hatch, 
+            // but for clipping it might work better if we used multiple paths)
+            return points;
+        }
+        case 'pline':
+        case 'polygon':
+        case 'spline':
+        case 'hatch':
+            return [...s.points];
+        default:
+            return [];
+    }
+};
+
+export const isPointInsideShape = (p: Point, s: Shape): boolean => {
+    if (!isShapeClosed(s)) return false;
+    switch (s.type) {
+        case 'rect':
+            return p.x >= s.x && p.x <= s.x + s.width && p.y >= s.y && p.y <= s.y + s.height;
+        case 'circle':
+            return Math.sqrt(Math.pow(p.x - s.x, 2) + Math.pow(p.y - s.y, 2)) <= s.radius;
+        case 'pline':
+        case 'polygon':
+        case 'spline':
+        case 'hatch':
+            return isPointInPoly(p, s.points);
+        case 'ellipse': {
+            const dx = p.x - s.x, dy = p.y - s.y;
+            const cos = Math.cos(-s.rotation), sin = Math.sin(-s.rotation);
+            const tx = dx * cos - dy * sin, ty = dx * sin + dy * cos;
+            return (tx * tx) / (s.rx * s.rx) + (ty * ty) / (s.ry * s.ry) <= 1;
+        }
+        case 'donut': {
+            const dist = Math.sqrt(Math.pow(p.x - s.x, 2) + Math.pow(p.y - s.y, 2));
+            return dist >= s.innerRadius && dist <= s.outerRadius;
+        }
+        default:
+            return false;
+    }
+};
+
 export const hitTestShape = (x: number, y: number, s: Shape, threshold: number, blocks?: Record<string, BlockDefinition>): boolean => {
   switch (s.type) {
     case 'line': return distToSegment(x, y, s.x1, s.y1, s.x2, s.y2) < threshold;
@@ -187,6 +280,9 @@ export const hitTestShape = (x: number, y: number, s: Shape, threshold: number, 
         const d = Math.sqrt(Math.pow(x - s.x, 2) + Math.pow(y - s.y, 2));
         return (d >= s.innerRadius - threshold && d <= s.outerRadius + threshold);
     }
+    case 'hatch': {
+        return isPointInPoly({x, y}, s.points);
+    }
     case 'ray': case 'xline': {
         const d = distToInfiniteLine(x, y, s.x1, s.y1, s.x2, s.y2);
         if (d > threshold) return false;
@@ -245,6 +341,7 @@ export const getShapeBounds = (s: Shape, blocks?: Record<string, BlockDefinition
         case 'pline':
         case 'polygon':
         case 'spline':
+        case 'hatch':
             if (!s.points || s.points.length === 0) return { xMin: 0, yMin: 0, xMax: 0, yMax: 0 };
             let xMin = s.points[0].x, yMin = s.points[0].y, xMax = s.points[0].x, yMax = s.points[0].y;
             s.points.forEach(p => {
@@ -322,7 +419,7 @@ export const moveShape = (s: Shape, dx: number, dy: number): Shape => {
             (ns as any).x1 += dx; (ns as any).y1 += dy; (ns as any).x2 += dx; (ns as any).y2 += dy; break;
         case 'circle': case 'arc': case 'text': case 'mtext': case 'rect': case 'ellipse': case 'point': case 'donut': case 'dimang':
             (ns as any).x += dx; (ns as any).y += dy; break;
-        case 'pline': case 'polygon': case 'spline': case 'dline':
+        case 'pline': case 'polygon': case 'spline': case 'dline': case 'hatch':
             (ns as any).points = (ns as any).points.map((p: Point) => ({ x: p.x + dx, y: p.y + dy })); break;
         case 'dimension':
             (ns as any).x1 += dx; (ns as any).y1 += dy; (ns as any).x2 += dx; (ns as any).y2 += dy; (ns as any).dimX += dx; (ns as any).dimY += dy; break;
@@ -386,23 +483,84 @@ export const parseLength = (str: string, isImperial: boolean): number => {
     return matched ? totalInches : parseFloat(clean);
 };
 
-export const formatLength = (val: number, isImperial: boolean): string => {
+export const formatLength = (val: number, settings: AppSettings): string => {
     if (val === undefined || isNaN(val)) return "0.000";
-    if (!isImperial) return val.toFixed(3);
+    const isImperial = settings.units === 'imperial';
+    
+    if (!isImperial) {
+        const prec = settings.precision ? settings.precision.split('.')[1]?.length : 3;
+        return val.toFixed(prec || 3);
+    }
+
+    const format = settings.linearFormat || 'architectural';
     const absVal = Math.abs(val);
-    const feet = Math.floor(absVal / 12);
-    const inches = absVal % 12;
-    return `${val < 0 ? "-" : ""}${feet}'${inches.toFixed(2)}"`;
+
+    if (format === 'decimal') {
+        const prec = settings.precision ? settings.precision.split('.')[1]?.length : 3;
+        return `${val < 0 ? "-" : ""}${val.toFixed(prec || 3)}"`;
+    }
+
+    if (format === 'engineering' || format === 'architectural') {
+        const feet = Math.floor(absVal / 12);
+        const inches = absVal % 12;
+        if (format === 'engineering') {
+            const prec = settings.precision ? settings.precision.split('.')[1]?.length : 2;
+            return `${val < 0 ? "-" : ""}${feet}'${inches.toFixed(prec || 2)}"`;
+        } else {
+            // Architectural (fractions)
+            const wholeInches = Math.floor(inches);
+            const remainder = inches - wholeInches;
+            const precisionMap: Record<string, number> = { '1"': 1, '1/2"': 2, '1/4"': 4, '1/8"': 8, '1/16"': 16, '1/32"': 32, '1/64"': 64 };
+            const denominator = precisionMap[settings.precision] || 16;
+            const fraction = Math.round(remainder * denominator);
+            
+            if (fraction === 0) return `${val < 0 ? "-" : ""}${feet}'${wholeInches}"`;
+            if (fraction === denominator) return `${val < 0 ? "-" : ""}${feet}'${wholeInches + 1}"`;
+            
+            // Simplify fraction
+            const gcd = (a: number, b: number): number => b ? gcd(b, a % b) : a;
+            const common = gcd(fraction, denominator);
+            return `${val < 0 ? "-" : ""}${feet}'${wholeInches}-${fraction/common}/${denominator/common}"`;
+        }
+    }
+
+    if (format === 'scientific') {
+        return val.toExponential(3);
+    }
+
+    return val.toFixed(3);
 };
 
-export const formatDualLength = (val: number, isImperial: boolean): { primary: string, secondary: string } => {
-    const primary = formatLength(val, isImperial);
-    const secondary = formatLength(isImperial ? val * 25.4 : val / 25.4, !isImperial);
+export const formatAngle = (rad: number, settings: AppSettings): string => {
+    const deg = rad * 180 / Math.PI;
+    const format = settings.angularFormat || 'decimalDegrees';
+    const prec = parseInt(settings.anglePrecision || '0');
+
+    switch (format) {
+        case 'degMinSec': {
+            const d = Math.floor(deg);
+            const m = Math.floor((deg - d) * 60);
+            const s = ((deg - d) * 60 - m) * 60;
+            return `${d}°${m}'${s.toFixed(prec)}"`;
+        }
+        case 'grads': return `${(deg * 400 / 360).toFixed(prec)}g`;
+        case 'radians': return `${rad.toFixed(prec)}r`;
+        case 'surveyors': return `${deg.toFixed(prec)}°`; // Simplification
+        default: return `${deg.toFixed(prec)}°`;
+    }
+};
+
+export const formatDualLength = (val: number, settings: AppSettings): { primary: string, secondary: string } => {
+    const isImperial = settings.units === 'imperial';
+    const primary = formatLength(val, settings);
+    const secondarySettings = { ...settings, units: isImperial ? 'metric' as const : 'imperial' as const };
+    const secondary = formatLength(isImperial ? val * 25.4 : val / 25.4, secondarySettings);
     return { primary, secondary: isImperial ? `${secondary} mm` : secondary };
 };
 
-export const formatDualArea = (val: number, isImperial: boolean): { primary: string, secondary: string } => {
+export const formatDualArea = (val: number, settings: AppSettings): { primary: string, secondary: string } => {
     // Area conversion: 1 sq. inch = 645.16 sq. mm
+    const isImperial = settings.units === 'imperial';
     if (isImperial) {
         const sqmm = val * 645.16;
         const sqm = sqmm / 1000000;
@@ -788,7 +946,7 @@ export const rotateShape = (s: Shape, base: Point, angle: number): Shape => {
             const p = rotatePt({ x: ns.x, y: ns.y });
             ns.x = p.x; ns.y = p.y; ns.rotation += angle; break;
         }
-        case 'pline': case 'polygon': case 'spline': case 'dline':
+        case 'pline': case 'polygon': case 'spline': case 'dline': case 'hatch':
             (ns as any).points = (ns as any).points.map((p: Point) => rotatePt(p)); break;
         case 'dimension': {
             const p1 = rotatePt({x: ns.x1, y: ns.y1}), p2 = rotatePt({x: ns.x2, y: ns.y2}), p3 = rotatePt({x: ns.dimX, y: ns.dimY});
@@ -830,7 +988,7 @@ export const scaleShape = (s: Shape, base: Point, factor: number): Shape => {
             const p = scalePt({ x: ns.x, y: ns.y });
             ns.x = p.x; ns.y = p.y; break;
         }
-        case 'pline': case 'polygon': case 'spline': case 'dline':
+        case 'pline': case 'polygon': case 'spline': case 'dline': case 'hatch':
             (ns as any).points = (ns as any).points.map((p: Point) => scalePt(p)); break;
         case 'dimension': {
             const p1 = scalePt({x: ns.x1, y: ns.y1}), p2 = scalePt({x: ns.x2, y: ns.y2}), p3 = scalePt({x: ns.dimX, y: ns.dimY});
@@ -864,7 +1022,7 @@ export const mirrorShape = (s: Shape, p1: Point, p2: Point): Shape => {
             // Mirroring text/rect/ellipse might need more complex angle flipping
             break;
         }
-        case 'pline': case 'polygon': case 'spline':
+        case 'pline': case 'polygon': case 'spline': case 'hatch':
             ns.points = ns.points.map(p => mirrorPt(p)); break;
     }
     return ns as Shape;
@@ -964,7 +1122,7 @@ export const stretchShape = (s: Shape, xMin: number, yMin: number, xMax: number,
             }
             break;
         }
-        case 'pline': case 'polygon': case 'spline': case 'dline':
+        case 'pline': case 'polygon': case 'spline': case 'dline': case 'hatch':
             ns.points = ns.points.map(p => inRect(p) ? { x: p.x + dx, y: p.y + dy } : p);
             break;
         case 'dimension':

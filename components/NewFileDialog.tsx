@@ -1,10 +1,18 @@
 
 import React, { useState } from 'react';
 import { Ruler, Globe, X, FileEdit, Check, Target } from 'lucide-react';
-import { UnitType } from '../types';
+import { UnitType, LinearUnitFormat, AngularUnitFormat } from '../types';
 
 interface NewFileDialogProps {
-  onSelect: (config: { units: UnitType, subUnit: string, precision: string, name: string }) => void;
+  onSelect: (config: { 
+    units: UnitType, 
+    subUnit: string, 
+    precision: string, 
+    linearFormat: LinearUnitFormat,
+    angularFormat: AngularUnitFormat,
+    anglePrecision: string,
+    name: string 
+  }) => void;
   onClose: () => void;
 }
 
@@ -13,12 +21,24 @@ const NewFileDialog: React.FC<NewFileDialogProps> = ({ onSelect, onClose }) => {
   const [standard, setStandard] = useState<UnitType>('metric');
   const [subUnit, setSubUnit] = useState('mm');
   const [precision, setPrecision] = useState('0.0000');
+  const [linearFormat, setLinearFormat] = useState<LinearUnitFormat>('decimal');
+  const [angularFormat, setAngularFormat] = useState<AngularUnitFormat>('decimalDegrees');
+  const [anglePrecision, setAnglePrecision] = useState('0');
 
   const metricPrecisions = ['0', '0.0', '0.00', '0.000', '0.0000'];
   const imperialPrecisions = ['1"', '1/2"', '1/4"', '1/8"', '1/16"', '1/32"', '1/64"'];
+  const anglePrecisions = ['0', '0.0', '0.00', '0.000', '0.0000'];
 
   const handleCreate = () => {
-    onSelect({ units: standard, subUnit, precision, name });
+    onSelect({ 
+        units: standard, 
+        subUnit, 
+        precision, 
+        linearFormat, 
+        angularFormat, 
+        anglePrecision,
+        name 
+    });
   };
 
   const isMetric = standard === 'metric';
@@ -55,23 +75,56 @@ const NewFileDialog: React.FC<NewFileDialogProps> = ({ onSelect, onClose }) => {
           </div>
 
           {/* Standard Selection - More compact */}
-          <div className="space-y-2">
-             <label className="text-[9px] font-black text-neutral-500 uppercase tracking-[0.15em] px-1">Standard System</label>
-             <div className="grid grid-cols-2 gap-2">
-                <button 
-                    onClick={() => { setStandard('metric'); setSubUnit('mm'); setPrecision('0.0000'); }}
-                    className={`flex items-center justify-center gap-2.5 py-3.5 rounded-xl border transition-all no-tap ${isMetric ? 'bg-cyan-500/10 border-cyan-500/40 text-cyan-400' : 'bg-[#121214] border-transparent text-neutral-600 hover:bg-white/5'}`}
-                >
-                    <Globe size={14} />
-                    <span className="text-[10px] font-black uppercase tracking-wider">Metric</span>
-                </button>
-                <button 
-                    onClick={() => { setStandard('imperial'); setSubUnit('ft-in'); setPrecision('1/16"'); }}
-                    className={`flex items-center justify-center gap-2.5 py-3.5 rounded-xl border transition-all no-tap ${!isMetric ? 'bg-amber-500/10 border-amber-500/40 text-amber-500' : 'bg-[#121214] border-transparent text-neutral-600 hover:bg-white/5'}`}
-                >
-                    <Ruler size={14} />
-                    <span className="text-[10px] font-black uppercase tracking-wider">Imperial</span>
-                </button>
+          <div className="space-y-4">
+             <div className="space-y-2">
+                <label className="text-[9px] font-black text-neutral-500 uppercase tracking-[0.15em] px-1">Standard System</label>
+                <div className="grid grid-cols-2 gap-2">
+                    <button 
+                        onClick={() => { setStandard('metric'); setSubUnit('mm'); setPrecision('0.0000'); setLinearFormat('decimal'); }}
+                        className={`flex items-center justify-center gap-2.5 py-3.5 rounded-xl border transition-all no-tap ${isMetric ? 'bg-cyan-500/10 border-cyan-500/40 text-cyan-400' : 'bg-[#121214] border-transparent text-neutral-600 hover:bg-white/5'}`}
+                    >
+                        <Globe size={14} />
+                        <span className="text-[10px] font-black uppercase tracking-wider">Metric</span>
+                    </button>
+                    <button 
+                        onClick={() => { setStandard('imperial'); setSubUnit('ft-in'); setPrecision('1/16"'); setLinearFormat('architectural'); }}
+                        className={`flex items-center justify-center gap-2.5 py-3.5 rounded-xl border transition-all no-tap ${!isMetric ? 'bg-amber-500/10 border-amber-500/40 text-amber-500' : 'bg-[#121214] border-transparent text-neutral-600 hover:bg-white/5'}`}
+                    >
+                        <Ruler size={14} />
+                        <span className="text-[10px] font-black uppercase tracking-wider">Imperial</span>
+                    </button>
+                </div>
+             </div>
+
+             <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                    <label className="text-[9px] font-black text-neutral-500 uppercase tracking-[0.15em] px-1">Linear Format</label>
+                    <select 
+                        value={linearFormat}
+                        onChange={(e) => setLinearFormat(e.target.value as any)}
+                        className="w-full bg-[#121214] border border-white/[0.03] rounded-xl py-3 px-3 text-[9px] text-white font-bold outline-none appearance-none uppercase cursor-pointer hover:border-white/10 transition-all text-center"
+                    >
+                        <option value="decimal">DECIMAL</option>
+                        <option value="architectural">ARCHITECTURAL</option>
+                        <option value="engineering">ENGINEERING</option>
+                        <option value="fractional">FRACTIONAL</option>
+                        <option value="scientific">SCIENTIFIC</option>
+                    </select>
+                </div>
+                <div className="space-y-2">
+                    <label className="text-[9px] font-black text-neutral-500 uppercase tracking-[0.15em] px-1">Angular Format</label>
+                    <select 
+                        value={angularFormat}
+                        onChange={(e) => setAngularFormat(e.target.value as any)}
+                        className="w-full bg-[#121214] border border-white/[0.03] rounded-xl py-3 px-3 text-[9px] text-white font-bold outline-none appearance-none uppercase cursor-pointer hover:border-white/10 transition-all text-center"
+                    >
+                        <option value="decimalDegrees">DEC DEG</option>
+                        <option value="degMinSec">DMS</option>
+                        <option value="grads">GRADS</option>
+                        <option value="radians">RADIANS</option>
+                        <option value="surveyors">SURVEYORS</option>
+                    </select>
+                </div>
              </div>
           </div>
 

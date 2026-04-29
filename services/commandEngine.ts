@@ -1,6 +1,6 @@
 
 import { Shape, Point, AppSettings, LayerConfig, LineShape, CircleShape, RectShape, ArcShape, PolyShape, TextShape, MTextShape, EllipseShape, DimensionShape, AngularDimensionShape, PointShape, InfiniteLineShape, DonutShape, LeaderShape, ViewState, DoubleLineShape, DLineJustification, TextJustification, LineType, BlockDefinition, LayoutDefinition, LayoutViewport, DimensionType, BlockShape, HatchShape } from '../types';
-import { generateId, getCircleFrom3Points, formatLength, parseLength, hitTestShape, distance, getTrimmedShapes, moveShape, resolvePointInput, calculateArea, offsetShape, getPolygonPoints, stretchShape, getShapesInRect, rotateShape, scaleShape, mirrorShape, getExtendedShapes, filletLines, modifyShapeByGrip } from './cadService';
+import { generateId, getCircleFrom3Points, formatLength, formatAngle, parseLength, hitTestShape, distance, getTrimmedShapes, moveShape, resolvePointInput, calculateArea, offsetShape, getPolygonPoints, stretchShape, getShapesInRect, rotateShape, scaleShape, mirrorShape, getExtendedShapes, filletLines, modifyShapeByGrip, isPointInsideShape, getShapeBoundaryPoints, isShapeClosed, getShapeBounds } from './cadService';
 
 export interface CommandContext {
     getSettings: () => AppSettings;
@@ -1109,7 +1109,7 @@ export class DistanceCommand implements CADCommand {
         else {
             const finalP = applyOrthoConstraint(p, this.p1, this.ctx.getSettings().ortho, snapped);
             const d = distance(this.p1, finalP);
-            this.ctx.addLog(`DISTANCE: ${formatLength(d, this.ctx.getSettings().units === 'imperial')}`);
+            this.ctx.addLog(`DISTANCE: ${formatLength(d, this.ctx.getSettings())}`);
             this.ctx.onFinish();
         }
     }
@@ -1236,7 +1236,7 @@ export class DimensionCommand implements CADCommand {
                            layer: style.layer, color: style.color,
                            x1: this.center.x, y1: this.center.y,
                            x2: p.x, y2: p.y, dimX: p.x, dimY: p.y,
-                           text: `${formatLength(val, false)}°`,
+                           text: formatAngle(val * Math.PI / 180, this.ctx.getSettings()),
                            styleId: appSettings.activeDimStyle
                        };
                        this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
@@ -1254,7 +1254,7 @@ export class DimensionCommand implements CADCommand {
                     x1: this.center.x, y1: this.center.y,
                     x2: p.x, y2: p.y,
                     dimX: p.x, dimY: p.y,
-                    text: `${prefix}${formatLength(val, appSettings.units === 'imperial')}`,
+                    text: `${prefix}${formatLength(val, appSettings)}`,
                     styleId: appSettings.activeDimStyle
                 };
                 this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
@@ -1277,7 +1277,7 @@ export class DimensionCommand implements CADCommand {
                 x1: this.p1.x, y1: this.p1.y, 
                 x2: p.x, y2: p.y, 
                 dimX: p.x, dimY: p.y, 
-                text: formatLength(val, appSettings.units === 'imperial'),
+                text: formatLength(val, appSettings),
                 styleId: appSettings.activeDimStyle
             };
             this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
@@ -1298,7 +1298,7 @@ export class DimensionCommand implements CADCommand {
                 x1: this.p1.x, y1: this.p1.y, 
                 x2: this.p2.x, y2: this.p2.y, 
                 dimX: p.x, dimY: p.y, 
-                text: formatLength(d, appSettings.units === 'imperial'),
+                text: formatLength(d, appSettings),
                 styleId: appSettings.activeDimStyle
             };
             this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
@@ -1332,8 +1332,8 @@ export class DimensionCommand implements CADCommand {
                 let val = d;
                 let prefix = '';
                 let text = '';
-                if (this.dimType === 'radius') { prefix = 'R'; text = `${prefix}${formatLength(val, appSettings.units === 'imperial')}`; }
-                else if (this.dimType === 'diameter') { prefix = 'Ø'; val = d * 2; text = `${prefix}${formatLength(val, appSettings.units === 'imperial')}`; }
+                if (this.dimType === 'radius') { prefix = 'R'; text = `${prefix}${formatLength(val, appSettings)}`; }
+                else if (this.dimType === 'diameter') { prefix = 'Ø'; val = d * 2; text = `${prefix}${formatLength(val, appSettings)}`; }
                 else if (this.p1) {
                     const a1 = Math.atan2(this.p1.y - this.center.y, this.p1.x - this.center.x);
                     const a2 = Math.atan2(p.y - this.center.y, p.x - this.center.x);
@@ -1341,9 +1341,9 @@ export class DimensionCommand implements CADCommand {
                     if (diff > Math.PI) diff = 2 * Math.PI - diff;
                     if (this.dimType === 'arc') {
                         prefix = '⌒';
-                        text = `${prefix}${formatLength(d * diff, appSettings.units === 'imperial')}`;
+                        text = `${prefix}${formatLength(d * diff, appSettings)}`;
                     } else if (this.dimType === 'angular') {
-                        text = `${formatLength(diff * 180 / Math.PI, false)}°`;
+                        text = formatAngle(diff, appSettings);
                     }
                 } else {
                     text = this.dimType.toUpperCase();
@@ -1374,7 +1374,7 @@ export class DimensionCommand implements CADCommand {
                     layer: style.layer, color: style.color,
                     x1: this.p1.x, y1: this.p1.y, x2: p.x, y2: p.y,
                     dimX: p.x, dimY: p.y,
-                    text: formatLength(val, appSettings.units === 'imperial'),
+                    text: formatLength(val, appSettings),
                     styleId: appSettings.activeDimStyle
                 } as any]);
             }
@@ -1396,7 +1396,7 @@ export class DimensionCommand implements CADCommand {
                 x1: this.p1.x, y1: this.p1.y, 
                 x2: this.p2.x, y2: this.p2.y, 
                 dimX: p.x, dimY: p.y, 
-                text: formatLength(d, appSettings.units === 'imperial'),
+                text: formatLength(d, appSettings),
                 styleId: appSettings.activeDimStyle
             } as any]);
         }
@@ -2354,12 +2354,6 @@ export class BlockCommand implements CADCommand {
         this.ctx.onFinish();
     }
     onMove() {}
-    onEnter() { 
-        if (this.selecting && this.ctx.getSelectedIds().length > 0) {
-            this.selecting = false;
-            this.ctx.setMessage("BLOCK Enter name:");
-        }
-    }
     onCancel() { this.ctx.onFinish(); }
 }
 
@@ -2441,38 +2435,75 @@ export class HatchCommand implements CADCommand {
     name = "HATCH"; 
     constructor(public ctx: CommandContext) {}
     onStart() {
+        // If there's a selection, try hatching that
+        const selectedIds = this.ctx.getSelectedIds();
+        if (selectedIds.length > 0) {
+            const allShapes = Object.values(this.ctx.getLayers()).flat();
+            const closedShapes = allShapes.filter(s => selectedIds.includes(s.id) && isShapeClosed(s));
+            if (closedShapes.length > 0) {
+                this.triggerSelector(closedShapes);
+                return;
+            }
+        }
         this.ctx.setMessage("HATCH: Click inside a closed boundary:");
     }
+
+    private triggerSelector(targets: Shape[]) {
+        if (this.ctx.onExternalRequest) {
+            this.ctx.onExternalRequest('hatch_selector', null, (pattern) => {
+                if (pattern) {
+                    const style = getStyleSettings(this.ctx);
+                    targets.forEach(boundary => {
+                        const points = getShapeBoundaryPoints(boundary);
+                        if (points.length > 2) {
+                            const bounds = getShapeBounds(boundary);
+                            const width = bounds.xMax - bounds.xMin;
+                            const height = bounds.yMax - bounds.yMin;
+                            const diagonal = Math.sqrt(width * width + height * height);
+                            
+                            // Auto-scale logic: 
+                            // We want roughly 20 lines across the diagonal.
+                            // Base spacing for lines is 24, for dots is 12.
+                            const baseSpacing = pattern === 'dots' ? 12 : 24;
+                            let autoScale = diagonal / (20 * baseSpacing);
+
+                            // Clamp to reasonable defaults
+                            autoScale = Math.max(0.01, Math.min(100, autoScale));
+
+                            const hatch: HatchShape = {
+                                id: generateId(), type: 'hatch', pattern: pattern, points: [...points],
+                                layer: style.layer, color: style.color, 
+                                scale: autoScale, 
+                                rotation: pattern.startsWith('ansi3') ? 0 : 0
+                            };
+                            this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), hatch]}));
+                        }
+                    });
+                    this.ctx.onFinish();
+                } else {
+                    this.ctx.onFinish();
+                }
+            });
+        }
+    }
+
     onClick(p: Point) {
-        const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
         const all = Object.values(this.ctx.getLayers()).flat();
-        const boundary = all.find(s => (s as any).points && (s as any).closed && hitTestShape(p.x, p.y, s, 5/ts, this.ctx.getBlocks()));
+        // Find smallest closed shape containing the point
+        const boundaries = all.filter(s => isShapeClosed(s) && isPointInsideShape(p, s));
         
-        if (boundary && (boundary as any).points) {
-            if (this.ctx.onExternalRequest) {
-                this.ctx.onExternalRequest('hatch_selector', null, (pattern) => {
-                    if (pattern) {
-                        const style = getStyleSettings(this.ctx);
-                        const hatch: HatchShape = {
-                            id: generateId(), type: 'hatch', pattern: pattern, points: [...(boundary as any).points],
-                            layer: style.layer, color: style.color, scale: 1, rotation: 0
-                        };
-                        this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), hatch]}));
-                        this.ctx.onFinish();
-                    } else {
-                        this.ctx.onFinish();
-                    }
-                });
-            } else {
-                // Fallback if no external request handler
-                const style = getStyleSettings(this.ctx);
-                const hatch: HatchShape = {
-                    id: generateId(), type: 'hatch', pattern: 'ansi31', points: [...(boundary as any).points],
-                    layer: style.layer, color: style.color, scale: 1, rotation: 0
-                };
-                this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), hatch]}));
-                this.ctx.onFinish();
-            }
+        if (boundaries.length > 0) {
+            // Sort by "area" roughly (estimate by bounds) to find smallest nesting
+            boundaries.sort((a, b) => {
+                const ba = getShapeBounds(a);
+                const bb = getShapeBounds(b);
+                const aa = (ba.xMax - ba.xMin) * (ba.yMax - ba.yMin);
+                const ab = (bb.xMax - bb.xMin) * (bb.yMax - bb.yMin);
+                return aa - ab;
+            });
+            
+            const target = boundaries[0];
+            this.triggerSelector([target]);
         } else {
             this.ctx.setMessage("HATCH: No closed boundary found. Click again.");
         }
@@ -2602,6 +2633,66 @@ export class GripEditCommand implements CADCommand {
         });
         this.ctx.onFinish();
     }
+}
+
+export class MatchPropertiesCommand implements CADCommand {
+    name = "MATCHPROP";
+    source: Shape | null = null;
+    constructor(public ctx: CommandContext) {}
+    onStart() {
+        this.ctx.setMessage("MATCHPROP Select source object:");
+    }
+    onClick(p: Point) {
+        const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
+        const all = Object.values(this.ctx.getLayers()).flat();
+        const hit = all.find(s => hitTestShape(p.x, p.y, s, 15/ts, this.ctx.getBlocks()));
+        if (!hit) return;
+
+        if (!this.source) {
+            this.source = hit;
+            this.ctx.setMessage("MATCHPROP Select destination objects:");
+            this.ctx.setSelectedIds([hit.id]);
+        } else {
+            const updates: Partial<Shape> = {
+                color: this.source.color,
+                layer: this.source.layer,
+                lineType: this.source.lineType,
+                thickness: this.source.thickness
+            };
+            
+            // If it's a hatch, maybe match hatch properties too
+            if (this.source.type === 'hatch' && hit.type === 'hatch') {
+                (updates as HatchShape).pattern = this.source.pattern;
+                (updates as HatchShape).scale = this.source.scale;
+                (updates as HatchShape).rotation = this.source.rotation;
+            }
+
+            this.ctx.setLayers(prev => {
+                const next = { ...prev };
+                let found = false;
+                Object.keys(next).forEach(l => {
+                    const idx = next[l].findIndex(s => s.id === hit.id);
+                    if (idx !== -1) {
+                        const updated = { ...next[l][idx], ...updates } as Shape;
+                        next[l] = [...next[l]];
+                        
+                        if (updated.layer !== l) {
+                            next[l].splice(idx, 1);
+                            const newL = updated.layer || '0';
+                            next[newL] = [...(next[newL] || []), updated];
+                        } else {
+                            next[l][idx] = updated;
+                        }
+                        found = true;
+                    }
+                });
+                return next;
+            });
+            this.ctx.addLog("Properties matched");
+        }
+    }
+    onEnter() { this.ctx.onFinish(); }
+    onCancel() { this.ctx.onFinish(); }
 }
 
 export class LayoutCommand implements CADCommand {

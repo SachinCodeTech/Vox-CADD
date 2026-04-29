@@ -173,8 +173,67 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
                             <button onClick={() => onSettingsChange({ units: 'imperial' })} className={`flex-1 py-3 rounded-lg text-[9px] font-black uppercase transition-all ${settings.units === 'imperial' ? 'bg-cyan-600 text-black' : 'text-neutral-500 hover:text-neutral-300'}`}>Imperial</button>
                         </div>
                     </div>
-                    <div className="space-y-3">
-                        <label className="text-[9px] font-black text-neutral-600 uppercase tracking-widest px-1">Display Mode</label>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-3">
+                            <label className="text-[9px] font-black text-neutral-600 uppercase tracking-widest px-1">Linear Format</label>
+                            <select 
+                                value={settings.linearFormat}
+                                onChange={e => onSettingsChange({ linearFormat: e.target.value as any })}
+                                className="w-full bg-black border border-white/10 rounded-xl py-3 px-4 text-[10px] text-white font-bold tracking-tight focus:border-cyan-500 outline-none appearance-none"
+                            >
+                                <option value="decimal">DECIMAL</option>
+                                <option value="architectural">ARCHITECTURAL</option>
+                                <option value="engineering">ENGINEERING</option>
+                                <option value="fractional">FRACTIONAL</option>
+                                <option value="scientific">SCIENTIFIC</option>
+                            </select>
+                        </div>
+                        <div className="space-y-3">
+                            <label className="text-[9px] font-black text-neutral-600 uppercase tracking-widest px-1">Precision</label>
+                            <select 
+                                value={settings.precision}
+                                onChange={e => onSettingsChange({ precision: e.target.value })}
+                                className="w-full bg-black border border-white/10 rounded-xl py-3 px-4 text-[10px] text-white font-mono focus:border-cyan-500 outline-none appearance-none"
+                            >
+                                {(settings.linearFormat === 'architectural' || settings.linearFormat === 'fractional' ? ['1"', '1/2"', '1/4"', '1/8"', '1/16"', '1/32"', '1/64"'] : ['0', '0.0', '0.00', '0.000', '0.0000']).map(p => (
+                                    <option key={p} value={p}>{p}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 border-t border-white/5 pt-6">
+                        <div className="space-y-3">
+                            <label className="text-[9px] font-black text-neutral-600 uppercase tracking-widest px-1">Angular Format</label>
+                            <select 
+                                value={settings.angularFormat}
+                                onChange={e => onSettingsChange({ angularFormat: e.target.value as any })}
+                                className="w-full bg-black border border-white/10 rounded-xl py-3 px-4 text-[10px] text-white font-bold tracking-tight focus:border-cyan-500 outline-none appearance-none"
+                            >
+                                <option value="decimalDegrees">DEC DEGREES</option>
+                                <option value="degMinSec">DMS</option>
+                                <option value="grads">GRADS</option>
+                                <option value="radians">RADIANS</option>
+                                <option value="surveyors">SURVEYORS</option>
+                            </select>
+                        </div>
+                        <div className="space-y-3">
+                            <label className="text-[9px] font-black text-neutral-600 uppercase tracking-widest px-1">Angle Precision</label>
+                            <select 
+                                value={settings.anglePrecision}
+                                onChange={e => onSettingsChange({ anglePrecision: e.target.value })}
+                                className="w-full bg-black border border-white/10 rounded-xl py-3 px-4 text-[10px] text-white font-mono focus:border-cyan-500 outline-none appearance-none"
+                            >
+                                {['0', '0.0', '0.00', '0.000', '0.0000'].map(p => (
+                                    <option key={p} value={p}>{p}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="space-y-3 border-t border-white/5 pt-6">
+                        <label className="text-[9px] font-black text-neutral-600 uppercase tracking-widest px-1">Display Options</label>
                          <button 
                             onClick={() => onSettingsChange({ showDualUnits: !settings.showDualUnits })} 
                             className={`w-full flex items-center justify-between p-4 rounded-xl border transition-all ${settings.showDualUnits ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' : 'bg-neutral-900 border-white/5 text-neutral-600'}`}
@@ -190,18 +249,6 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
                                 <div className={`absolute top-1 w-3 h-3 rounded-full bg-white transition-all ${settings.showDualUnits ? 'right-1' : 'left-1'}`} />
                             </div>
                          </button>
-                    </div>
-                    <div className="space-y-3">
-                        <label className="text-[9px] font-black text-neutral-600 uppercase tracking-widest px-1">Decimal Precision</label>
-                        <select 
-                            value={settings.precision}
-                            onChange={e => onSettingsChange({ precision: e.target.value })}
-                            className="w-full bg-black border border-white/10 rounded-xl py-3 px-4 text-xs text-white font-mono focus:border-cyan-500 outline-none appearance-none"
-                        >
-                            {(settings.units === 'metric' ? ['0', '0.0', '0.00', '0.000', '0.0000'] : ['1"', '1/2"', '1/4"', '1/8"', '1/16"', '1/32"', '1/64"']).map(p => (
-                                <option key={p} value={p}>{p}</option>
-                            ))}
-                        </select>
                     </div>
                 </div>
             )}

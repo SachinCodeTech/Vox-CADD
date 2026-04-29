@@ -15,7 +15,7 @@ export interface Point {
 
 export type ShapeType = 'line' | 'dline' | 'circle' | 'rect' | 'text' | 'mtext' | 'arc' | 'pline' | 'spline' | 'dimension' | 'dimang' | 'ellipse' | 'polygon' | 'point' | 'ray' | 'xline' | 'donut' | 'leader' | 'block' | 'hatch';
 
-export type LineType = 'continuous' | 'dashed' | 'dotted' | 'center' | 'dashdot' | 'border' | 'divide' | 'phantom' | 'zigzag' | 'hotwater';
+export type LineType = 'continuous' | 'dashed' | 'dotted' | 'center' | 'dashdot' | 'border' | 'divide' | 'phantom' | 'zigzag' | 'hotwater' | 'hidden' | 'gasLine' | 'fenceLine' | 'tracks' | 'batt' | 'zigzag2' | 'dots2' | 'dash2';
 
 export type TextJustification = 'left' | 'center' | 'right';
 
@@ -240,6 +240,9 @@ export type UnitType = 'metric' | 'imperial';
 export type MetricSubUnit = 'm' | 'mm' | 'cm';
 export type ImperialSubUnit = 'ft' | 'ft-in';
 
+export type LinearUnitFormat = 'decimal' | 'architectural' | 'engineering' | 'fractional' | 'scientific';
+export type AngularUnitFormat = 'decimalDegrees' | 'degMinSec' | 'grads' | 'radians' | 'surveyors';
+
 export interface LayerConfig {
   id: string;
   name: string;
@@ -299,6 +302,9 @@ export interface AppSettings {
   cursorY: number;
   units: UnitType; 
   unitSubtype: string;
+  linearFormat: LinearUnitFormat;
+  angularFormat: AngularUnitFormat;
+  anglePrecision: string;
   showDualUnits?: boolean;
   precision: string;
   fillEnabled: boolean;

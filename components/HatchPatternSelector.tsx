@@ -8,11 +8,13 @@ interface HatchPatternSelectorProps {
 }
 
 const patterns = [
-  { id: 'ansi31', name: 'ANSI31 (Iron/Brick)', icon: <Hash size={24} /> },
-  { id: 'ansi37', name: 'ANSI37 (Brass)', icon: <Grid size={24} /> },
+  { id: 'ansi31', name: 'ANSI31 (Brick)', icon: <Hash size={24} /> },
+  { id: 'ansi32', name: 'ANSI32 (Steel)', icon: <Hash size={24} className="rotate-90" /> },
+  { id: 'ansi37', name: 'ANSI37 (Glass)', icon: <Grid size={24} /> },
   { id: 'cross', name: 'CROSS (Net)', icon: <MoreHorizontal size={24} className="rotate-45" /> },
   { id: 'net', name: 'NET', icon: <Grid size={24} /> },
   { id: 'dots', name: 'DOTS', icon: <div className="grid grid-cols-2 gap-1"><div className="w-1 h-1 bg-current rounded-full" /><div className="w-1 h-1 bg-current rounded-full" /><div className="w-1 h-1 bg-current rounded-full" /><div className="w-1 h-1 bg-current rounded-full" /></div> },
+  { id: 'honey', name: 'HONEY (Hex)', icon: <div className="grid grid-cols-3 gap-0.5"><div className="w-1.5 h-1.5 bg-current transform rotate-45" /><div className="w-1.5 h-1.5 bg-current transform rotate-45" /><div className="w-1.5 h-1.5 bg-current transform rotate-45" /></div> },
   { id: 'solid', name: 'SOLID', icon: <div className="w-6 h-6 bg-current rounded-sm" /> },
 ];
 

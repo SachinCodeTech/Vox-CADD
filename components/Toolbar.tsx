@@ -19,6 +19,7 @@ import { ToolbarCategory } from '../App';
 interface ToolbarProps {
   category: ToolbarCategory;
   settings: AppSettings;
+  activePanel: string;
   onSettingChange: (settings: AppSettings) => void;
   onAction: (action: string, payload?: any) => void;
   onCommand: (cmd: string) => void;
@@ -99,9 +100,9 @@ const ToolCircleBtn: React.FC<{
             className={`flex-shrink-0 flex flex-col items-center justify-center active:scale-95 no-tap py-0.5 px-0.5 ${disabled ? 'opacity-20 grayscale' : ''}`}
         >
             <div className={`w-[40px] h-[40px] rounded-full border flex items-center justify-center transition-all duration-300 shadow-sm
-                ${active ? 'bg-[#00bcd4] text-black border-[#00bcd4] shadow-[0_0_20px_rgba(34,211,238,0.6)] scale-110 z-10' : 
+                ${active ? 'bg-[#00bcd4] text-black border-[#00bcd4] shadow-[0_0_20px_rgba(34,211,238,0.8)] scale-110 z-10' : 
                   danger ? 'bg-red-950/20 border-red-900/40 text-red-500 hover:border-red-500 hover:bg-red-500/10 hover:shadow-[0_0_15px_rgba(239,68,68,0.3)]' :
-                  'bg-[#121214] border-white/5 text-neutral-500 hover:text-[#00bcd4] hover:border-[#00bcd4] hover:bg-[#00bcd4]/10 hover:shadow-[0_0_15px_rgba(0,188,212,0.4)] hover:scale-105 active:scale-95'}`}
+                  'bg-[#121214] border-cyan-500/20 text-neutral-500 shadow-[0_0_10px_rgba(0,188,212,0.15)] hover:text-[#00bcd4] hover:border-[#00bcd4] hover:bg-[#00bcd4]/10 hover:shadow-[0_0_15px_rgba(0,188,212,0.4)] hover:scale-105 active:scale-95'}`}
             >
                 {React.cloneElement(icon as React.ReactElement, { size: 18 })}
             </div>
@@ -110,7 +111,7 @@ const ToolCircleBtn: React.FC<{
     );
 };
 
-const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settings, onSettingChange, canUndo, canRedo, activeCommandName, showCircleOptions, showArcOptions, showEllipseOptions }) => {
+const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settings, activePanel, onSettingChange, canUndo, canRedo, activeCommandName, showCircleOptions, showArcOptions, showEllipseOptions }) => {
   const [dimFlyoutOpen, setDimFlyoutOpen] = useState(false);
 
     const btnRef = React.useRef<HTMLDivElement>(null);
@@ -259,14 +260,14 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
             <ToolCircleBtn onClick={() => onSettingChange({ ...settings, grid: !settings.grid })} icon={<LayoutGrid />} label="GRID" active={settings.grid} />
             <ToolCircleBtn onClick={() => onSettingChange({ ...settings, showHUD: !settings.showHUD })} icon={<Monitor />} label="HUD" active={settings.showHUD} />
             <ToolCircleBtn onClick={() => onSettingChange({ ...settings, showLineWeights: !settings.showLineWeights })} icon={<Weight />} label="L-WEIGHT" active={settings.showLineWeights} />
-            <ToolCircleBtn onClick={() => onAction('toggleLayers')} icon={<Layers2 />} label="LAYERS" />
-            <ToolCircleBtn onClick={() => onAction('toggleProperties')} icon={<Settings2 />} label="PROPS" />
-            <ToolCircleBtn onClick={() => onAction('toggleDraftingSettings')} icon={<Sliders />} label="DRAFT" />
-            <ToolCircleBtn onClick={() => onAction('toggleCalculator')} icon={<Calculator />} label="CALC" />
+            <ToolCircleBtn onClick={() => onAction('toggleLayers')} icon={<Layers2 />} label="LAYERS" active={activePanel === 'layers'} />
+            <ToolCircleBtn onClick={() => onAction('toggleProperties')} icon={<Settings2 />} label="PROPS" active={activePanel === 'properties'} />
+            <ToolCircleBtn onClick={() => onAction('toggleDraftingSettings')} icon={<Sliders />} label="DRAFT" active={activePanel === 'drafting'} />
+            <ToolCircleBtn onClick={() => onAction('toggleCalculator')} icon={<Calculator />} label="CALC" active={activePanel === 'calculator'} />
             <ToolCircleBtn onClick={() => onCommand('filter')} icon={<Filter />} label="FILTER" active={activeCommandName === 'FILTER'} />
             <ToolCircleBtn onClick={() => onCommand('find')} icon={<Search />} label="FIND" active={activeCommandName === 'FIND'} />
             <ToolCircleBtn onClick={() => onCommand('vports')} icon={<MonitorPlay />} label="VPORTS" active={activeCommandName === 'VIEWPORT'} />
-            <ToolCircleBtn onClick={() => onAction('toggleAbout')} icon={<Info />} label="ABOUT" />
+            <ToolCircleBtn onClick={() => onAction('toggleAbout')} icon={<Info />} label="ABOUT" active={activePanel === 'about'} />
           </>
         );
       default: return null;
@@ -308,7 +309,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
            <button onClick={() => onAction('cancel')} className="shrink-0 px-3 py-1 rounded-md bg-red-500/10 border border-red-500/30 text-red-500 text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all">Cancel</button>
         </div>
       )}
-      <div className="w-full flex items-center gap-1 px-4 h-[64px] overflow-x-auto scrollbar-none touch-pan-x overscroll-x-contain">
+      <div className="w-full flex items-center gap-4 px-4 h-[64px] overflow-x-auto scrollbar-none touch-pan-x overscroll-x-contain">
         {renderContent()}
       </div>
     </div>

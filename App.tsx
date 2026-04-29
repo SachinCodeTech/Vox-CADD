@@ -43,7 +43,10 @@ const INITIAL_SETTINGS: AppSettings = {
   ortho: true, snap: true, grid: true,
   currentLayer: '0', drawingScale: 1, penThickness: 1,
   activeLineType: 'continuous',
-  cursorX: 0, cursorY: 0, units: 'metric', unitSubtype: 'mm', precision: '0.0000',
+  cursorX: 0, cursorY: 0, 
+  units: 'metric', unitSubtype: 'mm', 
+  linearFormat: 'decimal', angularFormat: 'decimalDegrees', anglePrecision: '0', 
+  precision: '0.0000',
   fillEnabled: false,
   gridSpacing: 100, snapSpacing: 10,
   snapOptions: { 
@@ -999,7 +1002,8 @@ const App: React.FC = () => {
             switch(e.key.toLowerCase()) {
                 case 's':
                     e.preventDefault();
-                    handleAction('save');
+                    if (e.shiftKey) handleAction('saveAs');
+                    else handleAction('save');
                     break;
                 case 'o':
                     e.preventDefault();
@@ -1011,8 +1015,30 @@ const App: React.FC = () => {
                     break;
                 case 'z':
                     e.preventDefault();
-                    if (e.shiftKey) { /* Redo? */ }
+                    if (e.shiftKey) { 
+                        // Redo logic
+                        if (redoStack.length > 0) {
+                            const next = redoStack[0];
+                            setRedoStack(prev => prev.slice(1));
+                            setHistory(prev => [...prev, layers]);
+                            setLayers(next);
+                            setLogMessage("REDO_ACTION_SUCCESS");
+                        }
+                    }
                     else handleAction('undo');
+                    break;
+                case 'y':
+                    if (!e.shiftKey) {
+                        e.preventDefault();
+                        // Redo logic
+                        if (redoStack.length > 0) {
+                            const next = redoStack[0];
+                            setRedoStack(prev => prev.slice(1));
+                            setHistory(prev => [...prev, layers]);
+                            setLayers(next);
+                            setLogMessage("REDO_ACTION_SUCCESS");
+                        }
+                    }
                     break;
             }
         }
@@ -1032,7 +1058,7 @@ const App: React.FC = () => {
     return () => clearInterval(timer);
   }, [commitToHistory]);
 
-  // Global Escape Key Handler
+    // Global Escape/Delete Key Handler
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -1046,8 +1072,19 @@ const App: React.FC = () => {
         } else if (selectedIds.length > 0) {
           setSelectedIds([]);
         }
+      } else if (e.key === 'Delete' || (e.key === 'Backspace' && !isNavigatingInput())) {
+        if (!engineRef.current?.active && selectedIds.length > 0) {
+            handleAction('erase');
+        }
       }
     };
+    
+    // Helper to check if we are typing in an input
+    const isNavigatingInput = () => {
+        const active = document.activeElement;
+        return active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.getAttribute('contenteditable') === 'true');
+    };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [mtextEditor, activePanel, selectedIds, handleAction]);
@@ -1135,6 +1172,7 @@ const App: React.FC = () => {
       't': TextCommand, 'text': TextCommand, 
       'z': ZoomCommand, 'zoom': ZoomCommand, 'tr': TrimCommand, 'trim': TrimCommand,
       'h': HatchCommand, 'hatch': HatchCommand, 'lea': LeaderCommand, 'leader': LeaderCommand,
+      'ma': MatchPropertiesCommand, 'matchprop': MatchPropertiesCommand,
       'p': PanCommand, 'pan': PanCommand, 'o': OffsetCommand, 'offset': OffsetCommand,
       's': StretchCommand, 'stretch': StretchCommand,
       'el': EllipseCommand, 'ellipse': EllipseCommand, 'pol': PolygonCommand, 'polygon': PolygonCommand,
@@ -1185,7 +1223,8 @@ const App: React.FC = () => {
             'x': 'EXPLODE', 'explode': 'EXPLODE',
             'o': 'OFFSET', 'offset': 'OFFSET',
             'f': 'FILLET', 'fillet': 'FILLET',
-            'e': 'ERASE', 'erase': 'ERASE',
+            'e': 'ERASE', 'erase': 'ERASE', 'del': 'ERASE',
+            'ma': 'MATCHPROP', 'matchprop': 'MATCHPROP', 'match': 'MATCHPROP',
             'mt': 'MTEXT', 'mtext': 'MTEXT',
             't': 'TEXT', 'text': 'TEXT',
             'dim': 'DIM', 'dist': 'DIST', 'area': 'AREA',
@@ -1446,11 +1485,35 @@ const App: React.FC = () => {
                     )}
                   </div>
                   <div className="h-px bg-white/5 my-1" />
+                  <div className="grid grid-cols-3 gap-1 px-1">
+                    <button 
+                      onClick={() => { handleAction('new'); setFileMenuOpen(false); }}
+                      className="flex flex-col items-center gap-1 p-2 rounded-xl text-neutral-500 hover:bg-white/5 hover:text-cyan-400 transition-all group"
+                    >
+                      <FilePlus size={16} />
+                      <span className="text-[7px] font-black uppercase">New</span>
+                    </button>
+                    <button 
+                      onClick={() => { handleAction('open'); setFileMenuOpen(false); }}
+                      className="flex flex-col items-center gap-1 p-2 rounded-xl text-neutral-500 hover:bg-white/5 hover:text-cyan-400 transition-all"
+                    >
+                      <FolderOpen size={16} />
+                      <span className="text-[7px] font-black uppercase">Open</span>
+                    </button>
+                    <button 
+                      onClick={() => { handleAction('save'); setFileMenuOpen(false); }}
+                      className="flex flex-col items-center gap-1 p-2 rounded-xl text-neutral-500 hover:bg-white/5 hover:text-cyan-400 transition-all"
+                    >
+                      <Save size={16} />
+                      <span className="text-[7px] font-black uppercase">Save</span>
+                    </button>
+                  </div>
+                  <div className="h-px bg-white/5 my-1" />
                   <button 
-                    onClick={() => { handleAction('open'); setFileMenuOpen(false); }}
+                    onClick={() => { handleAction('saveAs'); setFileMenuOpen(false); }}
                     className="w-full text-left px-3 py-3 rounded-xl text-[10px] text-neutral-400 hover:bg-white/10 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
                   >
-                    <FolderOpen size={16} className="text-cyan-500" /> Open External...
+                    <Share2 size={16} className="text-cyan-500" /> Save As...
                   </button>
                 </div>
               </>
@@ -1619,7 +1682,15 @@ const App: React.FC = () => {
                   }
                 });
             }} 
-            onSetActive={(id) => setSettings(s => ({...s, currentLayer: id}))} 
+            onSetActive={(id) => {
+                if(navigator.vibrate) navigator.vibrate(5);
+                setSettings(s => ({ ...s, currentLayer: id }));
+                // Automatically turn on and thaw the layer if it becomes current
+                setLayerConfig(prev => ({
+                    ...prev,
+                    [id]: { ...prev[id], visible: true, frozen: false }
+                }));
+            }} 
           />
         )}
         {activePanel === 'properties' && <PropertiesPanel selectedShapes={(Object.values(layers).flat() as Shape[]).filter(s => selectedIds.includes(s.id))} onUpdateShape={(id, upd) => setLayers(prev => { const n = {...prev}; Object.keys(n).forEach(l => n[l] = n[l].map(s => s.id === id ? {...s, ...upd} : s)); return n; })} layers={layerConfig} settings={settings} onUpdateSettings={(upd) => setSettings(s => ({...s, ...upd}))} onCommand={executeCommand} onClose={() => setActivePanel('none')} />}
@@ -1650,7 +1721,15 @@ const App: React.FC = () => {
         {activePanel === 'new_file' && <NewFileDialog onSelect={(cfg) => { 
             const name = cfg.name + '.vox';
             setLayers({ '0': [], 'defpoints': [] }); 
-            setSettings(s => ({...s, units: cfg.units, precision: cfg.precision })); 
+            setSettings(s => ({
+              ...s, 
+              units: cfg.units, 
+              unitSubtype: cfg.subUnit,
+              precision: cfg.precision,
+              linearFormat: cfg.linearFormat,
+              angularFormat: cfg.angularFormat,
+              anglePrecision: cfg.anglePrecision
+            })); 
             setCurrentFileName(name); 
             setActivePanel('none'); 
             updateRecentFiles(name);
@@ -1898,6 +1977,7 @@ const App: React.FC = () => {
         <Toolbar 
             category={activeCategory} 
             settings={settings} 
+            activePanel={activePanel}
             onSettingChange={setSettings} 
             onAction={handleAction} 
             onCommand={executeCommand} 

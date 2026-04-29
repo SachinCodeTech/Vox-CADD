@@ -117,6 +117,21 @@ export const shapesToDXF = (shapes: Shape[], layerConfigs?: Record<string, Layer
         writer.write(10, 1000); writer.write(20, 1000); writer.write(30, 0);
         writer.write(9, "$INSUNITS");
         writer.write(70, settings?.units === 'metric' ? 4 : 1); // 4=mm, 1=inches
+        
+        // Linear Units Format & Precision
+        const lUnitsMap: Record<string, number> = { 'scientific': 1, 'decimal': 2, 'engineering': 3, 'architectural': 4, 'fractional': 5 };
+        writer.write(9, "$LUNITS");
+        writer.write(70, lUnitsMap[settings?.linearFormat || 'decimal'] || 2);
+        writer.write(9, "$LUPREC");
+        writer.write(70, settings?.precision ? (settings.precision.split('.')[1]?.length || 0) : 4);
+
+        // Angular Units Format & Precision
+        const aUnitsMap: Record<string, number> = { 'decimalDegrees': 0, 'degMinSec': 1, 'grads': 2, 'radians': 3, 'surveyors': 4 };
+        writer.write(9, "$AUNITS");
+        writer.write(70, aUnitsMap[settings?.angularFormat || 'decimalDegrees'] || 0);
+        writer.write(9, "$AUPREC");
+        writer.write(70, parseInt(settings?.anglePrecision || '0'));
+
         writer.write(9, "$MEASUREMENT");
         writer.write(70, settings?.units === 'metric' ? 1 : 0); // 1=metric, 0=imperial
         writer.write(9, "$LTSCALE");

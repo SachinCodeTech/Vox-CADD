@@ -34,6 +34,43 @@ interface PropertiesPanelProps {
   onCommand?: (cmd: string) => void;
 }
 
+const LineTypePreview = ({ type, color = "#00bcd4", weight = 1 }: { type: LineType, color?: string, weight?: number }) => {
+  const L = 8; // Base unit for preview
+  const getDash = () => {
+    switch (type) {
+        case 'dashed': return [L * 2, L];
+        case 'dotted': return [L * 0.1, L * 0.6];
+        case 'center': return [L * 4, L * 0.8, L * 0.6, L * 0.8];
+        case 'dashdot': return [L * 3, L * 0.6, L * 0.2, L * 0.6];
+        case 'border': return [L * 5, L, L * 2, L];
+        case 'divide': return [L * 2.5, L * 0.4, L * 0.4, L * 0.4, L * 0.4, L * 0.4];
+        case 'phantom': return [L * 5, L * 0.5, L * 0.5, L * 0.5, L * 0.5, L * 0.5];
+        case 'zigzag': return [L * 3, L, L, L];
+        case 'hotwater': return [L * 4, L, L * 0.4, L, L * 0.4, L];
+        case 'hidden': return [L * 0.5, L * 0.5];
+        case 'gasLine': return [L * 7, L * 1.5, L * 0.6, L * 1.5, L * 0.6, L * 1.5];
+        case 'fenceLine': return [L * 4, L * 0.5, L * 0.5, L * 0.5, L * 0.5, L * 0.5];
+        case 'tracks': return [L * 1.5, L * 0.5, L * 1.5, L * 0.5];
+        case 'batt': return [L * 2, L * 0.2, L * 0.2, L * 0.2, L * 2, L * 0.2];
+        case 'zigzag2': return [L * 0.8, L * 0.4];
+        case 'dots2': return [L * 0.1, L * 0.3];
+        case 'dash2': return [L * 0.5, L * 0.5];
+        default: return [];
+    }
+  };
+
+  return (
+    <svg width="60" height="12" className="overflow-visible">
+      <line 
+        x1="0" y1="6" x2="60" y2="6" 
+        stroke={color} 
+        strokeWidth={Math.max(1, weight * 0.5)} 
+        strokeDasharray={getDash().join(',')}
+      />
+    </svg>
+  );
+};
+
 const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ 
     selectedShapes, onUpdateShape, layers, settings, onUpdateSettings, onClose, onCommand
 }) => {
@@ -86,7 +123,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   );
 
   const NumericInput = ({ value, onChange, readOnly = false, isArea = false }: { value: number, onChange: (val: number) => void, readOnly?: boolean, isArea?: boolean }) => {
-    const { primary, secondary } = isArea ? formatDualArea(value, isImperial) : formatDualLength(value, isImperial);
+    const { primary, secondary } = isArea ? formatDualArea(value, settings) : formatDualLength(value, settings);
     const [local, setLocal] = useState(primary);
     useEffect(() => { setLocal(primary); }, [value, isImperial, primary]);
     
@@ -140,6 +177,20 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     { value: 'dashed', label: 'Dashed' }, 
     { value: 'dotted', label: 'Dotted' }, 
     { value: 'center', label: 'Center' },
+    { value: 'dashdot', label: 'Dash Dot' },
+    { value: 'border', label: 'Border' },
+    { value: 'divide', label: 'Divide' },
+    { value: 'phantom', label: 'Phantom' },
+    { value: 'zigzag', label: 'Zigzag' },
+    { value: 'hotwater', label: 'Hot Water' },
+    { value: 'hidden', label: 'Hidden' },
+    { value: 'gasLine', label: 'Gas Line' },
+    { value: 'fenceLine', label: 'Fence Line' },
+    { value: 'tracks', label: 'Tracks' },
+    { value: 'batt', label: 'Batt' },
+    { value: 'zigzag2', label: 'Zigzag 2' },
+    { value: 'dots2', label: 'Dots (dense)' },
+    { value: 'dash2', label: 'Dashed (short)' },
   ];
 
   const renderGeometry = (s: Shape) => {
@@ -255,6 +306,33 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             <PropertyRow label="Center Y"><NumericInput value={d.y} onChange={v => handleShapeChange('y', v)} /></PropertyRow>
             <PropertyRow label="Inner Rad"><NumericInput value={d.innerRadius} onChange={v => handleShapeChange('innerRadius', v)} /></PropertyRow>
             <PropertyRow label="Outer Rad"><NumericInput value={d.outerRadius} onChange={v => handleShapeChange('outerRadius', v)} /></PropertyRow>
+            <PropertyRow label="Area" readOnly><DualAreaLabel value={area} /></PropertyRow>
+          </>
+        );
+      }
+      case 'hatch': {
+        const h = s as any;
+        const area = calculateArea(h.points);
+        return (
+          <>
+            <PropertyRow label="Pattern">
+               <select 
+                 value={h.pattern}
+                 onChange={e => handleShapeChange('pattern', e.target.value)}
+                 className="w-full bg-[#121214] border border-white/5 text-[11px] text-white font-mono rounded-xl px-4 py-3 outline-none focus:border-[#00bcd4]/50 transition-all uppercase"
+               >
+                 <option value="solid">Solid</option>
+                 <option value="ansi31">ANSI31</option>
+                 <option value="ansi32">ANSI32</option>
+                 <option value="ansi37">ANSI37</option>
+                 <option value="dots">Dots</option>
+                 <option value="cross">Cross</option>
+                 <option value="net">Net</option>
+                 <option value="honey">Honey</option>
+               </select>
+            </PropertyRow>
+            <PropertyRow label="Scale"><NumericInput value={h.scale || 1} onChange={v => handleShapeChange('scale', v)} /></PropertyRow>
+            <PropertyRow label="Rotation"><NumericInput value={(h.rotation || 0)} onChange={v => handleShapeChange('rotation', v)} /></PropertyRow>
             <PropertyRow label="Area" readOnly><DualAreaLabel value={area} /></PropertyRow>
           </>
         );
@@ -422,13 +500,21 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                   </PropertyRow>
 
                   <PropertyRow label="Linetype">
-                      <select 
-                        className="w-full bg-[#121214] border border-white/5 text-[10px] text-white rounded-lg px-3 py-2 outline-none uppercase font-black cursor-pointer" 
-                        value={selectedShapes.length === 1 ? selectedShapes[0].lineType || 'continuous' : ''} 
-                        onChange={(e) => handleShapeChange('lineType', e.target.value)}
-                      >
-                          {lineTypes.map(lt => <option key={lt.value} value={lt.value}>{lt.label}</option>)}
-                      </select>
+                      <div className="flex items-center gap-3">
+                          <select 
+                            className="flex-1 bg-[#121214] border border-white/5 text-[10px] text-white rounded-lg px-3 py-2 outline-none uppercase font-black cursor-pointer appearance-none hover:border-[#00bcd4]/30 transition-all" 
+                            value={selectedShapes.length === 1 ? selectedShapes[0].lineType || 'continuous' : ''} 
+                            onChange={(e) => handleShapeChange('lineType', e.target.value)}
+                          >
+                              {lineTypes.map(lt => <option key={lt.value} value={lt.value}>{lt.label}</option>)}
+                          </select>
+                          <div className="bg-white/5 rounded-lg px-2 py-2 flex items-center justify-center min-w-[70px]">
+                            <LineTypePreview 
+                                type={selectedShapes.length === 1 ? selectedShapes[0].lineType || 'continuous' : 'continuous'} 
+                                color={selectedShapes.length === 1 ? selectedShapes[0].color || '#00bcd4' : '#555'}
+                            />
+                          </div>
+                      </div>
                   </PropertyRow>
 
                   <PropertyRow label="Lineweight">

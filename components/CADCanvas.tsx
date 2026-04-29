@@ -1,7 +1,7 @@
 
 import React, { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { Shape, ViewState, AppSettings, SnapPoint, LayerConfig, Point, MTextShape, BlockDefinition, LayoutDefinition } from '../types';
-import { hitTestShape, findBestSnap, formatLength, getShapesInRect, getShapeBounds, isRectIntersecting, formatDualLength } from '../services/cadService';
+import { hitTestShape, findBestSnap, formatLength, getShapesInRect, getShapeBounds, isRectIntersecting, formatDualLength, isShapeClosed, isPointInsideShape } from '../services/cadService';
 
 interface CADCanvasProps {
   layers: Record<string, Shape[]>;
@@ -377,7 +377,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     ctx.strokeRect(screenPos.x - 5, screenPos.y - 5, 10, 10);
     
     if (settings.showHUD) {
-        const text = `${formatLength(targetWorldP.x, settings.units === 'imperial')}, ${formatLength(targetWorldP.y, settings.units === 'imperial')}`;
+        const text = `${formatLength(targetWorldP.x, settings)}, ${formatLength(targetWorldP.y, settings)}`;
         
         ctx.font = '700 10px "JetBrains Mono", "Fira Code", monospace';
         const tw = ctx.measureText(text).width;
@@ -431,21 +431,25 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     else { ctx.strokeStyle = baseColor; if (conf?.locked) ctx.globalAlpha = 0.45; ctx.lineWidth = weight/ts; }
     
     const currentLineType = s.lineType || conf?.lineType || 'continuous';
+    const L = 10 / ts; // Base dash unit
     if (!s.isPreview && !isH && !isS) {
-        if (currentLineType === 'dashed') ctx.setLineDash([12/ts, 8/ts]);
-        else if (currentLineType === 'dotted') ctx.setLineDash([2/ts, 5/ts]);
-        else if (currentLineType === 'center') ctx.setLineDash([25/ts, 8/ts, 5/ts, 8/ts]);
-        else if (currentLineType === 'dashdot') ctx.setLineDash([20/ts, 6/ts, 3/ts, 6/ts]);
-        else if (currentLineType === 'border') ctx.setLineDash([25/ts, 5/ts, 10/ts, 5/ts]);
-        else if (currentLineType === 'divide') ctx.setLineDash([18/ts, 5/ts, 3/ts, 5/ts, 3/ts, 5/ts]);
-        else if (currentLineType === 'phantom') ctx.setLineDash([30/ts, 6/ts, 6/ts, 6/ts, 6/ts, 6/ts]);
-        else if (currentLineType === 'zigzag') {
-          // Zigzag approximation
-          ctx.setLineDash([10/ts, 5/ts, 2/ts, 5/ts]); 
-        }
-        else if (currentLineType === 'hotwater') {
-          ctx.setLineDash([25/ts, 6/ts, 5/ts, 6/ts, 5/ts, 6/ts]); 
-        }
+        if (currentLineType === 'dashed') ctx.setLineDash([L * 2, L]);
+        else if (currentLineType === 'dotted') ctx.setLineDash([L * 0.1, L * 0.6]);
+        else if (currentLineType === 'center') ctx.setLineDash([L * 4, L * 0.8, L * 0.6, L * 0.8]);
+        else if (currentLineType === 'dashdot') ctx.setLineDash([L * 3, L * 0.6, L * 0.2, L * 0.6]);
+        else if (currentLineType === 'border') ctx.setLineDash([L * 5, L, L * 2, L]);
+        else if (currentLineType === 'divide') ctx.setLineDash([L * 2.5, L * 0.4, L * 0.4, L * 0.4, L * 0.4, L * 0.4]);
+        else if (currentLineType === 'phantom') ctx.setLineDash([L * 5, L * 0.5, L * 0.5, L * 0.5, L * 0.5, L * 0.5]);
+        else if (currentLineType === 'zigzag') ctx.setLineDash([L * 3, L, L, L]);
+        else if (currentLineType === 'hotwater') ctx.setLineDash([L * 4, L, L * 0.4, L, L * 0.4, L]);
+        else if (currentLineType === 'hidden') ctx.setLineDash([L * 0.5, L * 0.5]);
+        else if (currentLineType === 'gasLine') ctx.setLineDash([L * 7, L * 1.5, L * 0.6, L * 1.5, L * 0.6, L * 1.5]);
+        else if (currentLineType === 'fenceLine') ctx.setLineDash([L * 4, L * 0.5, L * 0.5, L * 0.5, L * 0.5, L * 0.5]);
+        else if (currentLineType === 'tracks') ctx.setLineDash([L * 1.5, L * 0.5, L * 1.5, L * 0.5]);
+        else if (currentLineType === 'batt') ctx.setLineDash([L * 2, L * 0.2, L * 0.2, L * 0.2, L * 2, L * 0.2]);
+        else if (currentLineType === 'zigzag2') ctx.setLineDash([L * 0.8, L * 0.4]);
+        else if (currentLineType === 'dots2') ctx.setLineDash([L * 0.1, L * 0.3]);
+        else if (currentLineType === 'dash2') ctx.setLineDash([L * 0.5, L * 0.5]);
         else ctx.setLineDash([]);
     }
 
@@ -463,14 +467,20 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       case 'hatch':
         if (s.points && s.points.length > 2) {
           ctx.save();
-          const region = new Path2D();
-          region.moveTo(s.points[0].x, s.points[0].y);
-          s.points.forEach(p => region.lineTo(p.x, p.y));
-          region.closePath();
-          ctx.clip(region);
+          // Define clipping path
+          const clipPath = new Path2D();
+          clipPath.moveTo(s.points[0].x, s.points[0].y);
+          s.points.forEach((p, idx) => { if (idx > 0) clipPath.lineTo(p.x, p.y); });
+          clipPath.closePath();
+          
+          ctx.clip(clipPath);
           
           drawHatchPattern(ctx, s.pattern, s.points, s.scale || 1, s.rotation || 0, ts);
           ctx.restore();
+          
+          // DO NOT let the outer stroke/fill handle this
+          ctx.restore();
+          return;
         }
         break;
       case 'ray': {
@@ -695,37 +705,33 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
 
   const drawHatchPattern = (ctx: CanvasRenderingContext2D, pattern: string, points: Point[], scale: number, rotation: number, ts: number) => {
     // Calculate bounds of the hatch
-    const xMin = Math.min(...points.map(p => p.x));
-    const xMax = Math.max(...points.map(p => p.x));
-    const yMin = Math.min(...points.map(p => p.y));
-    const yMax = Math.max(...points.map(p => p.y));
+    let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+    points.forEach(p => {
+        xMin = Math.min(xMin, p.x); xMax = Math.max(xMax, p.x);
+        yMin = Math.min(yMin, p.y); yMax = Math.max(yMax, p.y);
+    });
     
-    const width = xMax - xMin;
-    const height = yMax - yMin;
-    
-    const spacing = (scale || 1) * (pattern === 'dots' ? 20 : 40) / ts;
+    // Safety check for empty bounds
+    if (xMin === Infinity) return;
+
+    const width = xMax - xMin, height = yMax - yMin;
+    // Spacing should be model-space (not divided by ts)
+    const spacing = (scale || 1) * (pattern === 'dots' ? 12 : 24);
     const angle = (rotation || 0) * Math.PI / 180;
     
     ctx.save();
-    
-    // REQUIREMENT: Correctly implement Hatch clip to prevent overflow
-    ctx.beginPath();
-    ctx.moveTo(points[0].x, points[0].y);
-    points.forEach((p, i) => i > 0 && ctx.lineTo(p.x, p.y));
-    ctx.closePath();
-    ctx.clip();
-
-    ctx.lineWidth = 1/ts;
+    ctx.lineWidth = 0.8/ts;
     ctx.setLineDash([]);
+    // Use the color of the shape if provided, else current strokeStyle
+    const hatchColor = ctx.strokeStyle;
     ctx.globalAlpha = 0.6;
     
     if (pattern === 'solid') {
-      ctx.globalAlpha = 0.3;
-      ctx.fillStyle = ctx.strokeStyle;
-      ctx.fill(); // Fill the current path which is the boundary
+      ctx.fillStyle = hatchColor;
+      ctx.globalAlpha = 0.35;
+      ctx.fill(); 
     } else {
-        // Simple line-based hatch generator
-        const diagonal = Math.sqrt(width*width + height*height) * 4; // Increased factor for safety
+        const diagonal = Math.sqrt(width*width + height*height) * 2;
         const count = Math.ceil(diagonal / spacing);
         const startX = (xMin + xMax) / 2;
         const startY = (yMin + yMax) / 2;
@@ -733,29 +739,79 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         ctx.translate(startX, startY);
         ctx.rotate(angle);
         
-        ctx.beginPath();
-        for (let i = -count; i <= count; i++) {
-           const offset = i * spacing;
-           
-           if (pattern.startsWith('ansi3') || pattern === 'cross' || pattern === 'net') {
-               // Diagonal lines
-               ctx.moveTo(-diagonal, offset);
-               ctx.lineTo(diagonal, offset);
-           }
-           
-           if (pattern === 'cross' || pattern === 'net' || pattern === 'ansi37') {
-               // Perpendicular lines
-               ctx.moveTo(offset, -diagonal);
-               ctx.lineTo(offset, diagonal);
-           }
-           
-           if (pattern === 'dots') {
-               for (let j = -count; j <= count; j++) {
-                   ctx.rect(i * spacing, j * spacing, 1/ts, 1/ts);
-               }
-           }
+        if (pattern === 'dots') {
+            ctx.beginPath();
+            for (let i = -count; i <= count; i++) {
+                for (let j = -count; j <= count; j++) {
+                    const px = i * spacing, py = j * spacing;
+                    if (Math.abs(px) < diagonal && Math.abs(py) < diagonal) {
+                        ctx.moveTo(px + 0.5/ts, py);
+                        ctx.arc(px, py, 0.4/ts, 0, Math.PI * 2);
+                    }
+                }
+            }
+            ctx.fillStyle = hatchColor;
+            ctx.fill();
+        } else {
+            ctx.beginPath();
+            for (let i = -count; i <= count; i++) {
+                const offset = i * spacing;
+                
+                // ANSI patterns
+                if (pattern.startsWith('ansi') || pattern === 'cross' || pattern === 'net') {
+                    // ANSI31: 45 deg lines
+                    // ANSI32: 45 deg double lines
+                    // ANSI37: Crosshatch at roughly 45 deg or dots-patterns? 
+                    // Actually let's just make them distinct
+                    const a = (pattern === 'ansi31' || pattern === 'ansi32') ? Math.PI/4 : 
+                              (pattern === 'ansi37') ? -Math.PI/4 : 0;
+                    
+                    ctx.save();
+                    ctx.rotate(a);
+                    ctx.moveTo(-diagonal, offset);
+                    ctx.lineTo(diagonal, offset);
+                    if (pattern === 'ansi32') { 
+                        ctx.moveTo(-diagonal, offset + spacing/5);
+                        ctx.lineTo(diagonal, offset + spacing/5);
+                    }
+                    ctx.restore();
+                }
+                
+                if (pattern === 'cross' || pattern === 'net') {
+                    ctx.save();
+                    ctx.rotate(Math.PI/2);
+                    ctx.moveTo(-diagonal, offset);
+                    ctx.lineTo(diagonal, offset);
+                    ctx.restore();
+                }
+
+                if (pattern === 'ansi37') {
+                    ctx.save();
+                    ctx.rotate(Math.PI/4); // The other 45
+                    ctx.moveTo(-diagonal, offset);
+                    ctx.lineTo(diagonal, offset);
+                    ctx.restore();
+                }
+                
+                if (pattern === 'honey') {
+                    // Proper honeycomb logic: staggered segments
+                    const s = spacing;
+                    const h = s * Math.sqrt(3) / 2;
+                    // Draw vertical-ish segments
+                    for (let j = -count; j <= count; j++) {
+                        const px = i * s * 1.5;
+                        const py = j * h * 2 + (i % 2 === 0 ? 0 : h);
+                        
+                        // A hexagon has 6 sides. In a grid we mostly draw 3 sides to avoid overlap
+                        ctx.moveTo(px, py);
+                        ctx.lineTo(px + s * 0.5, py + h);
+                        ctx.lineTo(px + s * 1.5, py + h);
+                        ctx.lineTo(px + s * 2.0, py);
+                    }
+                }
+            }
+            ctx.stroke();
         }
-        ctx.stroke();
     }
     ctx.restore();
   };
@@ -818,12 +874,24 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           touchStartTime.current = Date.now();
           touchStartCount.current = 1;
 
-          // REQUIREMENT: Long press for multi object selection
+          // REQUIREMENT: Long press for multi object selection or Hatch
           if (!isCommandActive) {
             selectionTimer.current = setTimeout(() => {
                 isMultiSelecting.current = true;
-                if(navigator.vibrate) navigator.vibrate(30);
-                if (setLogMessage) setLogMessage("MULTI_SELECT_ACTIVE (LONG PRESS)");
+                
+                // If long pressing on a closed shape, trigger HATCH
+                const wp = screenToWorld(x, y);
+                const allShapes = getAllShapesForSelection();
+                const target = allShapes.find(s => isShapeClosed(s) && isPointInsideShape(wp, s));
+                
+                if (target && onCommand) {
+                    if (navigator.vibrate) navigator.vibrate(50);
+                    onSelectionChange?.([target.id], false);
+                    onCommand('HATCH');
+                } else {
+                    if(navigator.vibrate) navigator.vibrate(30);
+                    if (setLogMessage) setLogMessage("MULTI_SELECT_ACTIVE (LONG PRESS)");
+                }
             }, 600);
           }
       } else if (count === 2) {

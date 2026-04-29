@@ -54,11 +54,11 @@ export const getCommandFromAI = async (prompt: string, contextSummary: string = 
     if (!apiKey) return { text: "Error: No API Key found.", commands: [] };
 
     const ai = new GoogleGenAI({ apiKey });
-    const modelName = 'gemini-2.0-flash'; // High-speed, high-precision for drafting
+    const modelName = 'gemini-1.5-flash'; // Fallback to 1.5-flash if 2.0 is overloaded
     
     const contextPart = { text: `[ARCHITECTURAL CONTEXT]\n${contextSummary}\n\n[USER REQUEST]\n${prompt || "Produce architectural drafting."}` };
     
-    const contents: any[] = history.slice(-10);
+    const contents: any[] = history.slice(-6); // Further reduced history to save tokens
     const userParts: any[] = [contextPart];
 
     if (sketchData) {
@@ -75,8 +75,8 @@ export const getCommandFromAI = async (prompt: string, contextSummary: string = 
 
     const response = await (async () => {
       let retries = 0;
-      const maxRetries = 3;
-      const baseDelay = 1000;
+      const maxRetries = 5;
+      const baseDelay = 2000;
       
       while (true) {
         try {
@@ -106,11 +106,13 @@ export const getCommandFromAI = async (prompt: string, contextSummary: string = 
             }
           });
         } catch (err: any) {
-          const isRateLimit = err?.message?.includes('429') || err?.status === 429 || err?.message?.includes('RESOURCE_EXHAUSTED');
+          const errMsg = err?.message || "";
+          const isRateLimit = err?.status === 429 || errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED');
+          
           if (isRateLimit && retries < maxRetries) {
             retries++;
-            const delay = baseDelay * Math.pow(2, retries);
-            console.warn(`Gemini Rate Limit (429). Retrying in ${delay}ms... (Attempt ${retries}/${maxRetries})`);
+            const delay = baseDelay * Math.pow(2, retries) + Math.random() * 1000;
+            console.warn(`Gemini Rate Limit (429). Retrying in ${Math.round(delay)}ms... (Attempt ${retries}/${maxRetries})`);
             await new Promise(resolve => setTimeout(resolve, delay));
             continue;
           }
@@ -215,7 +217,7 @@ export const connectLiveAgent = async (handlers: LiveSessionHandlers) => {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
     const sessionPromise = ai.live.connect({
-        model: 'gemini-3.1-flash-live-preview',
+        model: 'gemini-2.0-flash-exp',
         callbacks: {
             onopen: () => {
                 const source = inputAudioContext.createMediaStreamSource(stream);
