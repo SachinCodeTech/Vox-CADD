@@ -101,6 +101,7 @@ const App: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings>(INITIAL_SETTINGS);
   const [activeTab, setActiveTab] = useState<string>('model');
   const [currentFileName, setCurrentFileName] = useState('Drawing 1.vox');
+  const [fileSource, setFileSource] = useState('storage');
   const [recentFiles, setRecentFiles] = useState<{name: string, date: number}[]>([]);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
   const [fileNameMenuOpen, setFileNameMenuOpen] = useState(false);
@@ -458,6 +459,7 @@ const App: React.FC = () => {
     } else {
       // Default open with Drawing 1.vox
       setCurrentFileName("Drawing 1.vox");
+      setFileSource("storage");
       updateRecentFiles("Drawing 1.vox");
     }
     const handleDragOver = (e: DragEvent) => e.preventDefault();
@@ -467,7 +469,7 @@ const App: React.FC = () => {
       if (file) {
         const isDwg = file.name.toLowerCase().endsWith('.dwg');
         const content = isDwg ? await file.arrayBuffer() : await file.text();
-        handleOpenFile(file.name, content);
+        handleOpenFile(file.name, content, "external");
       }
     };
     window.addEventListener('dragover', handleDragOver);
@@ -482,7 +484,7 @@ const App: React.FC = () => {
           const file = await fileHandle.getFile();
           const isDwg = file.name.toLowerCase().endsWith('.dwg');
           const content = isDwg ? await file.arrayBuffer() : await file.text();
-          handleOpenFile(file.name, content);
+          handleOpenFile(file.name, content, "device/storage");
         }
       });
     }
@@ -493,7 +495,7 @@ const App: React.FC = () => {
     };
   }, []);
 
-  const handleOpenFile = async (fileName: string, content: string | ArrayBuffer) => {
+  const handleOpenFile = async (fileName: string, content: string | ArrayBuffer, source: string = "storage") => {
     if (navigator.vibrate) navigator.vibrate(20);
     const isDxf = fileName.toLowerCase().endsWith('.dxf');
     const isDwg = fileName.toLowerCase().endsWith('.dwg');
@@ -565,6 +567,7 @@ const App: React.FC = () => {
         setLayerConfig(finalConfig);
         setSettings(finalSettings);
         setCurrentFileName(fileName);
+        setFileSource(source);
         updateRecentFiles(fileName);
         setView(INITIAL_VIEW); 
         
@@ -670,7 +673,7 @@ const App: React.FC = () => {
             if (!file) { setLogMessage("OPEN_CANCELLED"); return; }
             const isDwg = file.name.toLowerCase().endsWith('.dwg');
             const content = isDwg ? await file.arrayBuffer() : await file.text();
-            handleOpenFile(file.name, content);
+            handleOpenFile(file.name, content, "external/sd-card");
         };
         openInput.click();
         break;
@@ -1389,8 +1392,8 @@ const App: React.FC = () => {
           <VoxIcon size={22} className="text-cyan-400" />
           <div className="flex items-center gap-2">
             <div className="flex items-baseline gap-1 leading-none">
-              <span className="font-black text-[12px] uppercase tracking-tighter text-white">VOX</span>
-              <span className="font-normal text-[12px] uppercase tracking-tighter text-cyan-500">CADD</span>
+              <span className="font-black text-[15px] uppercase tracking-tighter text-white">VOX</span>
+              <span className="font-normal text-[15px] uppercase tracking-tighter text-cyan-500">CADD</span>
             </div>
             <div className="text-[7px] font-black text-neutral-600 uppercase tracking-[0.2em] bg-white/5 px-1.5 py-0.5 rounded-sm border border-white/5">V-1.0.1</div>
           </div>
@@ -1407,7 +1410,7 @@ const App: React.FC = () => {
               onClick={() => { setFileMenuOpen(!fileMenuOpen); setFileNameMenuOpen(false); }}
               className={`text-[9px] font-black uppercase transition-colors flex items-center gap-1.5 ${fileMenuOpen ? 'text-cyan-400' : 'text-neutral-500 hover:text-neutral-300'}`}
             >
-              FILE: {fileMenuOpen ? <RotateCw size={9} className="animate-spin-slow" /> : <FolderOpen size={9} />}
+              {fileMenuOpen ? <RotateCw size={10} className="animate-spin-slow" /> : <FolderOpen size={10} />}
             </button>
             {fileMenuOpen && (
               <>
@@ -1468,8 +1471,8 @@ const App: React.FC = () => {
           </button>
       </div>
 
-      <div className="h-7 bg-black border-b border-white/5 flex items-center px-1 z-[99] shrink-0 gap-0 overflow-x-auto scrollbar-none">
-          {['FILE', 'EDIT', 'VIEW', 'DRAW', 'MODIFY', 'ANNO', 'TOOLS'].map((item) => {
+      <div className="h-7 bg-black border-b border-white/5 flex items-center px-4 z-[99] shrink-0 gap-0 overflow-x-auto no-scrollbar scroll-smooth">
+          {['FILE', 'EDIT', 'VIEW', 'DRAW', 'MODIFY', 'ANNO', 'TOOLS'].map((item, index) => {
             const isSelected = 
               (item === 'FILE' && (activePanel === 'drawing_props' || activePanel === 'file')) ||
               (item === 'TOOLS' && activeCategory === 'Tools') || 
@@ -1491,11 +1494,11 @@ const App: React.FC = () => {
                   else if (item === 'ANNO') setActiveCategory('Anno'); 
                   else if (item === 'TOOLS') setActiveCategory('Tools'); 
                 }} 
-                className={`text-[9.5px] font-black tracking-widest transition-all no-tap whitespace-nowrap px-3 h-full flex items-center relative active:bg-white/5 ${
+                className={`text-[9.5px] font-black tracking-widest transition-all no-tap whitespace-nowrap h-full flex items-center relative active:bg-white/5 ${
                   isSelected 
                     ? 'text-cyan-400' 
-                    : 'text-neutral-600 hover:text-neutral-400'
-                }`}
+                    : 'text-neutral-500 hover:text-neutral-400'
+                } ${index === 0 ? 'pr-2' : 'px-2'}`}
               >
                 <div className="h-full flex flex-col justify-center items-center px-1">
                   <span className="mt-1">{item}</span>
