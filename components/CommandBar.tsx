@@ -243,7 +243,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
                 </div>
             </form>
           ) : (
-            <form onSubmit={handleSubmit} className={`flex items-start gap-2 bg-[#0a0a0c] border rounded-xl px-3 min-h-10 transition-all ${isAiThinking ? 'border-indigo-500 shadow-[0_0_20px_rgba(99,102,241,0.3)]' : 'border-white/10 focus-within:border-indigo-500/50'}`}>
+            <form onSubmit={handleSubmit} className={`flex items-start gap-2 bg-[#0a0a0c] border rounded-xl px-3 min-h-10 transition-all ${isAiThinking ? 'border-indigo-500' : 'border-white/10 focus-within:border-indigo-500/50'}`}>
                 <div className="flex items-center gap-2 shrink-0 pt-3">
                   <div className="relative">
                     <Bot size={14} className={isAiThinking ? 'text-indigo-400 animate-pulse' : 'text-indigo-500'} />

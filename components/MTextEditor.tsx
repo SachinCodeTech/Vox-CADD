@@ -72,7 +72,7 @@ const MTextEditor: React.FC<MTextEditorProps> = ({ initialValue, initialSettings
                   <button 
                     key={btn.id}
                     onClick={() => setJustification(btn.id as any)}
-                    className={`p-1.5 rounded-md transition-all ${justification === btn.id ? 'bg-cyan-500 text-black shadow-[0_0_10px_rgba(6,182,212,0.4)]' : 'text-neutral-500 hover:text-neutral-300'}`}
+                    className={`p-1.5 rounded-md transition-all ${justification === btn.id ? 'bg-cyan-500 text-black' : 'text-neutral-500 hover:text-neutral-300'}`}
                   >
                     {btn.icon}
                   </button>
@@ -88,7 +88,7 @@ const MTextEditor: React.FC<MTextEditorProps> = ({ initialValue, initialSettings
                   <button 
                     key={idx}
                     onClick={() => btn.setter(!btn.active)}
-                    className={`p-1.5 rounded-md transition-all ${btn.active ? 'bg-cyan-500 text-black shadow-[0_0_10px_rgba(6,182,212,0.4)]' : 'text-neutral-500 hover:text-neutral-300'}`}
+                    className={`p-1.5 rounded-md transition-all ${btn.active ? 'bg-cyan-500 text-black' : 'text-neutral-500 hover:text-neutral-300'}`}
                     title={btn.title}
                   >
                     {btn.icon}
@@ -96,7 +96,7 @@ const MTextEditor: React.FC<MTextEditorProps> = ({ initialValue, initialSettings
                 ))}
                 <button 
                   onClick={() => setHighlight(!highlight)}
-                  className={`p-1.5 rounded-md transition-all ${highlight ? 'bg-yellow-500 text-black shadow-[0_0_10px_rgba(234,179,8,0.4)]' : 'text-neutral-500 hover:text-neutral-300'}`}
+                  className={`p-1.5 rounded-md transition-all ${highlight ? 'bg-yellow-500 text-black' : 'text-neutral-500 hover:text-neutral-300'}`}
                   title="Highlight"
                 >
                   <Highlighter size={16} />

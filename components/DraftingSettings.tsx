@@ -72,7 +72,7 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
         </span>
       </div>
       <div className={`w-6 h-6 rounded-lg border-2 transition-all flex items-center justify-center shrink-0 ${active ? 'bg-cyan-500/20 border-cyan-500' : 'border-neutral-700 bg-neutral-900/50'}`}>
-        <div className={`w-2 h-2 rounded-full transition-all ${active ? 'bg-cyan-400 scale-100 shadow-[0_0_8px_rgba(34,211,238,0.8)]' : 'bg-transparent scale-0'}`} />
+        <div className={`w-2 h-2 rounded-full transition-all ${active ? 'bg-cyan-400 scale-100' : 'bg-transparent scale-0'}`} />
       </div>
     </button>
   );

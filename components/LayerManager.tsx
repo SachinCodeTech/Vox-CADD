@@ -162,7 +162,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({
                     <div className="w-12 flex justify-center shrink-0 py-2 border-r border-white/5">
                         <div 
                             title={isActive ? "Current Layer" : "Click to make current"}
-                            className={`w-5 h-5 flex items-center justify-center rounded-full transition-all ${isActive ? 'bg-cyan-500 text-black shadow-[0_0_12px_rgba(6,182,212,0.4)]' : 'bg-neutral-900/50 text-neutral-800 border border-white/5'}`}
+                            className={`w-5 h-5 flex items-center justify-center rounded-full transition-all ${isActive ? 'bg-cyan-500 text-black' : 'bg-neutral-900/50 text-neutral-800 border border-white/5'}`}
                         >
                             {isActive ? <Check size={12} strokeWidth={4} /> : <div className="w-1.5 h-1.5 rounded-full bg-neutral-800" />}
                         </div>

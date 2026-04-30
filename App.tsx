@@ -1593,9 +1593,9 @@ const App: React.FC = () => {
                 <div className="h-full flex flex-col justify-center items-center px-1">
                   <span className="mt-1">{item}</span>
                   {isSelected && (
-                    <motion.div 
+                      <motion.div 
                       layoutId="tab-underline"
-                      className="w-full h-[1.5px] bg-cyan-400 mt-0.5 rounded-full shadow-[0_0_8px_rgba(0,188,212,0.6)]"
+                      className="w-full h-[1.5px] bg-cyan-400 mt-0.5 rounded-full"
                     />
                   )}
                 </div>
