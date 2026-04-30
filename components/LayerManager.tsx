@@ -19,13 +19,13 @@ const LINE_WEIGHTS = [
 ];
 
 const LineTypePreview = ({ type, color = "#00bcd4" }: { type: LineType, color?: string }) => {
-    const L = 6;
+    const L = 12;
     const getDash = () => {
         switch (type) {
             case 'dashed': return [L * 2, L * 1.5];
             case 'dotted': return [0.5, L * 1.2];
-            case 'center': return [L * 4, L, L * 0.5, L];
-            case 'dashdot': return [L * 3, L * 0.8, L * 0.2, L * 0.8];
+            case 'center': return [L * 4, L, L * 0.8, L];
+            case 'dashdot': return [L * 3, L * 0.8, L * 0.4, L * 0.8];
             case 'border': return [L * 6, L * 1.2, L * 2, L * 1.2];
             case 'divide': return [L * 2.5, L * 0.6, L * 0.5, L * 0.6, L * 0.5, L * 0.6];
             case 'phantom': return [L * 5, L * 0.8, L * 0.5, L * 0.8, L * 0.5, L * 0.8];
@@ -33,11 +33,11 @@ const LineTypePreview = ({ type, color = "#00bcd4" }: { type: LineType, color?: 
             case 'gasLine': return [L * 6, L * 2];
             case 'fenceLine': return [L * 4, L * 2];
             case 'tracks': return [L * 1.5, L * 1, L * 1.5, L * 1];
-            case 'batt': return [L * 2, L * 0.5, L * 0.2, L * 0.5, L * 2, L * 0.5];
+            case 'batt': return [L * 2.5, L * 0.5];
             case 'zigzag': return [L * 3, L, L, L];
             case 'zigzag2': return [L * 1.2, L * 0.6];
-            case 'dots2': return [0.3, L * 0.5];
-            case 'dash2': return [L * 0.6, L * 0.4];
+            case 'dots2': return [0.3, L * 0.6];
+            case 'dash2': return [L * 0.8, L * 0.6];
             case 'hotwater': return [L * 5, L * 2];
             default: return [];
         }

@@ -15,6 +15,7 @@ const patterns = [
   { id: 'net', name: 'NET', icon: <Grid size={24} /> },
   { id: 'dots', name: 'DOTS', icon: <div className="grid grid-cols-2 gap-1"><div className="w-1 h-1 bg-current rounded-full" /><div className="w-1 h-1 bg-current rounded-full" /><div className="w-1 h-1 bg-current rounded-full" /><div className="w-1 h-1 bg-current rounded-full" /></div> },
   { id: 'honey', name: 'HONEY (Hex)', icon: <div className="grid grid-cols-3 gap-0.5"><div className="w-1.5 h-1.5 bg-current transform rotate-45" /><div className="w-1.5 h-1.5 bg-current transform rotate-45" /><div className="w-1.5 h-1.5 bg-current transform rotate-45" /></div> },
+  { id: 'gravel', name: 'GRAVEL', icon: <div className="flex gap-1 items-end"><div className="w-2 h-2 border border-current rotate-12" /><div className="w-1.5 h-1.5 border border-current -rotate-12" /><div className="w-2 h-1 border border-current rotate-45" /></div> },
   { id: 'solid', name: 'SOLID', icon: <div className="w-6 h-6 bg-current rounded-sm" /> },
 ];
 
@@ -37,17 +38,17 @@ const HatchPatternSelector: React.FC<HatchPatternSelectorProps> = ({ onSelect, o
           </button>
         </div>
 
-        <div className="p-6 grid grid-cols-2 gap-4">
+        <div className="p-6 grid grid-cols-3 gap-4">
           {patterns.map((p) => (
             <button
               key={p.id}
               onClick={() => onSelect(p.id)}
-              className="group flex flex-col items-center justify-center gap-4 p-6 rounded-2xl bg-white/5 border border-white/5 hover:bg-cyan-500/10 hover:border-cyan-500/30 transition-all active:scale-95 text-neutral-400 hover:text-cyan-400"
+              className="group aspect-square flex flex-col items-center justify-center gap-3 p-4 rounded-3xl bg-white/5 border border-white/5 hover:bg-cyan-500/10 hover:border-cyan-500/30 transition-all active:scale-95 text-neutral-400 hover:text-cyan-400"
             >
-              <div className="w-12 h-12 flex items-center justify-center rounded-xl bg-white/5 group-hover:bg-cyan-500/20 transition-colors">
+              <div className="w-14 h-14 flex items-center justify-center rounded-2xl bg-white/5 group-hover:bg-cyan-500/20 transition-colors">
                 {p.icon}
               </div>
-              <span className="text-[10px] font-black uppercase tracking-widest">{p.name}</span>
+              <span className="text-[9px] font-black uppercase tracking-widest text-center px-1 leading-tight">{p.name}</span>
             </button>
           ))}
         </div>

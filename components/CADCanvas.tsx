@@ -73,14 +73,16 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   const getAllShapesForRendering = () => {
     return (Object.values(layers).flat() as Shape[]).filter(s => {
         const conf = layerConfig[s.layer];
-        return conf ? (conf.visible && !conf.frozen) : true;
+        if (!conf) return true; // Default to visible if no config
+        return conf.visible && !conf.frozen;
     });
   };
 
   const getAllShapesForSelection = () => {
     return (Object.values(layers).flat() as Shape[]).filter(s => {
         const conf = layerConfig[s.layer];
-        return conf ? (conf.visible && !conf.frozen && !conf.locked) : true;
+        if (!conf) return true;
+        return conf.visible && !conf.frozen && !conf.locked;
     });
   };
 
@@ -430,26 +432,40 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     else if (isH) { ctx.strokeStyle = "#00bcd4"; ctx.lineWidth = 1.5/ts; ctx.setLineDash([4/ts, 4/ts]); }
     else { ctx.strokeStyle = baseColor; if (conf?.locked) ctx.globalAlpha = 0.45; ctx.lineWidth = weight/ts; }
     
+    // Auto-scaling logic: Adjust base L based on entity size if it's very small
     const currentLineType = s.lineType || conf?.lineType || 'continuous';
-    const L = 10 / ts; // Base dash unit
+    let L = 32 / ts; 
+    
+    // Calculate approximate perimeter/length for scaling
+    let sLen = 0;
+    if (s.type === 'line') sLen = Math.sqrt(Math.pow(s.x2-s.x1, 2) + Math.pow(s.y2-s.y1, 2));
+    else if (s.type === 'circle') sLen = Math.PI * 2 * s.radius;
+    else if (s.type === 'rect') sLen = 2 * (s.width + s.height);
+    else if (s.type === 'pline' || s.type === 'polygon' || s.type === 'hatch' || s.type === 'spline') sLen = 1000 / ts;
+    
+    // If the entity is shorter than 10 repetitions, scale the pattern down
+    if (sLen > 0 && sLen < L * 10) {
+      L = sLen / 10;
+    }
+
     if (!s.isPreview && !isH && !isS) {
-        if (currentLineType === 'dashed') ctx.setLineDash([L * 2, L]);
-        else if (currentLineType === 'dotted') ctx.setLineDash([L * 0.1, L * 0.6]);
-        else if (currentLineType === 'center') ctx.setLineDash([L * 4, L * 0.8, L * 0.6, L * 0.8]);
-        else if (currentLineType === 'dashdot') ctx.setLineDash([L * 3, L * 0.6, L * 0.2, L * 0.6]);
-        else if (currentLineType === 'border') ctx.setLineDash([L * 5, L, L * 2, L]);
-        else if (currentLineType === 'divide') ctx.setLineDash([L * 2.5, L * 0.4, L * 0.4, L * 0.4, L * 0.4, L * 0.4]);
-        else if (currentLineType === 'phantom') ctx.setLineDash([L * 5, L * 0.5, L * 0.5, L * 0.5, L * 0.5, L * 0.5]);
-        else if (currentLineType === 'zigzag') ctx.setLineDash([L * 3, L, L, L]);
-        else if (currentLineType === 'hotwater') ctx.setLineDash([L * 4, L, L * 0.4, L, L * 0.4, L]);
-        else if (currentLineType === 'hidden') ctx.setLineDash([L * 0.5, L * 0.5]);
-        else if (currentLineType === 'gasLine') ctx.setLineDash([L * 7, L * 1.5, L * 0.6, L * 1.5, L * 0.6, L * 1.5]);
-        else if (currentLineType === 'fenceLine') ctx.setLineDash([L * 4, L * 0.5, L * 0.5, L * 0.5, L * 0.5, L * 0.5]);
-        else if (currentLineType === 'tracks') ctx.setLineDash([L * 1.5, L * 0.5, L * 1.5, L * 0.5]);
-        else if (currentLineType === 'batt') ctx.setLineDash([L * 2, L * 0.2, L * 0.2, L * 0.2, L * 2, L * 0.2]);
-        else if (currentLineType === 'zigzag2') ctx.setLineDash([L * 0.8, L * 0.4]);
-        else if (currentLineType === 'dots2') ctx.setLineDash([L * 0.1, L * 0.3]);
-        else if (currentLineType === 'dash2') ctx.setLineDash([L * 0.5, L * 0.5]);
+        if (currentLineType === 'dashed') ctx.setLineDash([L * 2.0, L * 1.5]);
+        else if (currentLineType === 'dotted') ctx.setLineDash([1/ts, L * 1.0]);
+        else if (currentLineType === 'center') ctx.setLineDash([L * 6, L * 1.5, L * 1, L * 1.5]);
+        else if (currentLineType === 'dashdot') ctx.setLineDash([L * 5, L * 1.5, L * 0.8, L * 1.5]);
+        else if (currentLineType === 'border') ctx.setLineDash([L * 8, L * 1.5, L * 2.5, L * 1.5]);
+        else if (currentLineType === 'divide') ctx.setLineDash([L * 4, L * 1, L * 1, L * 1, L * 1, L * 1]);
+        else if (currentLineType === 'phantom') ctx.setLineDash([L * 8, L * 1.2, L * 1.2, L * 1.2, L * 1.2, L * 1.2]);
+        else if (currentLineType === 'zigzag') ctx.setLineDash([L * 5, L * 1.5, L * 1.5, L * 1.5]);
+        else if (currentLineType === 'hotwater') ctx.setLineDash([L * 7, L * 2, L * 1, L * 2, L * 1, L * 2]);
+        else if (currentLineType === 'hidden') ctx.setLineDash([L * 1.2, L * 1.2]);
+        else if (currentLineType === 'gasLine') ctx.setLineDash([L * 12, L * 4, L * 1.5, L * 4]);
+        else if (currentLineType === 'fenceLine') ctx.setLineDash([L * 8, L * 1.2, L * 1.2, L * 1.2]);
+        else if (currentLineType === 'tracks') ctx.setLineDash([L * 3, L * 1.5, L * 3, L * 1.5]);
+        else if (currentLineType === 'batt') ctx.setLineDash([L * 3.5, L * 0.5, L * 0.5, L * 0.5, L * 3.5, L * 0.5]);
+        else if (currentLineType === 'zigzag2') ctx.setLineDash([L * 2, L * 1]);
+        else if (currentLineType === 'dots2') ctx.setLineDash([1/ts, L * 0.5]);
+        else if (currentLineType === 'dash2') ctx.setLineDash([L * 1, L * 1]);
         else ctx.setLineDash([]);
     }
 
@@ -478,7 +494,12 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           drawHatchPattern(ctx, s.pattern, s.points, s.scale || 1, s.rotation || 0, ts);
           ctx.restore();
           
-          // DO NOT let the outer stroke/fill handle this
+          // Render boundary
+          ctx.beginPath();
+          ctx.moveTo(s.points[0].x, s.points[0].y);
+          s.points.forEach((p, idx) => { if (idx > 0) ctx.lineTo(p.x, p.y); });
+          ctx.closePath();
+          ctx.stroke();
           ctx.restore();
           return;
         }
@@ -728,11 +749,18 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     
     if (pattern === 'solid') {
       ctx.fillStyle = hatchColor;
-      ctx.globalAlpha = 0.35;
+      ctx.globalAlpha = 0.5; // Slightly more opaque for solid hatch
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      points.forEach((p, idx) => { if (idx > 0) ctx.lineTo(p.x, p.y); });
+      ctx.closePath();
       ctx.fill(); 
     } else {
         const diagonal = Math.sqrt(width*width + height*height) * 2;
-        const count = Math.ceil(diagonal / spacing);
+        let count = Math.ceil(diagonal / spacing);
+        // Safety cap for extremely dense patterns
+        if (count > 300) count = 300; 
+        
         const startX = (xMin + xMax) / 2;
         const startY = (yMin + yMax) / 2;
         
@@ -741,13 +769,12 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         
         if (pattern === 'dots') {
             ctx.beginPath();
+            const dotSize = 0.5/ts;
             for (let i = -count; i <= count; i++) {
                 for (let j = -count; j <= count; j++) {
                     const px = i * spacing, py = j * spacing;
-                    if (Math.abs(px) < diagonal && Math.abs(py) < diagonal) {
-                        ctx.moveTo(px + 0.5/ts, py);
-                        ctx.arc(px, py, 0.4/ts, 0, Math.PI * 2);
-                    }
+                    ctx.moveTo(px + dotSize, py);
+                    ctx.arc(px, py, dotSize, 0, Math.PI * 2);
                 }
             }
             ctx.fillStyle = hatchColor;
@@ -759,10 +786,6 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                 
                 // ANSI patterns
                 if (pattern.startsWith('ansi') || pattern === 'cross' || pattern === 'net') {
-                    // ANSI31: 45 deg lines
-                    // ANSI32: 45 deg double lines
-                    // ANSI37: Crosshatch at roughly 45 deg or dots-patterns? 
-                    // Actually let's just make them distinct
                     const a = (pattern === 'ansi31' || pattern === 'ansi32') ? Math.PI/4 : 
                               (pattern === 'ansi37') ? -Math.PI/4 : 0;
                     
@@ -787,22 +810,33 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
 
                 if (pattern === 'ansi37') {
                     ctx.save();
-                    ctx.rotate(Math.PI/4); // The other 45
+                    ctx.rotate(Math.PI/4); 
                     ctx.moveTo(-diagonal, offset);
                     ctx.lineTo(diagonal, offset);
                     ctx.restore();
                 }
                 
+                if (pattern === 'gravel') {
+                    const s = spacing;
+                    for (let j = -count; j <= count; j++) {
+                        const px = i * s + (j % 2 === 0 ? 0 : s/2);
+                        const py = j * s;
+                        const r = s * 0.15;
+                        const rot = Math.sin(i * 133 + j * 93) * Math.PI;
+                        const c = Math.cos(rot), st = Math.sin(rot);
+                        ctx.moveTo(px + (-r*c - (-r)*st), py + (-r*st + (-r)*c));
+                        ctx.lineTo(px + (r*c - (-r)*st), py + (r*st + (-r)*c));
+                        ctx.lineTo(px + (0 - r*st), py + (r*c));
+                        ctx.lineTo(px + (-r*c - (-r)*st), py + (-r*st + (-r)*c));
+                    }
+                }
+                
                 if (pattern === 'honey') {
-                    // Proper honeycomb logic: staggered segments
                     const s = spacing;
                     const h = s * Math.sqrt(3) / 2;
-                    // Draw vertical-ish segments
                     for (let j = -count; j <= count; j++) {
                         const px = i * s * 1.5;
                         const py = j * h * 2 + (i % 2 === 0 ? 0 : h);
-                        
-                        // A hexagon has 6 sides. In a grid we mostly draw 3 sides to avoid overlap
                         ctx.moveTo(px, py);
                         ctx.lineTo(px + s * 0.5, py + h);
                         ctx.lineTo(px + s * 1.5, py + h);
@@ -917,11 +951,16 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       lastClickTime.current = now;
       if (activePointers.current.size === 1) { 
         lastPos.current = { x, y }; 
-        if (!isCommandActive || activeCommandName === 'PAN' || e.button === 1 || e.button === 2) {
+        if (e.button === 1 || e.button === 2) {
+            setIsPanning(true);
+        } else if (activeCommandName === 'PAN') {
             setIsPanning(true);
         } else if (activeCommandName === 'SPLINE' || activeCommandName === 'SKETCH') {
             const wp = screenToWorld(x, y);
             if (onClick) onClick(wp.x, wp.y, !!activeSnapRef.current);
+        } else if (!isCommandActive) {
+            // No command? Default click behavior might be panning IF we drag, 
+            // but for now let's just let PointerUp handle selection.
         }
       }
       updateCursorAndSnaps(x, y); redraw();
@@ -941,7 +980,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
 
           if (isPanning) {
               const dx = x - lastPos.current.x, dy = y - lastPos.current.y;
-              if (Math.hypot(x - pointerStartPos.current.x, y - pointerStartPos.current.y) > 2) {
+              if (Math.hypot(x - pointerStartPos.current.x, y - pointerStartPos.current.y) > 6) {
                  const isSelCmd = ['SELECT', 'ERASE', 'MOVE', 'COPYCLIP', 'CUTCLIP', 'STRETCH'].includes(activeCommandName || '');
                  if (((!isCommandActive && activeCommandName !== 'PAN') || isSelCmd) && e.buttons === 1) {
                     const crossing = pointerStartPos.current.x > x;
@@ -1017,7 +1056,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           setHighlightedIds([]);
       } else {
           const dx = Math.abs(x - pointerStartPos.current.x), dy = Math.abs(y - pointerStartPos.current.y);
-          if (dx < 10 && dy < 10 && activePointers.current.size === 1) {
+          if (dx < 6 && dy < 6 && activePointers.current.size === 1) {
               const wp = screenToWorld(x, y), snapped = !!activeSnapRef.current;
               const finalP = activeSnapRef.current ? {x: activeSnapRef.current.x, y: activeSnapRef.current.y} : wp;
               if (isCommandActive && onClick && activeCommandName !== 'PAN') onClick(finalP.x, finalP.y, snapped);

@@ -35,26 +35,26 @@ interface PropertiesPanelProps {
 }
 
 const LineTypePreview = ({ type, color = "#00bcd4", weight = 1 }: { type: LineType, color?: string, weight?: number }) => {
-  const L = 8; // Base unit for preview
+  const L = 10; 
   const getDash = () => {
     switch (type) {
-        case 'dashed': return [L * 2, L];
-        case 'dotted': return [L * 0.1, L * 0.6];
-        case 'center': return [L * 4, L * 0.8, L * 0.6, L * 0.8];
-        case 'dashdot': return [L * 3, L * 0.6, L * 0.2, L * 0.6];
-        case 'border': return [L * 5, L, L * 2, L];
-        case 'divide': return [L * 2.5, L * 0.4, L * 0.4, L * 0.4, L * 0.4, L * 0.4];
-        case 'phantom': return [L * 5, L * 0.5, L * 0.5, L * 0.5, L * 0.5, L * 0.5];
-        case 'zigzag': return [L * 3, L, L, L];
-        case 'hotwater': return [L * 4, L, L * 0.4, L, L * 0.4, L];
-        case 'hidden': return [L * 0.5, L * 0.5];
-        case 'gasLine': return [L * 7, L * 1.5, L * 0.6, L * 1.5, L * 0.6, L * 1.5];
-        case 'fenceLine': return [L * 4, L * 0.5, L * 0.5, L * 0.5, L * 0.5, L * 0.5];
-        case 'tracks': return [L * 1.5, L * 0.5, L * 1.5, L * 0.5];
-        case 'batt': return [L * 2, L * 0.2, L * 0.2, L * 0.2, L * 2, L * 0.2];
-        case 'zigzag2': return [L * 0.8, L * 0.4];
-        case 'dots2': return [L * 0.1, L * 0.3];
-        case 'dash2': return [L * 0.5, L * 0.5];
+        case 'dashed': return [L * 2.0, L * 1.5];
+        case 'dotted': return [0.5, L * 1.0];
+        case 'center': return [L * 5, L * 1.5, L * 1, L * 1.5];
+        case 'dashdot': return [L * 5, L * 1.5, L * 0.8, L * 1.5];
+        case 'border': return [L * 8, L * 1.5, L * 2.5, L * 1.5];
+        case 'divide': return [L * 4, L * 1, L * 1, L * 1, L * 1, L * 1];
+        case 'phantom': return [L * 8, L * 1.2, L * 1.2, L * 1.2, L * 1.2, L * 1.2];
+        case 'zigzag': return [L * 5, L * 1.5, L * 1.5, L * 1.5];
+        case 'hotwater': return [L * 7, L * 2, L * 1, L * 2, L * 1, L * 2];
+        case 'hidden': return [L * 1.2, L * 1.2];
+        case 'gasLine': return [L * 12, L * 4, L * 1.5, L * 4];
+        case 'fenceLine': return [L * 8, L * 1.2, L * 1.2, L * 1.2];
+        case 'tracks': return [L * 3, L * 1.5, L * 3, L * 1.5];
+        case 'batt': return [L * 3.5, L * 0.5, L * 0.5, L * 0.5, L * 3.5, L * 0.5];
+        case 'zigzag2': return [L * 2, L * 1];
+        case 'dots2': return [0.5, L * 0.5];
+        case 'dash2': return [L * 1, L * 1];
         default: return [];
     }
   };
@@ -329,6 +329,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                  <option value="cross">Cross</option>
                  <option value="net">Net</option>
                  <option value="honey">Honey</option>
+                 <option value="gravel">Gravel</option>
                </select>
             </PropertyRow>
             <PropertyRow label="Scale"><NumericInput value={h.scale || 1} onChange={v => handleShapeChange('scale', v)} /></PropertyRow>

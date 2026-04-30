@@ -1,6 +1,6 @@
 
 import { Shape, Point, AppSettings, LayerConfig, LineShape, CircleShape, RectShape, ArcShape, PolyShape, TextShape, MTextShape, EllipseShape, DimensionShape, AngularDimensionShape, PointShape, InfiniteLineShape, DonutShape, LeaderShape, ViewState, DoubleLineShape, DLineJustification, TextJustification, LineType, BlockDefinition, LayoutDefinition, LayoutViewport, DimensionType, BlockShape, HatchShape } from '../types';
-import { generateId, getCircleFrom3Points, formatLength, formatAngle, parseLength, hitTestShape, distance, getTrimmedShapes, moveShape, resolvePointInput, calculateArea, offsetShape, getPolygonPoints, stretchShape, getShapesInRect, rotateShape, scaleShape, mirrorShape, getExtendedShapes, filletLines, modifyShapeByGrip, isPointInsideShape, getShapeBoundaryPoints, isShapeClosed, getShapeBounds } from './cadService';
+import { generateId, getCircleFrom3Points, formatLength, formatAngle, parseLength, hitTestShape, distance, getTrimmedShapes, moveShape, resolvePointInput, calculateArea, offsetShape, getPolygonPoints, stretchShape, getShapesInRect, rotateShape, scaleShape, mirrorShape, getExtendedShapes, filletLines, modifyShapeByGrip, isPointInsideShape, getShapeBoundaryPoints, isShapeClosed, getShapeBounds, extractBoundaryFromShapes } from './cadService';
 
 export interface CommandContext {
     getSettings: () => AppSettings;
@@ -2439,13 +2439,25 @@ export class HatchCommand implements CADCommand {
         const selectedIds = this.ctx.getSelectedIds();
         if (selectedIds.length > 0) {
             const allShapes = Object.values(this.ctx.getLayers()).flat();
-            const closedShapes = allShapes.filter(s => selectedIds.includes(s.id) && isShapeClosed(s));
+            const selectedShapes = allShapes.filter(s => selectedIds.includes(s.id));
+            
+            // First check if any single shape is closed
+            const closedShapes = selectedShapes.filter(isShapeClosed);
             if (closedShapes.length > 0) {
                 this.triggerSelector(closedShapes);
                 return;
             }
+            
+            // Then check if the selection of multiple entities forms a closed boundary
+            const combinedBoundary = extractBoundaryFromShapes(selectedShapes);
+            if (combinedBoundary) {
+                // Hack: We need a temporary shape to represent this boundary for triggerSelector
+                const tempShape: PolyShape = { id: 'temp', type: 'pline', points: combinedBoundary, closed: true, layer: '0' };
+                this.triggerSelector([tempShape]);
+                return;
+            }
         }
-        this.ctx.setMessage("HATCH: Click inside a closed boundary:");
+        this.ctx.setMessage("HATCH: Select closed boundary entities or click inside:");
     }
 
     private triggerSelector(targets: Shape[]) {
@@ -2691,6 +2703,7 @@ export class MatchPropertiesCommand implements CADCommand {
             this.ctx.addLog("Properties matched");
         }
     }
+    onMove(p: Point) {}
     onEnter() { this.ctx.onFinish(); }
     onCancel() { this.ctx.onFinish(); }
 }

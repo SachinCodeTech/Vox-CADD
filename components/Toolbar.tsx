@@ -40,44 +40,29 @@ const ToolCircleBtn: React.FC<{
     danger?: boolean,
     disabled?: boolean
 }> = ({ icon, label, onClick, onLongPress, active, danger, disabled }) => {
+    const [isHovered, setIsHovered] = useState(false);
     const timerRef = React.useRef<any>(null);
     const longPressTriggered = React.useRef(false);
 
-    const handleMouseDown = (e: React.MouseEvent) => {
-        if (!onLongPress) return;
+    const handleStart = () => {
+        if (!onLongPress || disabled) return;
         longPressTriggered.current = false;
         timerRef.current = setTimeout(() => {
             onLongPress();
             longPressTriggered.current = true;
             if (navigator.vibrate) navigator.vibrate([30, 50]);
-        }, 500);
+        }, 600);
     };
 
-    const handleTouchStart = (e: React.TouchEvent) => {
-        if (!onLongPress) return;
-        longPressTriggered.current = false;
-        timerRef.current = setTimeout(() => {
-            onLongPress();
-            longPressTriggered.current = true;
-            if (navigator.vibrate) navigator.vibrate([30, 50]);
-        }, 500);
-    };
-
-    const handleTouchMove = () => {
+    const handleEnd = () => {
         if (timerRef.current) {
             clearTimeout(timerRef.current);
             timerRef.current = null;
         }
     };
 
-    const handleMouseUp = () => {
-        if (timerRef.current) {
-            clearTimeout(timerRef.current);
-            timerRef.current = null;
-        }
-    };
-
-    const handleClick = () => {
+    const handleClick = (e: React.MouseEvent | React.TouchEvent) => {
+        if (disabled) return;
         if (longPressTriggered.current) {
             longPressTriggered.current = false;
             return;
@@ -89,24 +74,24 @@ const ToolCircleBtn: React.FC<{
     return (
         <button 
             onClick={handleClick} 
-            onMouseDown={handleMouseDown}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleMouseUp}
-            onTouchCancel={handleMouseUp}
+            onMouseDown={handleStart}
+            onMouseUp={handleEnd}
+            onMouseLeave={() => { handleEnd(); setIsHovered(false); }}
+            onMouseEnter={() => setIsHovered(true)}
+            onTouchStart={(e) => { handleStart(); }}
+            onTouchEnd={(e) => { handleEnd(); }}
             disabled={disabled}
-            className={`flex-shrink-0 flex flex-col items-center justify-center active:scale-95 no-tap py-0.5 px-0.5 ${disabled ? 'opacity-20 grayscale' : ''}`}
+            className={`flex-shrink-0 flex flex-col items-center justify-center active:scale-90 no-tap py-1 px-1 transition-all duration-200 ${disabled ? 'opacity-20 grayscale cursor-not-allowed' : 'cursor-pointer'}`}
         >
-            <div className={`w-[40px] h-[40px] rounded-full border flex items-center justify-center transition-all duration-300 shadow-sm
-                ${active ? 'bg-[#00bcd4] text-black border-[#00bcd4] shadow-[0_0_20px_rgba(34,211,238,0.8)] scale-110 z-10' : 
-                  danger ? 'bg-red-950/20 border-red-900/40 text-red-500 hover:border-red-500 hover:bg-red-500/10 hover:shadow-[0_0_15px_rgba(239,68,68,0.3)]' :
-                  'bg-[#121214] border-cyan-500/20 text-neutral-500 shadow-[0_0_10px_rgba(0,188,212,0.15)] hover:text-[#00bcd4] hover:border-[#00bcd4] hover:bg-[#00bcd4]/10 hover:shadow-[0_0_15px_rgba(0,188,212,0.4)] hover:scale-105 active:scale-95'}`}
+            <div className={`w-[44px] h-[44px] rounded-full border flex items-center justify-center transition-all duration-300 relative
+                ${active ? 'bg-[#00bcd4] text-black border-[#00bcd4] scale-110 z-10' : 
+                  danger ? 'bg-red-950/20 border-red-900/40 text-red-500 hover:border-red-500 hover:bg-red-500/10' :
+                  'bg-[#121214] border-white/10 text-neutral-400'}
+                ${isHovered && !active && !disabled ? 'border-[#00bcd4] text-[#00bcd4] scale-105' : ''}`}
             >
-                {React.cloneElement(icon as React.ReactElement, { size: 18 })}
+                {React.cloneElement(icon as React.ReactElement, { size: 19, strokeWidth: active ? 2.5 : 2 })}
             </div>
-            <span className={`text-[7.5px] font-black uppercase mt-1 tracking-widest leading-none ${active ? 'text-[#00bcd4]' : 'text-neutral-600'}`}>{label}</span>
+            <span className={`text-[8px] font-black uppercase mt-1.5 tracking-[0.1em] leading-none transition-colors duration-300 ${active ? 'text-[#00bcd4]' : isHovered ? 'text-neutral-300' : 'text-neutral-600'}`}>{label}</span>
         </button>
     );
 };

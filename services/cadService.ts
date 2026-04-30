@@ -144,6 +144,64 @@ export const isShapeClosed = (s: Shape): boolean => {
     }
 };
 
+/**
+ * Attempts to extract a closed boundary from a selection of linear entities.
+ */
+export const extractBoundaryFromShapes = (shapes: Shape[], tolerance: number = 0.001): Point[] | null => {
+    // 1. Convert all segments to start/end point pairs
+    const segments: { p1: Point, p2: Point }[] = [];
+    shapes.forEach(s => {
+        if (s.type === 'line') {
+            segments.push({ p1: { x: s.x1, y: s.y1 }, p2: { x: s.x2, y: s.y2 } });
+        } else if (s.type === 'pline' || s.type === 'polygon' || s.type === 'spline' || s.type === 'dline') {
+            for (let i = 0; i < s.points.length - 1; i++) {
+                segments.push({ p1: s.points[i], p2: s.points[i + 1] });
+            }
+            if (s.closed && s.points.length > 2) {
+                segments.push({ p1: s.points[s.points.length - 1], p2: s.points[0] });
+            }
+        }
+    });
+
+    if (segments.length < 3) return null;
+
+    const used = new Array(segments.length).fill(false);
+    const result: Point[] = [segments[0].p1, segments[0].p2];
+    used[0] = true;
+
+    let current = segments[0].p2;
+    let found = true;
+
+    while (found) {
+        found = false;
+        for (let i = 0; i < segments.length; i++) {
+            if (used[i]) continue;
+            const s = segments[i];
+            if (distance(current, s.p1) < tolerance) {
+                result.push(s.p2);
+                current = s.p2;
+                used[i] = true;
+                found = true;
+                break;
+            } else if (distance(current, s.p2) < tolerance) {
+                result.push(s.p1);
+                current = s.p1;
+                used[i] = true;
+                found = true;
+                break;
+            }
+        }
+    }
+
+    // Check if closed
+    if (result.length > 2 && distance(result[0], result[result.length - 1]) < tolerance) {
+        result.pop(); // Remove duplicate point
+        return result;
+    }
+
+    return null;
+};
+
 export const getShapeBoundaryPoints = (s: Shape): Point[] => {
     const points: Point[] = [];
     switch (s.type) {

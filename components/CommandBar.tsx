@@ -304,7 +304,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
           <div className="flex gap-2">
             <button 
               onClick={() => toggleTab('cli')}
-              className={`flex items-center gap-1.5 sm:gap-2 transition-all px-3 sm:px-5 py-1.5 sm:py-2 rounded-xl no-tap border ${activeTab === 'cli' ? 'bg-[#00bcd4] border-[#00bcd4] text-black shadow-[0_0_15px_rgba(0,188,212,0.4)]' : 'bg-[#0d0d0f] border-white/5 text-white'}`}
+              className={`flex items-center gap-1.5 sm:gap-2 transition-all px-3 sm:px-5 py-1.5 sm:py-2 rounded-xl no-tap border ${activeTab === 'cli' ? 'bg-[#00bcd4] border-[#00bcd4] text-black' : 'bg-[#0d0d0f] border-white/5 text-white'}`}
             >
               <Terminal size={12} className="sm:size-[14px]" strokeWidth={3} />
               <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-widest whitespace-nowrap">CLI</span>
@@ -312,7 +312,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
             
             <button 
               onClick={() => toggleTab('ai')}
-              className={`flex items-center gap-1.5 sm:gap-2 transition-all px-3 sm:px-5 py-1.5 sm:py-2 rounded-xl no-tap border ${activeTab === 'ai' ? 'bg-[#1a1a1c] border-[#6366f1]/40 text-[#6366f1] shadow-[0_0_15px_rgba(99,102,241,0.2)]' : 'bg-[#0d0d0f] border-white/5 text-white'}`}
+              className={`flex items-center gap-1.5 sm:gap-2 transition-all px-3 sm:px-5 py-1.5 sm:py-2 rounded-xl no-tap border ${activeTab === 'ai' ? 'bg-[#1a1a1c] border-[#6366f1]/40 text-[#6366f1]' : 'bg-[#0d0d0f] border-white/5 text-white'}`}
             >
               <Bot size={12} className="sm:size-[14px]" />
               <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-widest whitespace-nowrap">ARCHITECT AI</span>

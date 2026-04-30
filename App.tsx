@@ -29,7 +29,7 @@ import {
   RotateCommand, ScaleCommand, MirrorCommand, CopyCommand,
   ExtendCommand, ExplodeCommand,
   RayCommand, XLineCommand,
-  HatchCommand, LeaderCommand, PanCommand, OffsetCommand, TrimCommand, FilletCommand, EllipseCommand, PolygonCommand,
+  HatchCommand, LeaderCommand, PanCommand, OffsetCommand, TrimCommand, FilletCommand, EllipseCommand, PolygonCommand, MatchPropertiesCommand,
   DonutCommand, PointCommand,
   SelectAllCommand, CopyClipCommand, CutClipCommand, PasteClipCommand, SplineCommand, SketchCommand, StretchCommand, SelectCommand,
   ArrayCommand, BlockCommand, InsertCommand, FilterCommand, FindCommand, ViewportCommand, LayoutCommand, GripEditCommand, ImportCommand
@@ -643,6 +643,20 @@ const App: React.FC = () => {
       case 'toggleMainMenu': setActivePanel(activePanel === 'mainmenu' ? 'none' : 'mainmenu'); break;
       case 'toggleDrawingProps': setActivePanel(activePanel === 'drawing_props' ? 'none' : 'drawing_props'); break;
       case 'toggleHelp': setActivePanel(activePanel === 'help' ? 'none' : 'help'); break;
+      case 'erase':
+        if (selectedIds.length > 0) {
+            setLayers(prev => {
+                const next = { ...prev };
+                Object.keys(next).forEach(l => {
+                    next[l] = next[l].filter(s => !selectedIds.includes(s.id));
+                });
+                return next;
+            });
+            setSelectedIds([]);
+            setLogMessage(`ERASED ${selectedIds.length} OBJECTS`);
+            commitToHistory();
+        }
+        break;
       case 'toggleAbout': setActivePanel(activePanel === 'about' ? 'none' : 'about'); break;
       case 'togglePrivacy': setActivePanel(activePanel === 'privacy' ? 'none' : 'privacy'); break;
       case 'zoomExtents': setView({ scale: 0.05, originX: 0, originY: 0 }); break;
@@ -1172,7 +1186,7 @@ const App: React.FC = () => {
       't': TextCommand, 'text': TextCommand, 
       'z': ZoomCommand, 'zoom': ZoomCommand, 'tr': TrimCommand, 'trim': TrimCommand,
       'h': HatchCommand, 'hatch': HatchCommand, 'lea': LeaderCommand, 'leader': LeaderCommand,
-      'ma': MatchPropertiesCommand, 'matchprop': MatchPropertiesCommand,
+      'ma': MatchPropertiesCommand, 'match': MatchPropertiesCommand, 'matchprop': MatchPropertiesCommand,
       'p': PanCommand, 'pan': PanCommand, 'o': OffsetCommand, 'offset': OffsetCommand,
       's': StretchCommand, 'stretch': StretchCommand,
       'el': EllipseCommand, 'ellipse': EllipseCommand, 'pol': PolygonCommand, 'polygon': PolygonCommand,
@@ -1305,7 +1319,11 @@ const App: React.FC = () => {
         getLayerConfig: () => layerConfigRef.current,
         getSelectedIds: () => selectedIdsRef.current,
         setSelectedIds: setSelectedIds,
-        setLayers: (cb) => setLayers(prev => cb(prev)),
+        setLayers: (cb) => setLayers(prev => {
+          const next = cb(prev);
+          layersRef.current = next;
+          return next;
+        }),
         setPreview: setPreviewShapes,
         addLog: (msg) => setLogMessage(msg),
         setMessage: (msg) => {
@@ -1313,6 +1331,7 @@ const App: React.FC = () => {
               setCommandPrompt("COMMAND:"); 
               setIsCommandActive(false); 
               setActiveCommandName(undefined);
+              // Use a small timeout or just rely on the sync ref update we just did
               commitToHistory();
           } else setCommandPrompt(msg?.toUpperCase() || "COMMAND:");
         },
@@ -1330,9 +1349,17 @@ const App: React.FC = () => {
         },
         lastMousePoint: { x: 0, y: 0 },
         getBlocks: () => blocksRef.current,
-        setBlocks: (cb) => setBlocks(cb),
+        setBlocks: (cb) => setBlocks(prev => {
+          const next = cb(prev);
+          blocksRef.current = next;
+          return next;
+        }),
         getLayouts: () => layoutsRef.current,
-        setLayouts: (v) => setLayouts(v),
+        setLayouts: (cb) => setLayouts(prev => {
+          const next = typeof cb === 'function' ? (cb as any)(prev) : cb;
+          layoutsRef.current = next;
+          return next;
+        }),
         getActiveTab: () => activeTabRef.current,
         start: (cmd: CADCommand) => { setActiveCommandName(cmd.name); engineRef.current?.start(cmd); },
         onExternalRequest: (type, data, cb: (res: any, props?: any) => void) => {
@@ -1650,7 +1677,7 @@ const App: React.FC = () => {
 
         <div className="absolute right-3 top-3 flex flex-col gap-2 z-10">
           {sidebarButtons.map(p => (
-            <button key={p.id} onClick={() => { if(navigator.vibrate) navigator.vibrate(5); handleAction(p.action); }} className={`w-9 h-9 rounded-full flex items-center justify-center transition-all border no-tap shadow-lg ${activePanel === p.activeOn ? 'bg-[#00bcd4] text-black border-[#00bcd4] shadow-[0_0_15px_rgba(0,188,212,0.5)]' : 'bg-black/60 backdrop-blur-sm border-white/10 text-neutral-400 hover:text-[#00bcd4] hover:border-[#00bcd4] hover:bg-[#00bcd4]/5 hover:shadow-[0_0_10px_rgba(0,188,212,0.2)]'}`}><p.icon size={16} /></button>
+            <button key={p.id} onClick={() => { if(navigator.vibrate) navigator.vibrate(5); handleAction(p.action); }} className={`w-9 h-9 rounded-full flex items-center justify-center transition-all border no-tap ${activePanel === p.activeOn ? 'bg-[#00bcd4] text-black border-[#00bcd4]' : 'bg-black/60 backdrop-blur-sm border-white/10 text-neutral-400 hover:text-[#00bcd4] hover:border-[#00bcd4] hover:bg-[#00bcd4]/5'}`}><p.icon size={16} /></button>
           ))}
         </div>
 
