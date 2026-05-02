@@ -1,20 +1,8 @@
 
+import DxfParser from 'dxf-parser';
 import { Shape, LineShape, CircleShape, RectShape, PolyShape, ArcShape, TextShape, DoubleLineShape, EllipseShape, PointShape, DimensionShape, InfiniteLineShape, Point, LayerConfig, MTextShape, AppSettings } from '../types';
 import { generateId } from './cadService';
-
-const hexToACI = (hex: string | undefined): number => {
-    if (!hex) return 7;
-    const h = hex.toUpperCase();
-    if (h === '#FF0000' || h === 'RED') return 1;
-    if (h === '#FFFF00' || h === 'YELLOW') return 2;
-    if (h === '#00FF00' || h === 'GREEN') return 3;
-    if (h === '#00FFFF' || h === 'CYAN') return 4;
-    if (h === '#0000FF' || h === 'BLUE') return 5;
-    if (h === '#FF00FF' || h === 'MAGENTA') return 6;
-    if (h === '#FFFFFF' || h === 'WHITE') return 7;
-    if (h === '#000000' || h === 'BLACK') return 7;
-    return 7;
-};
+import { aciToHex, hexToACI } from './colorUtils';
 
 const mmToDXFLineWeight = (mm: number | undefined): number => {
     if (mm === undefined || isNaN(mm)) return 25;
@@ -603,85 +591,106 @@ export const shapesToDXF = (shapes: Shape[], layerConfigs?: Record<string, Layer
     }
 };
 
-export const dxfToShapes = (dxf: string): Shape[] => {
+export const dxfToShapes = (dxfString: string): { shapes: Shape[], stats: { total: number, unsupported: number, counts: Record<string, number> } } => {
     const shapes: Shape[] = [];
-    if (!dxf || typeof dxf !== 'string') return [];
-    const lines = dxf.replace(/\r\n/g, '\n').split('\n').map(l => l.trim());
-    let inEntities = false;
-    let currentEntity = "";
-    let data: any = { points: [] };
+    const stats = { total: 0, unsupported: 0, counts: {} as Record<string, number> };
+    if (!dxfString) return { shapes: [], stats };
     
-    for (let i = 0; i < lines.length; i++) {
-        const code = lines[i];
-        const value = lines[i+1];
-        if (!code || value === undefined) continue;
-
-        if (code === '0') {
-            if (value === 'ENTITIES') inEntities = true;
-            else if (value === 'ENDSEC') inEntities = false;
-            else if (inEntities) {
-                if (currentEntity) addShapeFromDXF(currentEntity, data, shapes);
-                currentEntity = value; 
-                data = { layer: '0', points: [] };
-            }
-            i++; 
-            continue;
-        }
-        
-        if (inEntities && currentEntity) {
-            if (code === '8') data.layer = value;
-            else if (code === '10') data.x = parseFloat(value);
-            else if (code === '20') data.y = parseFloat(value);
-            else if (code === '11') data.x2 = parseFloat(value);
-            else if (code === '21') data.y2 = parseFloat(value);
-            else if (code === '40') data.val1 = parseFloat(value);
-            else if (code === '50') data.angle1 = parseFloat(value);
-            else if (code === '51') data.angle2 = parseFloat(value);
-            else if (code === '1') data.text = value;
-            else if (code === '70') data.flag = parseInt(value);
-            
-            if (currentEntity === 'LWPOLYLINE') {
-                if (code === '10') data.nextX = parseFloat(value);
-                if (code === '20' && data.nextX !== undefined) {
-                    const py = parseFloat(value);
-                    if (!isNaN(data.nextX) && !isNaN(py)) data.points.push({ x: data.nextX, y: py });
-                    delete data.nextX;
-                }
-            }
-        }
-        i++; 
-    }
-    if (currentEntity) addShapeFromDXF(currentEntity, data, shapes);
-    return shapes;
-};
-
-const addShapeFromDXF = (type: string, data: any, list: Shape[]) => {
-    const id = generateId();
-    const layer = data.layer || '0';
-    if (isNaN(data.x)) data.x = 0;
-    if (isNaN(data.y)) data.y = 0;
-
     try {
-        if (type === 'LINE') {
-            list.push({ id, layer, color: '#FFFFFF', thickness: 1, type: 'line', x1: data.x, y1: data.y, x2: data.x2 || 0, y2: data.y2 || 0 } as LineShape);
-        } else if (type === 'CIRCLE') {
-            list.push({ id, layer, color: '#FFFFFF', thickness: 1, type: 'circle', x: data.x, y: data.y, radius: data.val1 || 10 } as CircleShape);
-        } else if (type === 'POINT') {
-            list.push({ id, layer, color: '#FFFFFF', thickness: 1, type: 'point', x: data.x, y: data.y, size: 5 } as PointShape);
-        } else if (type === 'ELLIPSE') {
-            const majorX = data.x2 || 1;
-            const majorY = data.y2 || 0;
-            const rx = Math.sqrt(majorX*majorX + majorY*majorY);
-            const rotation = Math.atan2(majorY, majorX);
-            const ratio = data.val1 !== undefined ? data.val1 : 1.0; 
-            list.push({ id, layer, color: '#FFFFFF', thickness: 1, type: 'ellipse', x: data.x, y: data.y, rx, ry: rx * ratio, rotation } as EllipseShape);
-        } else if (type === 'ARC') {
-            list.push({ id, layer, color: '#FFFFFF', thickness: 1, type: 'arc', x: data.x, y: data.y, radius: data.val1 || 10, startAngle: (data.angle1 || 0) * Math.PI / 180, endAngle: (data.angle2 || 0) * Math.PI / 180, counterClockwise: false } as ArcShape);
-        } else if (type === 'TEXT' || type === 'MTEXT') {
-            list.push({ id, layer, color: '#FFFFFF', thickness: 1, type: 'text', x: data.x, y: data.y, size: data.val1 || 12, content: data.text || 'Text' } as TextShape);
-        } else if (type === 'LWPOLYLINE') {
-            if (data.points && data.points.length > 1) list.push({ id, layer, color: '#FFFFFF', thickness: 1, type: 'pline', points: data.points, closed: (data.flag & 1) === 1 } as PolyShape);
-        }
-    } catch (e) { console.warn("DXF import entity error", type, e); }
+        const parser = new DxfParser();
+        const dxf = parser.parseSync(dxfString);
+        
+        if (!dxf || !dxf.entities) return { shapes: [], stats };
+
+        dxf.entities.forEach((entity: any) => {
+            const id = generateId();
+            const layer = entity.layer || '0';
+            const color = aciToHex(entity.color);
+            const thickness = 1; // Default
+            stats.total++;
+            stats.counts[entity.type] = (stats.counts[entity.type] || 0) + 1;
+
+            let supported = true;
+            try {
+                switch (entity.type) {
+                    case 'LINE':
+                        shapes.push({
+                            id, layer, color, thickness, type: 'line',
+                            x1: entity.vertices[0].x, y1: entity.vertices[0].y,
+                            x2: entity.vertices[1].x, y2: entity.vertices[1].y
+                        } as LineShape);
+                        break;
+                    case 'CIRCLE':
+                        shapes.push({
+                            id, layer, color, thickness, type: 'circle',
+                            x: entity.center.x, y: entity.center.y,
+                            radius: entity.radius
+                        } as CircleShape);
+                        break;
+                    case 'ARC':
+                        shapes.push({
+                            id, layer, color, thickness, type: 'arc',
+                            x: entity.center.x, y: entity.center.y,
+                            radius: entity.radius,
+                            startAngle: entity.startAngle, // dxf-parser converts to radians usually
+                            endAngle: entity.endAngle,
+                            counterClockwise: false
+                        } as ArcShape);
+                        break;
+                    case 'LWPOLYLINE':
+                    case 'POLYLINE':
+                        if (entity.vertices && entity.vertices.length > 1) {
+                            const points = entity.vertices.map((v: any) => ({ x: v.x, y: v.y }));
+                            shapes.push({
+                                id, layer, color, thickness, type: 'pline',
+                                points,
+                                closed: entity.shape || entity.closed
+                            } as PolyShape);
+                        }
+                        break;
+                    case 'TEXT':
+                    case 'MTEXT':
+                        shapes.push({
+                            id, layer, color, thickness, type: 'text',
+                            x: entity.columnCenter ? entity.columnCenter.x : (entity.position ? entity.position.x : 0),
+                            y: entity.columnCenter ? entity.columnCenter.y : (entity.position ? entity.position.y : 0),
+                            size: entity.textHeight || 12,
+                            content: entity.text || 'Text',
+                            rotation: (entity.rotation || 0) * Math.PI / 180
+                        } as TextShape);
+                        break;
+                    case 'ELLIPSE':
+                        const rx = Math.sqrt(entity.majorAxisEndPoint.x ** 2 + entity.majorAxisEndPoint.y ** 2);
+                        const rotation = Math.atan2(entity.majorAxisEndPoint.y, entity.majorAxisEndPoint.x);
+                        shapes.push({
+                            id, layer, color, thickness, type: 'ellipse',
+                            x: entity.center.x, y: entity.center.y,
+                            rx,
+                            ry: rx * entity.axisRatio,
+                            rotation
+                        } as EllipseShape);
+                        break;
+                    case 'POINT':
+                        shapes.push({
+                            id, layer, color, thickness, type: 'point',
+                            x: entity.position.x, y: entity.position.y,
+                            size: 5
+                        } as PointShape);
+                        break;
+                    default:
+                        supported = false;
+                        break;
+                }
+            } catch (err) {
+                console.warn("Entity parsing failed:", entity.type, err);
+                supported = false;
+            }
+            if (!supported) stats.unsupported++;
+        });
+    } catch (error) {
+        console.error("DXF Parsing error:", error);
+    }
+    
+    return { shapes, stats };
 };
 

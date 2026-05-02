@@ -16,13 +16,24 @@ interface CommandBarProps {
 }
 
 const COMMAND_LIST = [
-    { cmd: 'LINE', alias: 'L' }, { cmd: 'PLINE', alias: 'PL' }, { cmd: 'CIRCLE', alias: 'C' },
-    { cmd: 'RECT', alias: 'REC' }, { cmd: 'ARC', alias: 'A' }, { cmd: 'MOVE', alias: 'M' },
-    { cmd: 'ROTATE', alias: 'RO' }, { cmd: 'SCALE', alias: 'SC' }, { cmd: 'MIRROR', alias: 'MI' },
-    { cmd: 'COPY', alias: 'CO' }, { cmd: 'EXTEND', alias: 'EX' }, { cmd: 'EXPLODE', alias: 'X' },
-    { cmd: 'TRIM', alias: 'TR' }, { cmd: 'OFFSET', alias: 'O' }, { cmd: 'FILLET', alias: 'F' },
+    { cmd: 'LINE', alias: 'L' }, { cmd: 'PLINE', alias: 'PL' }, { cmd: 'DLINE', alias: 'DL' },
+    { cmd: 'CIRCLE', alias: 'C' }, { cmd: 'ARC', alias: 'A' }, { cmd: 'RECT', alias: 'REC' },
+    { cmd: 'POLYGON', alias: 'POL' }, { cmd: 'ELLIPSE', alias: 'EL' }, { cmd: 'SPLINE', alias: 'SPL' },
+    { cmd: 'DONUT', alias: 'DO' }, { cmd: 'POINT', alias: 'PO' }, { cmd: 'SKETCH', alias: 'SKETCH' },
+    { cmd: 'MOVE', alias: 'M' }, { cmd: 'COPY', alias: 'CO' }, { cmd: 'ROTATE', alias: 'RO' },
+    { cmd: 'SCALE', alias: 'SC' }, { cmd: 'MIRROR', alias: 'MI' }, { cmd: 'STRETCH', alias: 'S' },
+    { cmd: 'EXTEND', alias: 'EX' }, { cmd: 'TRIM', alias: 'TR' }, { cmd: 'FILLET', alias: 'F' },
+    { cmd: 'OFFSET', alias: 'O' }, { cmd: 'EXPLODE', alias: 'X' }, { cmd: 'ERASE', alias: 'E' },
+    { cmd: 'ZOOM', alias: 'Z' }, { cmd: 'PAN', alias: 'P' },
+    { cmd: 'DIST', alias: 'DI' }, { cmd: 'AREA', alias: 'AA' },
+    { cmd: 'MTEXT', alias: 'MT' }, { cmd: 'TEXT', alias: 'T' }, 
+    { cmd: 'HATCH', alias: 'H' }, { cmd: 'BLOCK', alias: 'B' }, { cmd: 'INSERT', alias: 'I' },
+    { cmd: 'ARRAY', alias: 'AR' }, { cmd: 'SELECT', alias: 'SEL' }, { cmd: 'SELALL', alias: 'SA' },
+    { cmd: 'DIMENSION', alias: 'DIM' }, { cmd: 'LEADER', alias: 'LE' },
     { cmd: 'RAY', alias: 'RAY' }, { cmd: 'XLINE', alias: 'XL' },
-    { cmd: 'ERASE', alias: 'E' }, { cmd: 'MTEXT', alias: 'MT' }
+    { cmd: 'MATCHPROP', alias: 'MA' }, { cmd: 'VIEWPORT', alias: 'VP' }, 
+    { cmd: 'LAYOUT', alias: 'LO' }, { cmd: 'FIND', alias: 'FIND' },
+    { cmd: 'COPYCLIP', alias: 'CC' }, { cmd: 'PASTECLIP', alias: 'CV' }
 ];
 
 const CommandBar: React.FC<CommandBarProps> = ({ 
@@ -34,6 +45,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [attachment, setAttachment] = useState<string | null>(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [suggestionIdx, setSuggestionIdx] = useState(-1);
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragStartY = useRef<number>(0);
@@ -45,6 +57,15 @@ const CommandBar: React.FC<CommandBarProps> = ({
   const inputHistory = useMemo(() => history.filter(h => h.startsWith("> ")).map(h => h.substring(2)), [history]);
   const [histIdx, setHistIdx] = useState(-1);
 
+  const suggestions = useMemo(() => {
+    if (!value || activeTab !== 'cli') return [];
+    const search = value.trim().toUpperCase();
+    if (!search) return [];
+    return COMMAND_LIST.filter(c => 
+      c.cmd.startsWith(search) || (c.alias && c.alias.startsWith(search))
+    ).slice(0, 8);
+  }, [value, activeTab]);
+
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
     const trimmed = value.trim();
@@ -54,10 +75,12 @@ const CommandBar: React.FC<CommandBarProps> = ({
     if (!canSubmit) return;
     
     if (activeTab === 'cli') {
-        onCommand(trimmed);
+        const cmdToRun = (suggestionIdx >= 0 && suggestions[suggestionIdx]) ? suggestions[suggestionIdx].cmd : trimmed;
+        onCommand(cmdToRun);
         onChange('');
         setHistIdx(-1);
         setShowSuggestions(false);
+        setSuggestionIdx(-1);
     } else {
         if (!trimmed && !attachment) return; // AI needs input
         onAiQuery(trimmed, attachment);
@@ -68,6 +91,27 @@ const CommandBar: React.FC<CommandBarProps> = ({
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (activeTab !== 'cli') return;
+
+    if (showSuggestions && suggestions.length > 0) {
+      if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSuggestionIdx(prev => (prev <= 0 ? suggestions.length - 1 : prev - 1));
+          return;
+      } else if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setSuggestionIdx(prev => (prev >= suggestions.length - 1 ? 0 : prev + 1));
+          return;
+      } else if (e.key === 'Tab') {
+          e.preventDefault();
+          const target = suggestions[suggestionIdx >= 0 ? suggestionIdx : 0];
+          if (target) {
+            onChange(target.cmd);
+            setSuggestionIdx(-1);
+          }
+          return;
+      }
+    }
+
     if (e.key === 'ArrowUp') {
         e.preventDefault();
         const next = Math.min(histIdx + 1, inputHistory.length - 1);
@@ -141,12 +185,6 @@ const CommandBar: React.FC<CommandBarProps> = ({
     }
   }, [history, isHistoryOpen]);
 
-  const suggestions = useMemo(() => {
-    if (!value || activeTab !== 'cli') return [];
-    const search = value.trim().toUpperCase();
-    return COMMAND_LIST.filter(c => c.cmd.startsWith(search) || (c.alias && c.alias.startsWith(search))).slice(0, 5);
-  }, [value, activeTab]);
-
   const toggleTab = (tab: 'cli' | 'ai') => {
     if (activeTab === tab) {
       setActiveTab(null);
@@ -193,9 +231,14 @@ const CommandBar: React.FC<CommandBarProps> = ({
                 {showSuggestions && suggestions.length > 0 && (
                     <div className="absolute bottom-full left-0 mb-2 w-full bg-[#111] border border-white/10 rounded-xl shadow-2xl z-[200] overflow-hidden backdrop-blur-xl">
                         {suggestions.map((s, i) => (
-                            <button key={i} type="button" onClick={() => { onChange(s.cmd); onCommand(s.cmd); onChange(''); setShowSuggestions(false); }} className="w-full px-4 py-3 text-left text-[10px] font-bold text-neutral-400 hover:bg-white hover:text-black border-b border-white/5 uppercase flex justify-between items-center transition-colors">
+                            <button 
+                              key={i} 
+                              type="button" 
+                              onClick={() => { onChange(s.cmd); onCommand(s.cmd); onChange(''); setShowSuggestions(false); setSuggestionIdx(-1); }} 
+                              className={`w-full px-4 py-3 text-left text-[10px] font-bold border-b border-white/5 uppercase flex justify-between items-center transition-colors ${suggestionIdx === i ? 'bg-white text-black' : 'text-neutral-400 hover:bg-white/5'}`}
+                            >
                                 <span>{s.cmd}</span>
-                                <span className="opacity-30 text-[8px] font-mono">{s.alias}</span>
+                                <span className={`text-[8px] font-mono ${suggestionIdx === i ? 'text-black/50' : 'opacity-30'}`}>{s.alias}</span>
                             </button>
                         ))}
                     </div>
@@ -211,6 +254,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
                         onChange={e => { 
                             onChange(e.target.value); 
                             setShowSuggestions(true);
+                            setSuggestionIdx(-1);
                             e.target.style.height = 'auto';
                             e.target.style.height = `${Math.max(40, Math.min(e.target.scrollHeight, 150))}px`;
                         }}

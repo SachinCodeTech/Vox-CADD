@@ -17,7 +17,10 @@ import HatchPatternSelector from './components/HatchPatternSelector';
 import MTextEditor from './components/MTextEditor';
 import DimStyleManager from './components/DimStyleManager';
 import LoadingScreen from './components/LoadingScreen';
-import { generateId, hitTestGrip } from './services/cadService';
+import { Share as CapacitorShare } from '@capacitor/share';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Capacitor } from '@capacitor/core';
+import { generateId, hitTestGrip, getAllShapesBounds } from './services/cadService';
 import { getCommandFromAI, connectLiveAgent } from './services/geminiService';
 import { shapesToDXF, dxfToShapes } from './services/dxfService';
 import { shapesToVox, voxToShapes } from './services/voxService';
@@ -34,10 +37,12 @@ import {
   SelectAllCommand, CopyClipCommand, CutClipCommand, PasteClipCommand, SplineCommand, SketchCommand, StretchCommand, SelectCommand,
   ArrayCommand, BlockCommand, InsertCommand, FilterCommand, FindCommand, ViewportCommand, LayoutCommand, GripEditCommand, ImportCommand
 } from './services/commandEngine';
-import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType, BlockDefinition, LayoutDefinition } from './types';
-import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive } from 'lucide-react';
+import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType, BlockDefinition, LayoutDefinition, LayoutViewport } from './types';
+import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive, AlertTriangle } from 'lucide-react';
 
 import VoxIcon from './components/VoxIcon';
+import ImportSummaryDialog from './components/ImportSummaryDialog';
+import { storageService } from './services/storageService';
 
 const INITIAL_SETTINGS: AppSettings = {
   ortho: true, snap: true, grid: true,
@@ -72,6 +77,8 @@ const INITIAL_SETTINGS: AppSettings = {
       extendLine: 100, offsetLine: 80, precision: 1 
     }
   },
+  limitsMin: { x: 0, y: 0 },
+  limitsMax: { x: 42000, y: 29700 }, // Default A3 in mm (scaled up for visibility)
   metadata: {
     author: '',
     createdAt: new Date().toISOString().split('T')[0],
@@ -93,6 +100,18 @@ type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 
 
 const STORAGE_PREFIX = 'voxcadd_file_v1_';
 const REGISTRY_KEY = 'voxcadd_recent_files';
+
+const blobToBase64 = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64data = reader.result as string;
+        resolve(base64data.split(',')[1] || base64data);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+};
 
 const App: React.FC = () => {
   const [layers, setLayers] = useState<Record<string, Shape[]>>({ '0': [], 'defpoints': [] });
@@ -136,6 +155,7 @@ const App: React.FC = () => {
   };
   const [activeCategory, setActiveCategory] = useState<ToolbarCategory>('Draw');
   const [isViewportActive, setIsViewportActive] = useState(false);
+  const [activeViewportId, setActiveViewportId] = useState<string | null>(null);
   const [history, setHistory] = useState<Record<string, Shape[]>[]>([]);
   const [redoStack, setRedoStack] = useState<Record<string, Shape[]>[]>([]);
   const [tabViews, setTabViews] = useState<Record<string, ViewState>>({
@@ -187,6 +207,7 @@ const App: React.FC = () => {
     initialValue: string, 
     callback: (text: string, props?: any) => void 
   } | null>(null);
+  const [importSummary, setImportSummary] = useState<{ fileName: string, stats: any } | null>(null);
   const [hatchSelector, setHatchSelector] = useState<{ 
     callback: (pattern: string) => void 
   } | null>(null);
@@ -374,11 +395,36 @@ const App: React.FC = () => {
   const view = tabViews[activeTab] || { scale: 1, originX: 0, originY: 0 };
 
   const setView = useCallback((updater: ViewState | ((v: ViewState) => ViewState)) => {
-    setTabViews(prev => ({
-      ...prev,
-      [activeTab]: typeof updater === 'function' ? (updater as (v: ViewState) => ViewState)(prev[activeTab]) : updater
-    }));
-  }, [activeTab]);
+    if (activeTab !== 'model' && isViewportActive && activeViewportId) {
+      setLayouts(prevLayouts => {
+        const layoutIndex = prevLayouts.findIndex(l => l.id === activeTab);
+        if (layoutIndex === -1) return prevLayouts;
+        
+        const newLayouts = [...prevLayouts];
+        const layout = { ...newLayouts[layoutIndex] };
+        const vpIndex = layout.viewports.findIndex(vp => vp.id === activeViewportId);
+        
+        if (vpIndex !== -1) {
+          const vp = { ...layout.viewports[vpIndex] };
+          vp.viewState = typeof updater === 'function' ? (updater as any)(vp.viewState) : updater;
+          
+          const newVps = [...layout.viewports];
+          newVps[vpIndex] = vp;
+          layout.viewports = newVps;
+          newLayouts[layoutIndex] = layout;
+          return newLayouts;
+        }
+        return prevLayouts;
+      });
+      return;
+    }
+
+    setTabViews(prev => {
+      const current = prev[activeTab] || { scale: 1, originX: 0, originY: 0 };
+      const next = typeof updater === 'function' ? (updater as (v: ViewState) => ViewState)(current) : updater;
+      return { ...prev, [activeTab]: next };
+    });
+  }, [activeTab, isViewportActive, activeViewportId]);
 
   const updateRecentFiles = useCallback((name: string) => {
     setRecentFiles(prev => {
@@ -401,6 +447,7 @@ const App: React.FC = () => {
   const activeTabRef = useRef(activeTab);
   const blocksRef = useRef(blocks);
   const layoutsRef = useRef(layouts);
+  const activeViewportIdRef = useRef(activeViewportId);
 
   useEffect(() => { settingsRef.current = settings; }, [settings]);
   useEffect(() => { layersRef.current = layers; }, [layers]);
@@ -410,61 +457,65 @@ const App: React.FC = () => {
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
   useEffect(() => { blocksRef.current = blocks; }, [blocks]);
   useEffect(() => { layoutsRef.current = layouts; }, [layouts]);
+  useEffect(() => { activeViewportIdRef.current = activeViewportId; }, [activeViewportId]);
 
-  // Restore session from LocalStorage
+  // Restore session from IndexedDB/LocalStorage
   useEffect(() => {
-    const saved = localStorage.getItem('voxcadd_active_workspace');
-    const savedRecent = localStorage.getItem(REGISTRY_KEY);
-    
-    // Seed sample files if empty to demonstrate multi-file switching
-    if (!savedRecent || JSON.parse(savedRecent).length === 0) {
-        const samples = [
-            { name: "1.vox", date: Date.now() - 3000 },
-            { name: "2.vox", date: Date.now() - 2000 },
-            { name: "3.vox", date: Date.now() - 1000 }
-        ];
-        localStorage.setItem(REGISTRY_KEY, JSON.stringify(samples));
-        setRecentFiles(samples);
-        
-        // Create sample contents
-        samples.forEach((s, i) => {
-            const sampleLayers = { 
-                '0': [
-                    { id: `seed-${i}`, type: 'circle', x: 200 * (i+1), y: 200 * (i+1), radius: 50 * (i+1), color: '#00bcd4', layer: '0' } as Shape
-                ], 
-                'defpoints': [] 
-            };
-            localStorage.setItem(`${STORAGE_PREFIX}${s.name}`, JSON.stringify({
-                layers: sampleLayers,
-                layerConfig: INITIAL_LAYERS_CONFIG,
-                settings: INITIAL_SETTINGS,
-                fileName: s.name
-            }));
-        });
-    } else {
-        try { setRecentFiles(JSON.parse(savedRecent)); } catch(e) {}
-    }
-
-    if (saved) {
-      try {
-        const data = JSON.parse(saved);
-        if (data.layers) setLayers(data.layers);
-        if (data.layerConfig) setLayerConfig(data.layerConfig);
-        if (data.settings) setSettings({ ...INITIAL_SETTINGS, ...data.settings });
-        if (data.fileName) {
-          setCurrentFileName(data.fileName);
-          updateRecentFiles(data.fileName);
-        }
-        setLogMessage("SESSION_RESTORED_SUCCESS");
-      } catch (e) {
-        console.error("Failed to restore session", e);
+    const initStorage = async () => {
+      const saved = await storageService.loadActiveWorkspace();
+      const savedRecent = localStorage.getItem(REGISTRY_KEY);
+      
+      // Seed sample files if empty to demonstrate multi-file switching
+      if (!savedRecent || JSON.parse(savedRecent).length === 0) {
+          const samples = [
+              { name: "1.vox", date: Date.now() - 3000 },
+              { name: "2.vox", date: Date.now() - 2000 },
+              { name: "3.vox", date: Date.now() - 1000 }
+          ];
+          localStorage.setItem(REGISTRY_KEY, JSON.stringify(samples));
+          setRecentFiles(samples);
+          
+          // Create sample contents
+          samples.forEach(async (s, i) => {
+              const sampleLayers = { 
+                  '0': [
+                      { id: `seed-${i}`, type: 'circle', x: 200 * (i+1), y: 200 * (i+1), radius: 50 * (i+1), color: '#00bcd4', layer: '0' } as Shape
+                  ], 
+                  'defpoints': [] 
+              };
+              await storageService.saveLarge(`${STORAGE_PREFIX}${s.name}`, {
+                  layers: sampleLayers,
+                  layerConfig: INITIAL_LAYERS_CONFIG,
+                  settings: INITIAL_SETTINGS,
+                  fileName: s.name
+              });
+          });
+      } else {
+          try { setRecentFiles(JSON.parse(savedRecent)); } catch(e) {}
       }
-    } else {
-      // Default open with Drawing 1.vox
-      setCurrentFileName("Drawing 1.vox");
-      setFileSource("storage");
-      updateRecentFiles("Drawing 1.vox");
-    }
+
+      if (saved) {
+        try {
+          if (saved.layers) setLayers(saved.layers);
+          if (saved.layerConfig) setLayerConfig(saved.layerConfig);
+          if (saved.settings) setSettings({ ...INITIAL_SETTINGS, ...saved.settings });
+          if (saved.fileName) {
+            setCurrentFileName(saved.fileName);
+            updateRecentFiles(saved.fileName);
+          }
+          setLogMessage("SESSION_RESTORED_SUCCESS");
+        } catch (e) {
+          console.error("Failed to restore session", e);
+        }
+      } else {
+        // Default open with Drawing 1.vox
+        setCurrentFileName("Drawing 1.vox");
+        setFileSource("storage");
+        updateRecentFiles("Drawing 1.vox");
+      }
+    };
+
+    initStorage();
     const handleDragOver = (e: DragEvent) => e.preventDefault();
     const handleDrop = async (e: DragEvent) => {
       e.preventDefault();
@@ -508,17 +559,23 @@ const App: React.FC = () => {
         let finalLayers: Record<string, Shape[]> = { '0': [], 'defpoints': [] };
         let finalConfig: Record<string, LayerConfig> = INITIAL_LAYERS_CONFIG;
         let finalSettings: AppSettings = INITIAL_SETTINGS;
+        let importStats: any = null;
 
         if (isDwg) {
             if (!(content instanceof ArrayBuffer)) {
                 setLogMessage("LOAD_ERR: BINARY_DATA_REQUIRED");
+                console.error("DWG load failed: content is not ArrayBuffer", typeof content);
                 return;
             }
+            console.log(`Loading DWG: ${fileName} (${content.byteLength} bytes)`);
             setLogMessage("PARSING_DWG_BINARY...");
             const result = await dwgToShapes(content);
-            const { shapes: importedShapes } = result;
+            const { shapes: importedShapes, stats } = result;
+            console.log(`DWG Import Result: ${importedShapes.length} shapes found`);
+            
             if (importedShapes.length > 0) {
                 finalLayers = { '0': importedShapes, 'defpoints': [] };
+                importStats = stats;
                 setLogMessage(`DWG_IMPORT: ${importedShapes.length} ENTITIES`);
             } else {
                 setLogMessage("DWG_EMPTY_OR_UNSUPPORTED");
@@ -540,9 +597,11 @@ const App: React.FC = () => {
                 setLogMessage("VOX_PROJECT_LOADED");
             } else {
                 setLogMessage("PARSING_DXF_DATA...");
-                const importedShapes = dxfToShapes(content);
+                const dxfResult = dxfToShapes(content);
+                const { shapes: importedShapes, stats } = dxfResult;
                 if (importedShapes.length > 0) {
                     finalLayers = { '0': importedShapes, 'defpoints': [] };
+                    importStats = stats;
                     setLogMessage(`DXF_IMPORT: ${importedShapes.length} ENTITIES`);
                 } else {
                     try {
@@ -581,9 +640,19 @@ const App: React.FC = () => {
           settings: finalSettings,
           fileName: fileName
         };
-        localStorage.setItem(`${STORAGE_PREFIX}${fileName}`, JSON.stringify(cachePayload));
-        localStorage.setItem('voxcadd_active_workspace', JSON.stringify(cachePayload));
+        storageService.saveLarge(`${STORAGE_PREFIX}${fileName}`, cachePayload);
+        storageService.saveActiveWorkspace(cachePayload);
         setActivePanel('none');
+        
+        if (importStats) {
+            setImportSummary({ fileName, stats: importStats });
+        }
+        
+        // Auto-zoom extents after a brief delay to allow rendering
+        setTimeout(() => {
+            handleAction('zoomExtents');
+        }, 100);
+
     } catch(err) { 
         console.error(err);
         setLogMessage("LOAD_ERR: CORRUPT_FORMAT"); 
@@ -595,7 +664,7 @@ const App: React.FC = () => {
     setHistory(prev => [...prev.slice(-49), currentState]);
     setRedoStack([]);
     
-    // Save to active workspace
+    // Save to active workspace (via IndexedDB to avoid quota issues)
     const payload = {
       layers: currentState,
       layerConfig: layerConfigRef.current,
@@ -603,11 +672,11 @@ const App: React.FC = () => {
       fileName: currentFileName
     };
     
-    localStorage.setItem('voxcadd_active_workspace', JSON.stringify(payload));
+    storageService.saveActiveWorkspace(payload);
     
     // Save to specific file storage if it's a named file
     if (currentFileName) {
-        localStorage.setItem(`${STORAGE_PREFIX}${currentFileName}`, JSON.stringify(payload));
+        storageService.saveLarge(`${STORAGE_PREFIX}${currentFileName}`, payload);
     }
   }, [currentFileName]);
 
@@ -659,7 +728,30 @@ const App: React.FC = () => {
         break;
       case 'toggleAbout': setActivePanel(activePanel === 'about' ? 'none' : 'about'); break;
       case 'togglePrivacy': setActivePanel(activePanel === 'privacy' ? 'none' : 'privacy'); break;
-      case 'zoomExtents': setView({ scale: 0.05, originX: 0, originY: 0 }); break;
+      case 'zoomExtents':
+      case 'zoomAll': {
+        const limits = act === 'zoomAll' ? { min: settingsRef.current.limitsMin, max: settingsRef.current.limitsMax } : undefined;
+        const bounds = getAllShapesBounds(layersRef.current, blocksRef.current, limits);
+        if (bounds && canvasHandleRef.current) {
+            const w = Math.max(1, bounds.xMax - bounds.xMin);
+            const h = Math.max(1, bounds.yMax - bounds.yMin);
+            const centerX = (bounds.xMax + bounds.xMin) / 2;
+            const centerY = (bounds.yMax + bounds.yMin) / 2;
+            
+            const canvas = canvasHandleRef.current.getCanvasSize();
+            const ts_scale = settingsRef.current.drawingScale;
+            const padding = 1.15;
+            
+            const scale = Math.min(canvas.width / (w * padding * ts_scale), canvas.height / (h * padding * ts_scale));
+            
+            setView({ scale, originX: -centerX * scale * ts_scale, originY: centerY * scale * ts_scale });
+            setLogMessage(`VOX_Z-${act === 'zoomAll' ? 'A' : 'E'}: [${w.toFixed(2)} x ${h.toFixed(2)}]`);
+        } else {
+            setView({ scale: 1, originX: 0, originY: 0 });
+            setLogMessage(`VOX_Z-${act === 'zoomAll' ? 'A' : 'E'}: (Empty drawing)`);
+        }
+        break;
+      }
       case 'zoomIn': setView(v => ({ ...v, scale: v.scale * 1.5 })); break;
       case 'zoomOut': setView(v => ({ ...v, scale: v.scale / 1.5 })); break;
       case 'setUnits': setSettings(s => ({ ...s, units: payload })); break;
@@ -702,12 +794,8 @@ const App: React.FC = () => {
         }
         if (!newName || oldName === newName) return;
 
-        // Migrate storage
-        const data = localStorage.getItem(`${STORAGE_PREFIX}${oldName}`);
-        if (data) {
-            localStorage.setItem(`${STORAGE_PREFIX}${newName}`, data);
-            localStorage.removeItem(`${STORAGE_PREFIX}${oldName}`);
-        }
+        // Migrate storage via IndexedDB
+        storageService.renameLarge(`${STORAGE_PREFIX}${oldName}`, `${STORAGE_PREFIX}${newName}`);
         
         // Update registry
         const updatedRecent = recentFiles.map(f => f.name === oldName ? { ...f, name: newName } : f);
@@ -722,24 +810,25 @@ const App: React.FC = () => {
         const filtered = recentFiles.filter(f => f.name !== payload);
         setRecentFiles(filtered);
         localStorage.setItem(REGISTRY_KEY, JSON.stringify(filtered));
-        localStorage.removeItem(`${STORAGE_PREFIX}${payload}`);
+        storageService.deleteLarge(`${STORAGE_PREFIX}${payload}`);
         setLogMessage(`FILE_DELETED: ${payload}`);
         break;
       }
       case 'downloadRecent': {
-        const data = localStorage.getItem(`${STORAGE_PREFIX}${payload}`);
-        if (data) {
-            const blob = new Blob([data], { type: 'application/x-vox' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = payload;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            setLogMessage(`DOWNLOADING: ${payload}`);
-        }
+        storageService.loadLarge(`${STORAGE_PREFIX}${payload}`).then(data => {
+            if (data) {
+                const blob = new Blob([JSON.stringify(data)], { type: 'application/x-vox' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = payload;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                setLogMessage(`DOWNLOADING: ${payload}`);
+            }
+        });
         break;
       }
       case 'openRecent': {
@@ -762,16 +851,15 @@ const App: React.FC = () => {
               settings: settingsRef.current,
               fileName: currentFileName
             };
-            localStorage.setItem(`${STORAGE_PREFIX}${currentFileName}`, JSON.stringify(oldState));
-            localStorage.setItem('voxcadd_active_workspace', JSON.stringify(oldState));
+            await storageService.saveLarge(`${STORAGE_PREFIX}${currentFileName}`, oldState);
+            await storageService.saveActiveWorkspace(oldState);
 
             setLoadingStatus(`OPENING ${payload}...`);
             await new Promise(r => setTimeout(r, 50)); // Allow UI to breathe
 
-            const savedData = localStorage.getItem(`${STORAGE_PREFIX}${payload}`);
-            if (!savedData) throw new Error("FILE_MISSING");
+            const data = await storageService.loadLarge<any>(`${STORAGE_PREFIX}${payload}`);
+            if (!data) throw new Error("FILE_MISSING");
 
-            const data = JSON.parse(savedData);
             setLoadingStatus("PARSING GEOMETRY...");
             await new Promise(r => setTimeout(r, 50));
 
@@ -941,12 +1029,11 @@ const App: React.FC = () => {
             setLoadingFile(false);
             setLogMessage("ERR: OPERATION_TIMEOUT");
           }
-        }, 30000);
+        }, 60000); // 60s for share
 
         try {
           const isDxfExport = payload === 'dxf';
           const finalExt = isDxfExport ? '.dxf' : '.vox';
-          
           setLoadingStatus(`COMPILING ${finalExt.substring(1).toUpperCase()} DATA...`);
           
           const content = isDxfExport 
@@ -957,8 +1044,8 @@ const App: React.FC = () => {
           const blob = new Blob([content], { type: isDxfExport ? 'application/dxf' : 'application/octet-stream' });
           
           const shareData = {
-            title: 'VoxCADD Project',
-            text: `Project: ${currentFileName}`,
+            title: 'VoxCADD File',
+            text: `File: ${currentFileName} shared from VoxCadd Professional`,
             url: window.location.href
           };
 
@@ -971,37 +1058,99 @@ const App: React.FC = () => {
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-            setLogMessage("INFO: DOWNLOAD_STARTED");
+            setLogMessage("INFO: FILE_DOWNLOADED (SHARE_FALLBACK)");
           };
 
-          setLoadingStatus("INITIATING SHARE...");
-          
+          setLoadingStatus("SHARE_INIT...");
+
+          // 1. TRY NATIVE SHARE (Capacitor)
+          if (Capacitor.isNativePlatform()) {
+            try {
+               setLoadingStatus("PREPARING NATIVE FILE...");
+               const base64 = await blobToBase64(blob);
+               const tempPath = `vox_share_${Date.now()}_${fileName}`;
+               
+               // Save to local cache
+               await Filesystem.writeFile({
+                 path: tempPath,
+                 data: base64,
+                 directory: Directory.Cache
+               });
+
+               // Get absolute URI for sharing
+               const fileUriInfo = await Filesystem.getUri({
+                 path: tempPath,
+                 directory: Directory.Cache
+               });
+
+               setLoadingStatus("OPENING SHARE DIALOG...");
+               await CapacitorShare.share({
+                 title: shareData.title,
+                 text: shareData.text,
+                 url: shareData.url, // includes link too
+                 files: [fileUriInfo.uri],
+                 dialogTitle: "Share VoxCADD File"
+               });
+               
+               setLogMessage("INFO: NATIVE_SHARE_COMPLETE");
+               setLoadingFile(false);
+               clearTimeout(loadingTimeout);
+               return;
+            } catch (nativeErr: any) {
+               console.error("Native share failed", nativeErr);
+               // fall through to web share if native fails for any reason
+            }
+          }
+
+          // 2. TRY WEB SHARE API
           if (navigator.share) {
               const file = new File([blob], fileName, { type: blob.type });
               if (navigator.canShare && navigator.canShare({ files: [file] })) {
                 try {
                    await navigator.share({ ...shareData, files: [file] });
-                   setLogMessage("INFO: PROJECT_SHARED");
+                   setLogMessage(`SUCCESS: ${fileName.toUpperCase()}_SHARED`);
+                   setLoadingFile(false);
+                   clearTimeout(loadingTimeout);
+                   return;
                 } catch (se: any) {
-                  if (se.name === 'AbortError') setLogMessage("INFO: SHARE_CANCELLED");
-                  else await navigator.share(shareData);
+                  if (se.name === 'AbortError') {
+                    setLogMessage("INFO: SHARE_CANCELLED");
+                    setLoadingFile(false);
+                    clearTimeout(loadingTimeout);
+                    return;
+                  }
+                  // try simple link share if file share fails
+                  try {
+                    await navigator.share(shareData);
+                    setLogMessage("INFO: LINK_SHARED");
+                  } catch (e) { /* ignore */ }
                 }
               } else {
-                 await navigator.share(shareData);
-                 setLogMessage("INFO: LINK_SHARED_DOWNLOADING");
+                 try {
+                    await navigator.share(shareData);
+                    setLogMessage("INFO: LINK_SHARED (FILE_DOWNLOADING)");
+                 } catch (e) { /* ignore */ }
                  executeDownload();
               }
           } else {
-              await navigator.clipboard.writeText(window.location.href);
-              setLogMessage("INFO: LINK_COPIED_DOWNLOADING");
+              // 3. FINAL FALLBACK: Download + Clipboard
+              setLogMessage("INFO: SHARING_NOT_SUPP_DOWNLOADING");
+              try {
+                await navigator.clipboard.writeText(window.location.href);
+                setLogMessage("INFO: FILE_DOWNLOADED. LINK_COPIED.");
+              } catch (e) { 
+                setLogMessage("INFO: FILE_DOWNLOADED.");
+              }
               executeDownload();
           }
-        } catch (e) {
-            setLogMessage("ERR: SHARE_FAILED");
+
+        } catch (err: any) {
+          console.error("Share system error:", err);
+          setLogMessage(`ERR: SHARE_FAILED (${err.message})`);
         } finally {
-            clearTimeout(loadingTimeout);
-            setLoadingFile(false);
-            setLoadingStatus("");
+          clearTimeout(loadingTimeout);
+          setLoadingFile(false);
+          setLoadingStatus("");
         }
         break;
       }
@@ -1337,6 +1486,14 @@ const App: React.FC = () => {
         },
         setView: setView as any,
         getViewState: () => tabViewsRef.current[activeTabRef.current],
+        getCanvasSize: () => {
+          const size = canvasHandleRef.current?.getCanvasSize();
+          return size || { width: window.innerWidth, height: window.innerHeight };
+        },
+        getActiveViewport: () => {
+          const layout = layoutsRef.current.find(l => l.id === activeTabRef.current);
+          return layout?.viewports.find(v => v.id === activeViewportIdRef.current);
+        },
         onFinish: () => { 
           setPreviewShapes(null); 
           setCommandPrompt("COMMAND:"); 
@@ -1396,6 +1553,107 @@ const App: React.FC = () => {
       });
     }
   }, [setView, commitToHistory]);
+
+  const handleViewportToggle = (x_screen?: number, y_screen?: number) => {
+    if (activeTab === 'model') return;
+
+    if (isViewportActive && x_screen !== undefined && y_screen !== undefined) {
+      // If we are already in a viewport, check if we clicked the same one or another one
+      const index = layouts.findIndex(l => l.id === activeTab);
+      if (index !== -1) {
+        const layout = layouts[index];
+        const view = tabViews[activeTab] || { scale: 1, originX: 0, originY: 0 };
+        const ts = view.scale * settings.drawingScale;
+        const canvas = canvasHandleRef.current?.getCanvasSize() || { width: 800, height: 600 };
+        const w = canvas.width, h = canvas.height;
+        const px = (x_screen - w/2 - view.originX) / ts;
+        const py = -(y_screen - h/2 - view.originY) / ts;
+        const papX = px + layout.paperSize.width/2;
+        const papY = -py + layout.paperSize.height/2;
+
+        const targetVp = layout.viewports.find(vp => 
+          papX >= vp.x && papX <= vp.x + vp.width &&
+          papY >= vp.y && papY <= vp.y + vp.height
+        );
+
+        if (targetVp && targetVp.id !== activeViewportId) {
+          // Switch to another viewport
+          setActiveViewportId(targetVp.id);
+          return;
+        }
+      }
+      
+      // Default: exit viewport
+      setIsViewportActive(false);
+      setActiveViewportId(null);
+      setLogMessage("PAPER_SPACE_ACTIVE");
+    } else if (x_screen !== undefined && y_screen !== undefined) {
+      // We are entering a viewport
+      const index = layouts.findIndex(l => l.id === activeTab);
+      if (index !== -1) {
+        const layout = layouts[index];
+        
+        // Find which viewport was clicked
+        // Need to map screen to paper units
+        const view = tabViews[activeTab] || { scale: 1, originX: 0, originY: 0 };
+        const ts = view.scale * settings.drawingScale;
+        const canvas = canvasHandleRef.current?.getCanvasSize() || { width: 800, height: 600 };
+        const w = canvas.width, h = canvas.height;
+        
+        // screenToWorld for layout:
+        const px = (x_screen - w/2 - view.originX) / ts;
+        const py = -(y_screen - h/2 - view.originY) / ts;
+        
+        // Paper coords (0,0 is center of paper)
+        // Convert to (0,0 is top-left of paper)
+        const papX = px + layout.paperSize.width/2;
+        const papY = -py + layout.paperSize.height/2;
+
+        let targetVp = layout.viewports.find(vp => 
+          papX >= vp.x && papX <= vp.x + vp.width &&
+          papY >= vp.y && papY <= vp.y + vp.height
+        );
+
+        if (!targetVp && layout.viewports.length === 0) {
+          // Create default if none exist
+          const margin = 10;
+          const vw = layout.paperSize.width - margin * 2;
+          const vh = layout.paperSize.height - margin * 2;
+          const vpId = 'vp_' + Date.now();
+          
+          const bounds = getAllShapesBounds(layers, blocks);
+          let initialViewState = { scale: 0.05, originX: 0, originY: 0 };
+          if (bounds) {
+            const bw = Math.max(1, bounds.xMax - bounds.xMin);
+            const bh = Math.max(1, bounds.yMax - bounds.yMin);
+            const bcx = (bounds.xMax + bounds.xMin) / 2;
+            const bcy = (bounds.yMax + bounds.yMin) / 2;
+            const vScale = Math.min(vw / (bw * 1.1), vh / (bh * 1.1));
+            initialViewState = { scale: vScale, originX: -bcx * vScale, originY: bcy * vScale };
+          }
+
+          const defaultViewport: LayoutViewport = {
+            id: vpId,
+            x: margin, y: margin, width: vw, height: vh,
+            viewState: initialViewState
+          };
+          const newLayouts = [...layouts];
+          newLayouts[index] = { ...layout, viewports: [defaultViewport] };
+          setLayouts(newLayouts);
+          setIsViewportActive(true);
+          setActiveViewportId(vpId);
+          setLogMessage("MODEL_SPACE_ACTIVE (VP)");
+          return;
+        }
+
+        if (targetVp) {
+          setIsViewportActive(true);
+          setActiveViewportId(targetVp.id);
+          setLogMessage("MODEL_SPACE_ACTIVE (VP)");
+        }
+      }
+    }
+  };
 
   const onCanvasClick = (x: number, y: number, snapped: boolean) => {
     // If no command is active and we have a selection, check for grips first
@@ -1627,7 +1885,8 @@ const App: React.FC = () => {
             isCommandActive={isCommandActive} 
             activeTab={activeTab} 
             isViewportActive={isViewportActive} 
-            onViewportToggle={() => setIsViewportActive(!isViewportActive)} 
+            activeViewportId={activeViewportId}
+            onViewportToggle={handleViewportToggle} 
             onClick={onCanvasClick} 
             onMouseMove={(x,y,s) => { if(engineRef.current) engineRef.current.move({x,y}, s); }} 
             selectedIds={selectedIds} 
@@ -1935,7 +2194,7 @@ const App: React.FC = () => {
               }}
               className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
             >
-              <Share2 size={14} className="text-cyan-500" /> Share Project
+              <Share2 size={14} className="text-cyan-500" /> Share File
             </button>
             <div className="h-px bg-white/5 my-1" />
             <button 
@@ -1945,7 +2204,7 @@ const App: React.FC = () => {
                }}
               className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-red-500/80 hover:bg-red-500 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
             >
-              <XCircle size={14} /> Close Project
+              <XCircle size={14} /> Close File
             </button>
           </div>
         </>
@@ -2110,6 +2369,15 @@ const App: React.FC = () => {
           </motion.div>
         )}
       </AnimatePresence>
+      {importSummary && (
+        <ImportSummaryDialog 
+          isOpen={!!importSummary}
+          onClose={() => setImportSummary(null)}
+          fileName={importSummary.fileName}
+          stats={importSummary.stats}
+        />
+      )}
+      
       {promptDialog && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4">
            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setPromptDialog(null)} />

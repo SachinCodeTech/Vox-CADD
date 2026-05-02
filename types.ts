@@ -29,6 +29,10 @@ export interface BaseShape {
   filled?: boolean; 
   opacity?: number;
   isPreview?: boolean; 
+  /** @internal Cached bounding box for performance */
+  _bounds?: { xMin: number, yMin: number, xMax: number, yMax: number };
+  /** @internal Cached length/perimeter for line type scaling */
+  _length?: number;
 }
 
 export interface LineShape extends BaseShape {
@@ -318,6 +322,8 @@ export interface AppSettings {
   textJustification: TextJustification;
   activeDimStyle: string;
   dimStyles: Record<string, DimensionStyle>;
+  limitsMin: Point;
+  limitsMax: Point;
   metadata?: ProjectMetadata;
 }
 

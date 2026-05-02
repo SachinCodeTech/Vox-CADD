@@ -54,7 +54,7 @@ export const getCommandFromAI = async (prompt: string, contextSummary: string = 
     if (!apiKey) return { text: "Error: No API Key found.", commands: [] };
 
     const ai = new GoogleGenAI({ apiKey });
-    const modelName = 'gemini-1.5-flash'; // Fallback to 1.5-flash if 2.0 is overloaded
+    const modelName = 'gemini-3.1-pro-preview';
     
     const contextPart = { text: `[ARCHITECTURAL CONTEXT]\n${contextSummary}\n\n[USER REQUEST]\n${prompt || "Produce architectural drafting."}` };
     
@@ -217,7 +217,7 @@ export const connectLiveAgent = async (handlers: LiveSessionHandlers) => {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
     const sessionPromise = ai.live.connect({
-        model: 'gemini-2.0-flash-exp',
+        model: 'gemini-3.1-flash-live-preview',
         callbacks: {
             onopen: () => {
                 const source = inputAudioContext.createMediaStreamSource(stream);

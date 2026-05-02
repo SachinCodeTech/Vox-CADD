@@ -1,6 +1,6 @@
 
 import { Shape, Point, AppSettings, LayerConfig, LineShape, CircleShape, RectShape, ArcShape, PolyShape, TextShape, MTextShape, EllipseShape, DimensionShape, AngularDimensionShape, PointShape, InfiniteLineShape, DonutShape, LeaderShape, ViewState, DoubleLineShape, DLineJustification, TextJustification, LineType, BlockDefinition, LayoutDefinition, LayoutViewport, DimensionType, BlockShape, HatchShape } from '../types';
-import { generateId, getCircleFrom3Points, formatLength, formatAngle, parseLength, hitTestShape, distance, getTrimmedShapes, moveShape, resolvePointInput, calculateArea, offsetShape, getPolygonPoints, stretchShape, getShapesInRect, rotateShape, scaleShape, mirrorShape, getExtendedShapes, filletLines, modifyShapeByGrip, isPointInsideShape, getShapeBoundaryPoints, isShapeClosed, getShapeBounds, extractBoundaryFromShapes } from './cadService';
+import { generateId, getCircleFrom3Points, formatLength, formatAngle, parseLength, hitTestShape, distance, getTrimmedShapes, moveShape, resolvePointInput, calculateArea, offsetShape, getPolygonPoints, stretchShape, getShapesInRect, rotateShape, scaleShape, mirrorShape, getExtendedShapes, filletLines, modifyShapeByGrip, isPointInsideShape, getShapeBoundaryPoints, isShapeClosed, getShapeBounds, extractBoundaryFromShapes, getAllShapesBounds } from './cadService';
 
 export interface CommandContext {
     getSettings: () => AppSettings;
@@ -22,6 +22,8 @@ export interface CommandContext {
     getLayouts: () => LayoutDefinition[];
     setLayouts: (layouts: LayoutDefinition[]) => void;
     getActiveTab: () => string;
+    getCanvasSize: () => { width: number, height: number };
+    getActiveViewport: () => LayoutViewport | undefined;
     onExternalRequest?: (type: string, data: any, callback: (result: any, props?: any) => void) => void;
 }
 
@@ -197,10 +199,10 @@ export class LineCommand implements CADCommand {
 }
 
 export class DoubleLineCommand implements CADCommand {
-    name = "DLINE"; public pts: Point[] = []; public thickness: number = 230;
+    name = "DLINE"; public pts: Point[] = []; public thickness: number = 230; public justification: DLineJustification = 'zero';
     constructor(public ctx: CommandContext) {}
     onStart() { 
-        this.ctx.setMessage("DLINE Specify start point or [Thickness]:"); 
+        this.ctx.setMessage("DLINE Specify start point or [Thickness/Justification]:"); 
     }
     onInput(text: string): boolean {
         const t = text.trim().toLowerCase();
@@ -208,6 +210,14 @@ export class DoubleLineCommand implements CADCommand {
             this.ctx.setMessage("DLINE Specify wall thickness:");
             return true;
         }
+        if (t === 'j' || t === 'justification') {
+            this.ctx.setMessage("DLINE Enter justification [Top/Zero/Bottom] <zero>:");
+            return true;
+        }
+        if (t === 'top') { this.justification = 'top'; this.ctx.setMessage("Justification: TOP. Specify start point:"); return true; }
+        if (t === 'zero' || t === 'z') { this.justification = 'zero'; this.ctx.setMessage("Justification: ZERO. Specify start point:"); return true; }
+        if (t === 'bottom' || t === 'b') { this.justification = 'bottom'; this.ctx.setMessage("Justification: BOTTOM. Specify start point:"); return true; }
+        
         if (!isNaN(parseFloat(t)) && !t.includes(',') && this.pts.length === 0) {
             this.thickness = parseFloat(t);
             this.ctx.setMessage("DLINE Thickness set. Specify start point:");
@@ -234,13 +244,13 @@ export class DoubleLineCommand implements CADCommand {
             const anchor = this.pts[this.pts.length - 1];
             const finalP = applyOrthoConstraint(p, anchor, this.ctx.getSettings().ortho, snapped);
             const style = getStyleSettings(this.ctx);
-            this.ctx.setPreview([{id:'p', type:'dline', isPreview:true, layer: style.layer, color: style.color, points: [...this.pts, finalP], thickness: this.thickness, justification: 'zero'} as any]);
+            this.ctx.setPreview([{id:'p', type:'dline', isPreview:true, layer: style.layer, color: style.color, points: [...this.pts, finalP], thickness: this.thickness, justification: this.justification} as any]);
         }
     }
     onEnter() {
         if (this.pts.length > 1) {
             const style = getStyleSettings(this.ctx);
-            const s: DoubleLineShape = { id: generateId(), type: 'dline', layer: style.layer, color: style.color, points: this.pts, thickness: this.thickness, justification: 'zero' };
+            const s: DoubleLineShape = { id: generateId(), type: 'dline', layer: style.layer, color: style.color, points: this.pts, thickness: this.thickness, justification: this.justification };
             this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
         }
         this.ctx.onFinish();
@@ -288,42 +298,46 @@ export class PolyCommand implements CADCommand {
 }
 
 export class SplineCommand implements CADCommand {
-    name = "SPLINE"; 
+    name = "SPLINE";
     public pts: Point[] = [];
     private isDrawing = false;
 
-    constructor(public ctx: CommandContext) {}
+    constructor(public ctx: CommandContext) { }
 
-    onStart() { 
-        this.ctx.setMessage("SPLINE: Drag to sketch naturally (Freehand) or Tap to start."); 
+    onStart() {
+        this.ctx.setMessage("SPLINE: Sketch naturally (Drag) or tap points. [Enter to finish]");
     }
 
     onClick(p: Point) {
         if (!this.isDrawing) {
             this.isDrawing = true;
             this.pts = [p];
-            this.ctx.setMessage("SPLINE: Drawing... Tap or release to finish.");
         } else {
-            this.isDrawing = false;
-            this.onEnter();
+            // Check if we are finishing a freehand stroke or just adding a vertex
+            const last = this.pts[this.pts.length - 1];
+            if (distance(last, p) > 2) {
+                this.pts.push(p);
+            }
         }
+        this.ctx.setMessage("SPLINE: Drawing... Drag to sketch or tap. [Enter to finish]");
     }
 
     onMove(p: Point) {
-        if (this.isDrawing) {
+        if (this.isDrawing && this.pts.length > 0) {
             const last = this.pts[this.pts.length - 1];
-            // Minimum distance to add a new point for smoothness (5 world units threshold)
-            if (distance(last, p) > 5) {
+            // Finer threshold for more natural freehand drawing
+            if (distance(last, p) > 3) {
                 this.pts.push(p);
             }
             const style = getStyleSettings(this.ctx);
+            // Preview shows the smoothed quadratic spline path
             this.ctx.setPreview([{
-                id: 'p', 
-                type: 'spline', 
-                isPreview: true, 
-                layer: style.layer, 
-                color: style.color, 
-                points: this.pts
+                id: 'p_spline',
+                type: 'spline',
+                isPreview: true,
+                layer: style.layer,
+                color: style.color,
+                points: [...this.pts, p]
             } as any]);
         }
     }
@@ -331,17 +345,18 @@ export class SplineCommand implements CADCommand {
     onEnter() {
         if (this.pts.length > 1) {
             const style = getStyleSettings(this.ctx);
-            const s: PolyShape = { 
-                id: generateId(), 
-                type: 'spline', 
-                layer: style.layer, 
-                color: style.color, 
-                points: this.pts, 
-                thickness: style.thickness, 
-                lineType: style.lineType 
-            };
-            this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
+            const s: Shape = {
+                id: generateId(),
+                type: 'spline',
+                points: this.pts,
+                layer: style.layer,
+                color: style.color,
+                thickness: style.thickness,
+                lineType: style.lineType
+            } as any;
+            this.ctx.setLayers(prev => ({ ...prev, [style.layer]: [...(prev[style.layer] || []), s] }));
         }
+        this.isDrawing = false;
         this.ctx.onFinish();
     }
 
@@ -1088,16 +1103,127 @@ export class EraseCommand implements CADCommand {
 }
 
 export class ZoomCommand implements CADCommand {
-    name = "ZOOM"; constructor(public ctx: CommandContext) {}
-    onStart() { this.ctx.setMessage("ZOOM Specify corner of window or [Extents/In/Out] <Extents>:"); }
+    name = "ZOOM"; public p1: Point | null = null;
+    constructor(public ctx: CommandContext) {}
+    onStart() { this.ctx.setMessage("ZOOM Specify corner of window or [All/Extents/In/Out] <Extents>:"); }
     onInput(text: string): boolean {
         const t = text.trim().toLowerCase();
-        if (t === 'e' || t === 'extents') { this.ctx.setView({ scale: 0.05, originX: 0, originY: 0 }); this.ctx.onFinish(); return true; }
+        if (t === 'e' || t === 'extents' || t === 'a' || t === 'all' || t === '') { 
+            const isAll = t === 'a' || t === 'all';
+            const settings = this.ctx.getSettings();
+            const activeVp = this.ctx.getActiveViewport();
+            
+            // For Zoom All: Use limits if shapes are within limits, OR expand to include shapes outside limits
+            // For Zoom Extents: Use ONLY shapes
+            const limits = isAll ? { min: settings.limitsMin, max: settings.limitsMax } : undefined;
+            const bounds = getAllShapesBounds(this.ctx.getLayers(), this.ctx.getBlocks(), limits);
+            
+            if (bounds) {
+                const w = Math.max(1, bounds.xMax - bounds.xMin);
+                const h = Math.max(1, bounds.yMax - bounds.yMin);
+                const centerX = (bounds.xMax + bounds.xMin) / 2;
+                const centerY = (bounds.yMax + bounds.yMin) / 2;
+                
+                const canvas = this.ctx.getCanvasSize();
+                const ts_scale = settings.drawingScale;
+                const padding = isAll ? 1.05 : 1.15; 
+                
+                if (activeVp) {
+                    // Zoom inside viewport
+                    const scale = Math.min(activeVp.width / (w * padding), activeVp.height / (h * padding));
+                    this.ctx.setView({ scale, originX: -centerX * scale, originY: centerY * scale });
+                } else {
+                    const scale = Math.min(canvas.width / (w * padding * ts_scale), canvas.height / (h * padding * ts_scale));
+                    this.ctx.setView({ scale, originX: -centerX * scale * ts_scale, originY: centerY * scale * ts_scale });
+                }
+                this.ctx.addLog(`ZOOM_${isAll ? 'ALL' : 'EXTENTS'}: [${w.toFixed(0)} x ${h.toFixed(0)}]`);
+            } else {
+                if (isAll) {
+                    // Even if no shapes, zoom to limits
+                    const w = Math.abs(settings.limitsMax.x - settings.limitsMin.x);
+                    const h = Math.abs(settings.limitsMax.y - settings.limitsMin.y);
+                    const centerX = (settings.limitsMax.x + settings.limitsMin.x) / 2;
+                    const centerY = (settings.limitsMax.y + settings.limitsMin.y) / 2;
+                    const canvas = this.ctx.getCanvasSize();
+                    
+                    if (activeVp) {
+                        const scale = Math.min(activeVp.width / (w * 1.05), activeVp.height / (h * 1.05));
+                        this.ctx.setView({ scale, originX: -centerX * scale, originY: centerY * scale });
+                    } else {
+                        const scale = Math.min(canvas.width / (w * 1.05 * settings.drawingScale), canvas.height / (h * 1.05 * settings.drawingScale));
+                        this.ctx.setView({ scale, originX: -centerX * scale * settings.drawingScale, originY: centerY * scale * settings.drawingScale });
+                    }
+                    this.ctx.addLog("ZOOM_ALL: Limits");
+                } else {
+                    this.ctx.setView({ scale: 1, originX: 0, originY: 0 });
+                    this.ctx.addLog("ZOOM_EXTENTS: Empty drawing");
+                }
+            }
+            this.ctx.onFinish();
+            return true;
+        }
+        if (t === 'w' || t === 'window') {
+            this.ctx.setMessage("ZOOM Window: Specify first corner:");
+            return true;
+        }
+        if (t === 'p' || t === 'previous') {
+            this.ctx.addLog("ZOOM_PREVIOUS: Command not yet implemented fully.");
+            this.ctx.onFinish();
+            return true;
+        }
         if (t === 'i' || t === 'in') { this.ctx.setView(v => ({...v, scale: v.scale * 1.5})); this.ctx.onFinish(); return true; }
         if (t === 'o' || t === 'out') { this.ctx.setView(v => ({...v, scale: v.scale / 1.5})); this.ctx.onFinish(); return true; }
         return false;
     }
-    onClick() { this.ctx.onFinish(); } onMove() {} onEnter() { this.ctx.onFinish(); } onCancel() { this.ctx.onFinish(); }
+    onClick(p: Point) { 
+        if (!this.p1) {
+            this.p1 = p;
+            this.ctx.setMessage("Specify opposite corner:");
+        } else {
+            const xMin = Math.min(this.p1.x, p.x);
+            const xMax = Math.max(this.p1.x, p.x);
+            const yMin = Math.min(this.p1.y, p.y);
+            const yMax = Math.max(this.p1.y, p.y);
+            
+            // Standard CAD Behavior: Zoom exactly to the window specified
+            const centerX = (xMax + xMin) / 2;
+            const centerY = (yMax + yMin) / 2;
+            const w = Math.max(0.001, xMax - xMin);
+            const h = Math.max(0.001, yMax - yMin);
+            const padding = 1.05; // 5% padding for clean view
+            
+            const canvas = this.ctx.getCanvasSize();
+            const ts_scale = this.ctx.getSettings().drawingScale;
+            const activeVp = this.ctx.getActiveViewport();
+            
+            if (activeVp) {
+                const scale = Math.min(activeVp.width / (w * padding), activeVp.height / (h * padding));
+                this.ctx.setView({ scale, originX: -centerX * scale, originY: centerY * scale });
+            } else {
+                const scale = Math.min(canvas.width / (w * padding * ts_scale), canvas.height / (h * padding * ts_scale));
+                this.ctx.setView({ scale, originX: -centerX * scale * ts_scale, originY: centerY * scale * ts_scale });
+            }
+            this.ctx.onFinish();
+        }
+    } 
+    onMove(p: Point) {
+        if (this.p1) {
+            this.ctx.setPreview([{
+                id: 'z_window',
+                type: 'rect',
+                x: Math.min(this.p1.x, p.x),
+                y: Math.min(this.p1.y, p.y),
+                width: Math.abs(p.x - this.p1.x),
+                height: Math.abs(p.y - this.p1.y),
+                isPreview: true,
+                layer: '0',
+                color: '#00bcd4',
+                lineType: 'dashed'
+            } as any]);
+        }
+    } 
+    onEnter() { this.onInput(''); } 
+    onCancel() { this.ctx.onFinish(); }
 }
 
 export class DistanceCommand implements CADCommand {
@@ -2452,7 +2578,7 @@ export class HatchCommand implements CADCommand {
             const combinedBoundary = extractBoundaryFromShapes(selectedShapes);
             if (combinedBoundary) {
                 // Hack: We need a temporary shape to represent this boundary for triggerSelector
-                const tempShape: PolyShape = { id: 'temp', type: 'pline', points: combinedBoundary, closed: true, layer: '0' };
+                const tempShape: PolyShape = { id: 'temp', type: 'pline', points: combinedBoundary, closed: true, layer: '0', color: '#888888' };
                 this.triggerSelector([tempShape]);
                 return;
             }
@@ -2585,17 +2711,77 @@ export class InsertCommand implements CADCommand {
 export class FilterCommand implements CADCommand {
     name = "FILTER";
     constructor(public ctx: CommandContext) {}
-    onStart() { this.ctx.setMessage("FILTER Enter type (line, circle, etc.):"); }
+    onStart() { 
+        this.ctx.setMessage("FILTER: Criteria (e.g. 'type:line', 'layer:0', 'color:red', 'len>100')."); 
+    }
     onInput(text: string): boolean {
-        const type = text.trim().toLowerCase();
+        const input = text.trim().toLowerCase();
+        if (!input) {
+            this.ctx.onFinish();
+            return true;
+        }
+
         const all = Object.values(this.ctx.getLayers()).flat();
-        const filtered = all.filter(s => s.type === type).map(s => s.id);
-        this.ctx.setSelectedIds(filtered);
-        this.ctx.addLog(`FILTERED: ${filtered.length} objects`);
+        let filtered = [...all];
+
+        const terms = input.split(/\s+/);
+        terms.forEach(term => {
+            if (term.includes(':') || term.includes('>') || term.includes('<') || term.includes('=')) {
+                let key: string, val: string, op = ':';
+                if (term.includes('>')) { [key, val] = term.split('>'); op = '>'; }
+                else if (term.includes('<')) { [key, val] = term.split('<'); op = '<'; }
+                else if (term.includes('=')) { [key, val] = term.split('='); op = '='; }
+                else if (term.includes(':')) { [key, val] = term.split(':'); op = ':'; }
+                else { key = term; val = ''; }
+
+                key = key.toLowerCase();
+                const numVal = parseFloat(val);
+
+                if (key === 'l' || key === 'layer') {
+                    filtered = filtered.filter(s => s.layer.toLowerCase() === val.toLowerCase());
+                } else if (key === 'c' || key === 'color') {
+                    filtered = filtered.filter(s => s.color?.toLowerCase().includes(val.toLowerCase()));
+                } else if (key === 't' || key === 'type') {
+                    filtered = filtered.filter(s => s.type.toLowerCase().includes(val.toLowerCase()));
+                } else if (key === 'r' || key === 'radius') {
+                    filtered = filtered.filter(s => (s.type === 'circle' || s.type === 'arc') && this.compare(s.radius, numVal, op));
+                } else if (key === 'len' || key === 'length') {
+                    filtered = filtered.filter(s => {
+                        let len = 0;
+                        if (s.type === 'line') len = Math.hypot(s.x2-s.x1, s.y2-s.y1);
+                        else if (s.type === 'circle') len = 2 * Math.PI * s.radius;
+                        else if (s.type === 'pline') {
+                            for(let i=0; i<s.points.length-1; i++) len += Math.hypot(s.points[i+1].x-s.points[i].x, s.points[i+1].y-s.points[i].y);
+                        }
+                        return this.compare(len, numVal, op);
+                    });
+                }
+            } else {
+                // General match
+                filtered = filtered.filter(s => 
+                    s.type.toLowerCase() === term || 
+                    s.layer.toLowerCase() === term ||
+                    (s.color && s.color.toLowerCase().includes(term))
+                );
+            }
+        });
+
+        const ids = filtered.map(s => s.id);
+        this.ctx.setSelectedIds(ids);
+        this.ctx.addLog(`FILTERED: ${ids.length} shapes selected`);
         this.ctx.onFinish();
         return true;
     }
-    onClick() {} onMove() {} onEnter() {} onCancel() { this.ctx.onFinish(); }
+    private compare(v: number, target: number, op: string) {
+        if (op === '>') return v > target;
+        if (op === '<') return v < target;
+        if (op === '=' || op === ':') return Math.abs(v - target) < 0.001;
+        return false;
+    }
+    onClick() { this.ctx.onFinish(); } 
+    onMove() {} 
+    onEnter() { this.ctx.onFinish(); } 
+    onCancel() { this.ctx.onFinish(); }
 }
 
 export class GripEditCommand implements CADCommand {

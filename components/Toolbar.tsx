@@ -231,10 +231,12 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
       case 'View':
         return (
           <>
-            <ToolCircleBtn onClick={() => onAction('zoomExtents')} icon={<Maximize />} label="FULL" />
-            <ToolCircleBtn onClick={() => onAction('zoomIn')} icon={<ZoomIn />} label="IN" />
-            <ToolCircleBtn onClick={() => onAction('zoomOut')} icon={<ZoomOut />} label="OUT" />
-            <ToolCircleBtn onClick={() => onCommand('p')} icon={<Hand />} label="PAN" active={activeCommandName === 'PAN'} />
+            <ToolCircleBtn onClick={() => onAction('zoomAll')} icon={<Maximize />} label="Z-A" />
+            <ToolCircleBtn onClick={() => onAction('zoomExtents')} icon={<Maximize2 />} label="Z-E" />
+            <ToolCircleBtn onClick={() => onCommand('zoom w')} icon={<BoxSelect />} label="Z-W" active={activeCommandName === 'ZOOM'} />
+            <ToolCircleBtn onClick={() => onAction('zoomIn')} icon={<ZoomIn />} label="Z- in" />
+            <ToolCircleBtn onClick={() => onAction('zoomOut')} icon={<ZoomOut />} label="Z- out" />
+            <ToolCircleBtn onClick={() => onCommand('p')} icon={<Hand />} label="Z- pan" active={activeCommandName === 'PAN'} />
           </>
         );
       case 'Tools': // TOOLS

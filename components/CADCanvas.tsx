@@ -1,7 +1,7 @@
 
 import React, { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { Shape, ViewState, AppSettings, SnapPoint, LayerConfig, Point, MTextShape, BlockDefinition, LayoutDefinition } from '../types';
-import { hitTestShape, findBestSnap, formatLength, getShapesInRect, getShapeBounds, isRectIntersecting, formatDualLength, isShapeClosed, isPointInsideShape } from '../services/cadService';
+import { hitTestShape, findBestSnap, formatLength, getShapesInRect, getShapeBounds, isRectIntersecting, formatDualLength, isShapeClosed, isPointInsideShape, getPolylineOffsetPoints, calculateShapeLength } from '../services/cadService';
 
 interface CADCanvasProps {
   layers: Record<string, Shape[]>;
@@ -14,7 +14,8 @@ interface CADCanvasProps {
   isCommandActive: boolean;
   activeTab: string;
   isViewportActive?: boolean;
-  onViewportToggle?: () => void;
+  activeViewportId?: string | null;
+  onViewportToggle?: (x?: number, y?: number) => void;
   onClick?: (x: number, y: number, snapped: boolean) => void; 
   onMouseMove?: (x: number, y: number, snapped: boolean) => void;
   selectedIds?: string[];
@@ -37,7 +38,7 @@ export interface CADCanvasHandle {
 
 const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({ 
     layers, blocks, layouts, layerConfig, view, setView, settings, isCommandActive, activeTab, 
-    isViewportActive = false, onViewportToggle,
+    isViewportActive = false, activeViewportId, onViewportToggle,
     onMouseMove, onClick, selectedIds = [], highlightIds = [], onSelectionChange, previewShapes,
     activePrompt, basePoint = null, activeCommandName, isAiThinking, lastAiCommandTime, onAction, onCommand,
     setLogMessage
@@ -49,6 +50,12 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       const canvas = canvasRef.current;
       if (!canvas) return '';
       return canvas.toDataURL('image/png');
+    },
+    getCanvasSize: () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return { width: 800, height: 600 };
+      const r = getPixelRatio();
+      return { width: canvas.width / r, height: canvas.height / r };
     }
   }));
 
@@ -94,13 +101,65 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   const screenToWorld = (sx: number, sy: number): Point => {
     const canvas = canvasRef.current; if (!canvas || !view) return { x: 0, y: 0 };
     const r = getPixelRatio(), w = canvas.width/r, h = canvas.height/r;
-    return calculateScreenToWorld(sx, sy, view, w, h);
+    const isModel = activeTab === 'model';
+    
+    if (isModel) {
+        return calculateScreenToWorld(sx, sy, view, w, h);
+    } else {
+        const pPoint = calculateScreenToWorld(sx, sy, view, w, h);
+        if (isViewportActive && activeViewportId) {
+            const layout = layouts.find(l => l.id === activeTab);
+            const vp = layout?.viewports.find(v => v.id === activeViewportId);
+            if (vp && layout) {
+                const paperW = layout.paperSize.width;
+                const paperH = layout.paperSize.height;
+                
+                const papX = pPoint.x + paperW/2;
+                const papY = paperH/2 - pPoint.y;
+                
+                const relX = papX - vp.x;
+                const relY = papY - vp.y;
+                
+                const vts = vp.viewState.scale;
+                return {
+                    x: (relX - vp.width/2 - vp.viewState.originX) / vts,
+                    y: (vp.height/2 + vp.viewState.originY - relY) / vts
+                };
+            }
+        }
+        return pPoint;
+    }
   };
 
   const worldToScreen = (wx: number, wy: number): Point => {
       const canvas = canvasRef.current; if (!canvas || !view) return { x: 0, y: 0 };
       const r = getPixelRatio(), w = canvas.width/r, h = canvas.height/r, ts = view.scale * settings.drawingScale;
-      return { x: wx * ts + w/2 + view.originX, y: -wy * ts + h/2 + view.originY };
+      const isModel = activeTab === 'model';
+
+      if (isModel) {
+        return { x: wx * ts + w/2 + view.originX, y: -wy * ts + h/2 + view.originY };
+      } else {
+        if (isViewportActive && activeViewportId) {
+            const layout = layouts.find(l => l.id === activeTab);
+            const vp = layout?.viewports.find(v => v.id === activeViewportId);
+            if (vp && layout) {
+                const vts = vp.viewState.scale;
+                
+                const papX_rel = (wx * vts + vp.viewState.originX) + vp.width/2;
+                const papY_rel = (-wy * vts + vp.viewState.originY) + vp.height/2;
+
+                const papX = papX_rel + vp.x;
+                const papY = papY_rel + vp.y;
+                
+                const paperW = layout.paperSize.width;
+                const paperH = layout.paperSize.height;
+                const pPoint = { x: papX - paperW/2, y: paperH/2 - papY };
+
+                return { x: pPoint.x * ts + w/2 + view.originX, y: -pPoint.y * ts + h/2 + view.originY };
+            }
+        }
+        return { x: wx * ts + w/2 + view.originX, y: -wy * ts + h/2 + view.originY };
+      }
   };
 
   const drawUCS = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
@@ -163,7 +222,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     const r = getPixelRatio(), w = canvas.width/r, h = canvas.height/r, ts = view.scale * settings.drawingScale;
     ctx.setTransform(r, 0, 0, r, 0, 0); 
     const isModel = activeTab === 'model';
-    ctx.fillStyle = isModel ? "#121212" : "#333"; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = isModel ? "#0a0a0c" : "#333"; ctx.fillRect(0, 0, w, h);
 
     if (!isModel) {
       const activeLayout = layouts.find(l => l.id === activeTab);
@@ -212,9 +271,11 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               const vW = vp.width * ts;
               const vH = vp.height * ts;
               
+              const isActive = isViewportActive && vp.id === activeViewportId;
+              
               ctx.translate(vX, vY);
-              ctx.strokeStyle = isViewportActive ? "#00bcd4" : "#adadad"; 
-              ctx.lineWidth = isViewportActive ? 2 : 1;
+              ctx.strokeStyle = isActive ? "#00bcd4" : "#adadad"; 
+              ctx.lineWidth = isActive ? 2 : 1;
               ctx.strokeRect(0, 0, vW, vH);
               
               const region = new Path2D();
@@ -222,12 +283,18 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               ctx.clip(region);
               
               // Render model space inside viewport
-              const vts = vp.viewState.scale * settings.drawingScale;
-              ctx.translate(vW/2 + vp.viewState.originX, vH/2 + vp.viewState.originY);
+              const vts = vp.viewState.scale * ts;
+              // originX and originY are stored in paper units (mm)
+              ctx.translate(vW/2 + vp.viewState.originX * ts, vH/2 + vp.viewState.originY * ts);
               ctx.scale(vts, -vts);
               
               const vShapes = getAllShapesForRendering();
               vShapes.forEach(s => drawShape(ctx, s, vts));
+              
+              if (isActive && isCommandActive && previewShapes) {
+                  previewShapes.forEach(s => drawShape(ctx, s, vts));
+              }
+              
               ctx.restore();
           });
       }
@@ -237,18 +304,23 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       }
     }
 
-    if (isModel || isViewportActive) {
+    if (isModel) {
       ctx.save(); ctx.translate(w/2 + view.originX, h/2 + view.originY); ctx.scale(ts, -ts);
     
-    if (isModel && settings.grid) {
+      if (settings.grid) {
         const sMin = calculateScreenToWorld(0, 0, view, w, h);
         const sMax = calculateScreenToWorld(w*r, h*r, view, w, h);
-        const g = settings.gridSpacing;
+        
+        let g = settings.gridSpacing;
         const majorEvery = 5;
+        
+        // Dynamic coarsening for "graph paper" feel and performance
+        const ts_adj = ts;
+        while (g * ts_adj < 5) g *= 5;
         
         // Minor Grid Lines
         ctx.lineWidth = 0.5 / ts;
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.05)";
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
         ctx.beginPath();
         for(let x=Math.floor(sMin.x/g)*g; x<=sMax.x; x+=g){ 
             if (Math.abs(x % (g * majorEvery)) > 0.001 && Math.abs(x) > 0.001) {
@@ -263,7 +335,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         ctx.stroke();
 
         // Major Grid Lines
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
         ctx.beginPath();
         for(let x=Math.floor(sMin.x/(g * majorEvery))*(g * majorEvery); x<=sMax.x; x+=(g * majorEvery)){
             if (Math.abs(x) > 0.001) {
@@ -278,36 +350,36 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         ctx.stroke();
 
         // Main Axes (Origin Lines)
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+        ctx.strokeStyle = "rgba(0, 188, 212, 0.3)"; // Subtle Cyan for Origin
         ctx.beginPath();
         if (0 >= sMin.x && 0 <= sMax.x) { ctx.moveTo(0, sMin.y); ctx.lineTo(0, sMax.y); }
         if (0 >= sMax.y && 0 <= sMin.y) { ctx.moveTo(sMin.x, 0); ctx.lineTo(sMax.x, 0); }
         ctx.stroke();
-    }
+      }
     
-    const renderable = getAllShapesForRendering();
-    
-    // Performance Optimization: Viewport Culling
-    const sMin = calculateScreenToWorld(0, 0, view, w, h);
-    const sMax = calculateScreenToWorld(w*r, h*r, view, w, h);
-    const viewportBounds = { 
-        xMin: Math.min(sMin.x, sMax.x), 
-        yMin: Math.min(sMin.y, sMax.y), 
-        xMax: Math.max(sMin.x, sMax.x), 
-        yMax: Math.max(sMin.y, sMax.y) 
-    };
-    
-    const visibleShapes = renderable.filter(s => {
-        const bounds = getShapeBounds(s);
-        return isRectIntersecting(viewportBounds, bounds);
-    });
+      const renderable = getAllShapesForRendering();
+      
+      // Performance Optimization: Viewport Culling
+      const sMin = calculateScreenToWorld(0, 0, view, w, h);
+      const sMax = calculateScreenToWorld(w*r, h*r, view, w, h);
+      const viewportBounds = { 
+          xMin: Math.min(sMin.x, sMax.x), 
+          yMin: Math.min(sMin.y, sMax.y), 
+          xMax: Math.max(sMin.x, sMax.x), 
+          yMax: Math.max(sMin.y, sMax.y) 
+      };
+      
+      const visibleShapes = renderable.filter(s => {
+          const bounds = getShapeBounds(s);
+          return isRectIntersecting(viewportBounds, bounds);
+      });
 
-    visibleShapes.forEach(s => drawShape(ctx, s, ts));
-    if (activeSnapRef.current) drawSnapMarker(ctx, activeSnapRef.current, ts);
-    if (isCommandActive && previewShapes) previewShapes.forEach(s => drawShape(ctx, s, ts));
-    
-    visibleShapes.filter(s => selectedIds.includes(s.id)).forEach(s => drawGrips(ctx, s, ts));
-    ctx.restore();
+      visibleShapes.forEach(s => drawShape(ctx, s, ts));
+      if (activeSnapRef.current) drawSnapMarker(ctx, activeSnapRef.current, ts);
+      if (isCommandActive && previewShapes) previewShapes.forEach(s => drawShape(ctx, s, ts));
+      
+      visibleShapes.filter(s => selectedIds.includes(s.id)).forEach(s => drawGrips(ctx, s, ts));
+      ctx.restore();
     }
 
     if (isModel) {
@@ -419,36 +491,36 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     const conf = layerConfig[s.layer]; 
     if (!s.isPreview && conf && (!conf.visible || conf.frozen)) return;
     
+    // LOD: Skip tiny text
+    if ((s.type === 'text' || s.type === 'mtext') && s.size * ts < 5) return;
+
     ctx.save(); ctx.beginPath();
     let baseColor = s.color || conf?.color || "#FFFFFF";
     if (s.isPreview && isCommandActive) baseColor = layerConfig[settings.currentLayer]?.color || "#FFFFFF";
     if (activeTab !== 'model' && (baseColor.toUpperCase() === '#FFF' || baseColor.toUpperCase() === '#FFFFFF')) baseColor = '#111111';
     
-    let weight = s.thickness || conf?.thickness || 1;
+    let weight = (s.type === 'dline' ? (conf?.thickness || 1) : (s.thickness || conf?.thickness || 1));
     if (!settings.showLineWeights && !isS && !isH && !s.isPreview) weight = 1;
 
-    if (s.isPreview) { ctx.strokeStyle = baseColor; ctx.setLineDash([6/ts, 4/ts]); ctx.globalAlpha = 0.5; ctx.lineWidth = 1/ts; }
+    if (s.isPreview) { 
+        ctx.strokeStyle = baseColor; 
+        ctx.setLineDash([6/ts, 4/ts]); 
+        ctx.globalAlpha = 0.5; 
+        ctx.lineWidth = 1/ts; 
+        // For dline preview specifically, we might want a slightly thicker visual or distinct look
+        if (s.type === 'dline') ctx.lineWidth = 1.5/ts;
+    }
     else if (isS) { ctx.strokeStyle = "#00bcd4"; ctx.lineWidth = 2.5/ts; ctx.setLineDash([2/ts, 2/ts]); }
     else if (isH) { ctx.strokeStyle = "#00bcd4"; ctx.lineWidth = 1.5/ts; ctx.setLineDash([4/ts, 4/ts]); }
     else { ctx.strokeStyle = baseColor; if (conf?.locked) ctx.globalAlpha = 0.45; ctx.lineWidth = weight/ts; }
     
     // Auto-scaling logic: Adjust base L based on entity size if it's very small
     const currentLineType = s.lineType || conf?.lineType || 'continuous';
-    let L = 32 / ts; 
-    
-    // Calculate approximate perimeter/length for scaling
-    let sLen = 0;
-    if (s.type === 'line') sLen = Math.sqrt(Math.pow(s.x2-s.x1, 2) + Math.pow(s.y2-s.y1, 2));
-    else if (s.type === 'circle') sLen = Math.PI * 2 * s.radius;
-    else if (s.type === 'rect') sLen = 2 * (s.width + s.height);
-    else if (s.type === 'pline' || s.type === 'polygon' || s.type === 'hatch' || s.type === 'spline') sLen = 1000 / ts;
-    
-    // If the entity is shorter than 10 repetitions, scale the pattern down
-    if (sLen > 0 && sLen < L * 10) {
-      L = sLen / 10;
-    }
+    if (currentLineType !== 'continuous' && !s.isPreview && !isH && !isS) {
+        let L = 32 / ts; 
+        const sLen = calculateShapeLength(s);
+        if (sLen > 0 && sLen < L * 10) L = sLen / 10;
 
-    if (!s.isPreview && !isH && !isS) {
         if (currentLineType === 'dashed') ctx.setLineDash([L * 2.0, L * 1.5]);
         else if (currentLineType === 'dotted') ctx.setLineDash([1/ts, L * 1.0]);
         else if (currentLineType === 'center') ctx.setLineDash([L * 6, L * 1.5, L * 1, L * 1.5]);
@@ -466,7 +538,6 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         else if (currentLineType === 'zigzag2') ctx.setLineDash([L * 2, L * 1]);
         else if (currentLineType === 'dots2') ctx.setLineDash([1/ts, L * 0.5]);
         else if (currentLineType === 'dash2') ctx.setLineDash([L * 1, L * 1]);
-        else ctx.setLineDash([]);
     }
 
     switch (s.type) {
@@ -624,11 +695,71 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           ctx.moveTo(s.x, s.y - size); ctx.lineTo(s.x, s.y + size);
           break;
       }
-      case 'pline': case 'polygon': case 'spline': case 'dline':
+      case 'pline': case 'polygon': case 'spline':
         if(s.points && s.points.length > 0) {
             ctx.moveTo(s.points[0].x, s.points[0].y);
-            s.points.forEach(p => ctx.lineTo(p.x, p.y));
+            if (s.type === 'spline' && s.points.length > 2) {
+                for (let i = 1; i < s.points.length - 2; i++) {
+                    const xc = (s.points[i].x + s.points[i + 1].x) / 2;
+                    const yc = (s.points[i].y + s.points[i + 1].y) / 2;
+                    ctx.quadraticCurveTo(s.points[i].x, s.points[i].y, xc, yc);
+                }
+                // For the last 2 points
+                const n = s.points.length;
+                ctx.quadraticCurveTo(s.points[n-2].x, s.points[n-2].y, s.points[n-1].x, s.points[n-1].y);
+            } else {
+                s.points.forEach(p => ctx.lineTo(p.x, p.y));
+            }
             if(s.closed || s.type === 'polygon') ctx.closePath();
+        }
+        break;
+      case 'dline':
+        if(s.points && s.points.length > 1) {
+            const thickness = s.thickness || 230;
+            const justification = s.justification || 'zero';
+            
+            let offset1 = 0;
+            let offset2 = 0;
+            
+            if (justification === 'zero') {
+                offset1 = thickness / 2;
+                offset2 = -thickness / 2;
+            } else if (justification === 'top') {
+                offset1 = 0;
+                offset2 = -thickness;
+            } else if (justification === 'bottom') {
+                offset1 = thickness;
+                offset2 = 0;
+            }
+            
+            const pts1 = getPolylineOffsetPoints(s.points, offset1, s.closed);
+            const pts2 = getPolylineOffsetPoints(s.points, offset2, s.closed);
+            
+            // Draw path 1
+            if (pts1.length > 0) {
+                ctx.moveTo(pts1[0].x, pts1[0].y);
+                pts1.forEach(p => ctx.lineTo(p.x, p.y));
+                if (s.closed) ctx.closePath();
+            }
+            
+            // Draw path 2
+            if (pts2.length > 0) {
+                ctx.moveTo(pts2[0].x, pts2[0].y);
+                pts2.forEach(p => ctx.lineTo(p.x, p.y));
+                if (s.closed) ctx.closePath();
+            }
+
+            // Optional: Draw end caps if not closed
+            if (!s.closed) {
+                if (pts1.length > 0 && pts2.length > 0) {
+                    // Start cap
+                    ctx.moveTo(pts1[0].x, pts1[0].y);
+                    ctx.lineTo(pts2[0].x, pts2[0].y);
+                    // End cap
+                    ctx.moveTo(pts1[pts1.length-1].x, pts1[pts1.length-1].y);
+                    ctx.lineTo(pts2[pts2.length-1].x, pts2[pts2.length-1].y);
+                }
+            }
         }
         break;
       case 'leader': {
@@ -900,6 +1031,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
 
   const handlePointerDown = (e: React.PointerEvent) => {
       const canvas = canvasRef.current; if (!canvas) return;
+      // try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
       const rect = canvas.getBoundingClientRect(), x = e.clientX-rect.left, y = e.clientY-rect.top;
       activePointers.current.set(e.pointerId, {x, y}); pointerStartPos.current = { x, y };
       
@@ -930,6 +1062,8 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           }
       } else if (count === 2) {
           touchStartCount.current = 2;
+          setIsPanning(false);
+          setSelectionRect(null); // Clear selection when pinch starts
           if (selectionTimer.current) {
             clearTimeout(selectionTimer.current);
             selectionTimer.current = null;
@@ -937,30 +1071,36 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       }
 
       if (count === 2) {
-          setIsPanning(false); 
           const pts = Array.from(activePointers.current.values()) as Point[];
           initialPinchDist.current = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
-          initialViewOnPinch.current = { ...view };
+          
+          const currentView = (isViewportActive && activeViewportId) ? 
+              layouts.find(l=>l.id===activeTab)?.viewports.find(vp=>vp.id===activeViewportId)?.viewState : view;
+          
+          initialViewOnPinch.current = currentView ? { ...currentView } : { scale: 1, originX: 0, originY: 0 };
           
           const midX = (pts[0].x + pts[1].x) / 2, midY = (pts[0].y + pts[1].y) / 2;
           initialPanMid.current = { x: midX, y: midY };
           worldPointOnPinch.current = screenToWorld(midX, midY);
       }
       const now = Date.now();
-      if (now - lastClickTime.current < 300) { if (activeTab === 'layout' && onViewportToggle) onViewportToggle(); return; }
+      // Only handle double-tap for single pointer to avoid blocking pinch
+      if (count === 1 && now - lastClickTime.current < 300) { 
+          if (activeTab !== 'model' && onViewportToggle) onViewportToggle(x, y); 
+          return; 
+      }
       lastClickTime.current = now;
       if (activePointers.current.size === 1) { 
         lastPos.current = { x, y }; 
-        if (e.button === 1 || e.button === 2) {
+        if (e.button === 1 || e.button === 2 || activeCommandName === 'PAN') {
             setIsPanning(true);
-        } else if (activeCommandName === 'PAN') {
-            setIsPanning(true);
-        } else if (activeCommandName === 'SPLINE' || activeCommandName === 'SKETCH') {
-            const wp = screenToWorld(x, y);
-            if (onClick) onClick(wp.x, wp.y, !!activeSnapRef.current);
-        } else if (!isCommandActive) {
-            // No command? Default click behavior might be panning IF we drag, 
-            // but for now let's just let PointerUp handle selection.
+        } else if (e.button === 0) {
+            if (activeCommandName === 'SPLINE' || activeCommandName === 'SKETCH' || activeCommandName === 'ZOOM') {
+                const wp = screenToWorld(x, y);
+                if (onClick) onClick(wp.x, wp.y, !!activeSnapRef.current);
+            }
+            // For selection window / rubber band
+            setIsPanning(true); 
         }
       }
       updateCursorAndSnaps(x, y); redraw();
@@ -981,7 +1121,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           if (isPanning) {
               const dx = x - lastPos.current.x, dy = y - lastPos.current.y;
               if (Math.hypot(x - pointerStartPos.current.x, y - pointerStartPos.current.y) > 6) {
-                 const isSelCmd = ['SELECT', 'ERASE', 'MOVE', 'COPYCLIP', 'CUTCLIP', 'STRETCH'].includes(activeCommandName || '');
+                 const isSelCmd = ['SELECT', 'ERASE', 'MOVE', 'COPYCLIP', 'CUTCLIP', 'STRETCH', 'ZOOM'].includes(activeCommandName || '');
                  if (((!isCommandActive && activeCommandName !== 'PAN') || isSelCmd) && e.buttons === 1) {
                     const crossing = pointerStartPos.current.x > x;
                     setSelectionRect({ start: pointerStartPos.current, end: {x, y}, crossing });
@@ -989,10 +1129,38 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                     const w1 = screenToWorld(pointerStartPos.current.x, pointerStartPos.current.y);
                     const w2 = screenToWorld(x, y);
                     const selectableShapes = getAllShapesForSelection();
-                    const hits = getShapesInRect(w1, w2, selectableShapes, crossing);
+                    const hits = getShapesInRect(w1, w2, selectableShapes, crossing, blocks);
                     setHighlightedIds(hits.map(s => s.id));
                  }
-                 else setView(v => ({ ...v, originX: v.originX + dx, originY: v.originY + dy }));
+                 else if (e.buttons === 4 || e.buttons === 2 || activeCommandName === 'PAN') {
+                    const lts = view.scale * settings.drawingScale;
+                    if (activeTab !== 'model' && isViewportActive && activeViewportId) {
+                        const layout = layouts.find(l => l.id === activeTab);
+                        const vp = layout?.viewports.find(v => v.id === activeViewportId);
+                        if (vp) {
+                            // Panning drawing inside viewport
+                            // dx/dy are in screen pixels, need to convert to paper units first
+                            const dx_paper = dx / lts;
+                            const dy_paper = dy / lts;
+                            // relX = halfW + originX + mx*vts
+                            // relY = halfH + originY - my*vts
+                            // To increase relX, increase originX. To increase relY, increase originY.
+                            setView(v => ({ 
+                                ...v, 
+                                originX: v.originX + dx_paper, 
+                                originY: v.originY + dy_paper 
+                            }));
+                        }
+                    } else {
+                        // Panning model space or layout paper
+                        // originX/Y are in pixels
+                        setView(v => ({ 
+                            ...v, 
+                            originX: v.originX + dx, 
+                            originY: v.originY + dy 
+                        }));
+                    }
+                 }
               }
           }
           lastPos.current = { x, y };
@@ -1003,15 +1171,32 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           
           if (initialPinchDist.current && initialViewOnPinch.current && worldPointOnPinch.current && initialPanMid.current) {
               const r = getPixelRatio(), w = canvas.width/r, h = canvas.height/r;
-              
-              // Scale
               const factor = curDist / initialPinchDist.current;
               const newScale = Math.max(0.000001, initialViewOnPinch.current.scale * factor);
-              const ts = newScale * settings.drawingScale;
               
-              // Origin based on mid point movement (Panning while pinching)
-              const newOriginX = midX - w/2 - worldPointOnPinch.current.x * ts;
-              const newOriginY = midY - h/2 + worldPointOnPinch.current.y * ts;
+              let newOriginX: number, newOriginY: number;
+              const wp = worldPointOnPinch.current;
+
+              if (activeTab === 'model' || !isViewportActive) {
+                  const ts = newScale * settings.drawingScale;
+                  newOriginX = midX - w/2 - wp.x * ts;
+                  newOriginY = midY - h/2 + wp.y * ts;
+              } else {
+                  const layout = layouts.find(l => l.id === activeTab);
+                  const vp = layout?.viewports.find(v => v.id === activeViewportId);
+                  if (vp && layout) {
+                      const pPoint = calculateScreenToWorld(midX, midY, view, w, h);
+                      const paperW = layout.paperSize.width, paperH = layout.paperSize.height;
+                      const papX = pPoint.x + paperW/2, papY = paperH/2 - pPoint.y;
+                      const relX = papX - vp.x, relY = papY - vp.y;
+                      
+                      newOriginX = relX - vp.width/2 - wp.x * newScale;
+                      newOriginY = relY - vp.height/2 + wp.y * newScale;
+                  } else {
+                      newOriginX = initialViewOnPinch.current.originX;
+                      newOriginY = initialViewOnPinch.current.originY;
+                  }
+              }
               
               setView({ scale: newScale, originX: newOriginX, originY: newOriginY });
           }
@@ -1043,15 +1228,23 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           return;
       }
 
-      if ((activeCommandName === 'SPLINE' || activeCommandName === 'SKETCH') && !selectionRect) {
-          // Finish sketching on PointerUp
-          const wp = screenToWorld(x, y);
-          if (onClick) onClick(wp.x, wp.y, !!activeSnapRef.current);
+      if ((activeCommandName === 'SKETCH' || activeCommandName === 'SPLINE') && !selectionRect) {
+          // Finish sketching or freehand drawing on PointerUp if it was a drag
+          const dist = Math.hypot(x - pointerStartPos.current.x, y - pointerStartPos.current.y);
+          if (dist > 10) {
+              const wp = screenToWorld(x, y);
+              if (onClick) onClick(wp.x, wp.y, !!activeSnapRef.current);
+          }
       } else if (selectionRect) {
-          const w1 = screenToWorld(selectionRect.start.x, selectionRect.start.y), w2 = screenToWorld(selectionRect.end.x, selectionRect.end.y);
-          const selectableShapes = getAllShapesForSelection();
-          const hits = getShapesInRect(w1, w2, selectableShapes, selectionRect.crossing);
-          if (onSelectionChange) onSelectionChange(hits.map(s => s.id), e.shiftKey);
+          if (activeCommandName === 'ZOOM') {
+              const w2 = screenToWorld(x, y);
+              if (onClick) onClick(w2.x, w2.y, !!activeSnapRef.current);
+          } else {
+              const w1 = screenToWorld(selectionRect.start.x, selectionRect.start.y), w2 = screenToWorld(selectionRect.end.x, selectionRect.end.y);
+              const selectableShapes = getAllShapesForSelection();
+              const hits = getShapesInRect(w1, w2, selectableShapes, selectionRect.crossing, blocks);
+              if (onSelectionChange) onSelectionChange(hits.map(s => s.id), e.shiftKey);
+          }
           setSelectionRect(null);
           setHighlightedIds([]);
       } else {
@@ -1089,9 +1282,39 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     const canvas = canvasRef.current; if (!canvas) return;
     const rect = canvas.getBoundingClientRect(), x = e.clientX - rect.left, y = e.clientY - rect.top;
     const zoomIn = e.deltaY < 0, factor = zoomIn ? 1.25 : 0.8;
-    const wp = screenToWorld(x, y), newScale = Math.max(0.000001, view.scale * factor);
+    
+    const wp = screenToWorld(x, y);
+    const currentView = (isViewportActive && activeViewportId) ? 
+        layouts.find(l=>l.id===activeTab)?.viewports.find(vp=>vp.id===activeViewportId)?.viewState : view;
+    
+    if (!currentView) return;
+
+    const newScale = Math.max(0.000001, currentView.scale * factor);
     const r = getPixelRatio(), w = canvas.width/r, h = canvas.height/r, ts = newScale * settings.drawingScale;
-    const newOriginX = x - w/2 - wp.x * ts, newOriginY = y - h/2 + wp.y * ts;
+    
+    let newOriginX: number, newOriginY: number;
+    
+    if (activeTab === 'model' || !isViewportActive) {
+        newOriginX = x - w/2 - wp.x * ts;
+        newOriginY = y - h/2 + wp.y * ts;
+    } else {
+        const layout = layouts.find(l => l.id === activeTab);
+        const vp = layout?.viewports.find(v => v.id === activeViewportId);
+        if (vp && layout) {
+            const pPoint = calculateScreenToWorld(x, y, view, w, h);
+            const paperW = layout.paperSize.width, paperH = layout.paperSize.height;
+            const papX = pPoint.x + paperW/2, papY = paperH/2 - pPoint.y;
+            const relX = papX - vp.x, relY = papY - vp.y;
+            
+            const vts = newScale; 
+            newOriginX = relX - vp.width/2 - wp.x * vts;
+            newOriginY = relY - vp.height/2 + wp.y * vts;
+        } else {
+            newOriginX = currentView.originX;
+            newOriginY = currentView.originY;
+        }
+    }
+    
     setView({ scale: newScale, originX: newOriginX, originY: newOriginY });
   };
 
@@ -1117,7 +1340,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   useEffect(() => { redraw(); }, [redraw, view, isViewportActive, layers, layerConfig, selectedIds, highlightIds, settings, previewShapes]);
 
   return (
-    <div className="w-full h-full overflow-hidden bg-[#121212] touch-none">
+    <div className="w-full h-full overflow-hidden bg-[#0a0a0c] touch-none">
         <canvas ref={canvasRef} className="w-full h-full outline-none" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onWheel={handleWheel} onContextMenu={e => e.preventDefault()} />
     </div>
   );

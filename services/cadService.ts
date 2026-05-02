@@ -324,13 +324,38 @@ export const hitTestShape = (x: number, y: number, s: Shape, threshold: number, 
       if (s.counterClockwise) { if (eA < sA) return angle >= sA || angle <= eA; return angle >= sA && angle <= eA; }
       else { if (sA < eA) return angle >= eA || angle <= sA; return angle >= eA && angle <= sA; }
     }
-    case 'pline': case 'polygon': case 'spline': case 'dline': {
+    case 'pline': case 'polygon': case 'spline': {
         for(let i=0; i<s.points.length-1; i++) {
             if (distToSegment(x, y, s.points[i].x, s.points[i].y, s.points[i+1].x, s.points[i+1].y) < threshold) return true;
         }
         if (s.closed && s.points.length > 2) {
             if (distToSegment(x, y, s.points[s.points.length-1].x, s.points[s.points.length-1].y, s.points[0].x, s.points[0].y) < threshold) return true;
             if (s.filled && isPointInPoly({x, y}, s.points)) return true;
+        }
+        return false;
+    }
+    case 'dline': {
+        const thickness = s.thickness || 230;
+        const justification = s.justification || 'zero';
+        let offset1 = 0, offset2 = 0;
+        if (justification === 'zero') { offset1 = thickness/2; offset2 = -thickness/2; }
+        else if (justification === 'top') { offset1 = 0; offset2 = -thickness; }
+        else if (justification === 'bottom') { offset1 = thickness; offset2 = 0; }
+
+        const pts1 = getPolylineOffsetPoints(s.points, offset1, s.closed);
+        const pts2 = getPolylineOffsetPoints(s.points, offset2, s.closed);
+
+        // Check path 1
+        for(let i=0; i<pts1.length-1; i++) {
+            if (distToSegment(x, y, pts1[i].x, pts1[i].y, pts1[i+1].x, pts1[i+1].y) < threshold) return true;
+        }
+        // Check path 2
+        for(let i=0; i<pts2.length-1; i++) {
+            if (distToSegment(x, y, pts2[i].x, pts2[i].y, pts2[i+1].x, pts2[i+1].y) < threshold) return true;
+        }
+        // Also check if it's "inside" the wall (between the lines)
+        for(let i=0; i<s.points.length-1; i++) {
+            if (distToSegment(x, y, s.points[i].x, s.points[i].y, s.points[i+1].x, s.points[i+1].y) < (thickness/2 + threshold)) return true;
         }
         return false;
     }
@@ -372,41 +397,52 @@ export const hitTestShape = (x: number, y: number, s: Shape, threshold: number, 
 };
 
 export const getShapeBounds = (s: Shape, blocks?: Record<string, BlockDefinition>): { xMin: number, yMin: number, xMax: number, yMax: number } => {
+    if (s._bounds) return s._bounds;
+    
+    let bounds;
     switch (s.type) {
         case 'line':
-            return { xMin: Math.min(s.x1, s.x2), yMin: Math.min(s.y1, s.y2), xMax: Math.max(s.x1, s.x2), yMax: Math.max(s.y1, s.y2) };
+            bounds = { xMin: Math.min(s.x1, s.x2), yMin: Math.min(s.y1, s.y2), xMax: Math.max(s.x1, s.x2), yMax: Math.max(s.y1, s.y2) };
+            break;
         case 'block':
             if (blocks && blocks[s.blockId]) {
                 const block = blocks[s.blockId];
-                let xMin = Infinity, yMin = Infinity, xMax = -Infinity, yMax = -Infinity;
+                let bxMin = Infinity, byMin = Infinity, bxMax = -Infinity, byMax = -Infinity;
                 block.shapes.forEach(bs => {
                     const b = getShapeBounds(bs, blocks);
-                    xMin = Math.min(xMin, b.xMin); yMin = Math.min(yMin, b.yMin);
-                    xMax = Math.max(xMax, b.xMax); yMax = Math.max(yMax, b.yMax);
+                    bxMin = Math.min(bxMin, b.xMin); byMin = Math.min(byMin, b.yMin);
+                    bxMax = Math.max(bxMax, b.xMax); byMax = Math.max(byMax, b.yMax);
                 });
-                // TODO: Apply scale and rotation to bounds (simplified for now as circle around origin)
-                const r = Math.sqrt(Math.max(xMin*xMin, xMax*xMax) + Math.max(yMin*yMin, yMax*yMax)) * Math.max(s.scaleX, s.scaleY);
-                return { xMin: s.x - r, yMin: s.y - r, xMax: s.x + r, yMax: s.y + r };
+                const r = Math.sqrt(Math.max(bxMin*bxMin, bxMax*bxMax) + Math.max(byMin*byMin, byMax*byMax)) * Math.max(s.scaleX, s.scaleY);
+                bounds = { xMin: s.x - r, yMin: s.y - r, xMax: s.x + r, yMax: s.y + r };
+            } else {
+                bounds = { xMin: s.x - 5, yMin: s.y - 5, xMax: s.x + 5, yMax: s.y + 5 };
             }
-            return { xMin: s.x - 5, yMin: s.y - 5, xMax: s.x + 5, yMax: s.y + 5 };
+            break;
         case 'circle':
-            return { xMin: s.x - s.radius, yMin: s.y - s.radius, xMax: s.x + s.radius, yMax: s.y + s.radius };
+            bounds = { xMin: s.x - s.radius, yMin: s.y - s.radius, xMax: s.x + s.radius, yMax: s.y + s.radius };
+            break;
         case 'rect':
-            return { xMin: s.x, yMin: s.y, xMax: s.x + s.width, yMax: s.y + s.height };
+            bounds = { xMin: s.x, yMin: s.y, xMax: s.x + s.width, yMax: s.y + s.height };
+            break;
         case 'arc':
-            // Simple bounding box for arc (can be refined but this is safe)
-            return { xMin: s.x - s.radius, yMin: s.y - s.radius, xMax: s.x + s.radius, yMax: s.y + s.radius };
+            bounds = { xMin: s.x - s.radius, yMin: s.y - s.radius, xMax: s.x + s.radius, yMax: s.y + s.radius };
+            break;
         case 'pline':
         case 'polygon':
         case 'spline':
         case 'hatch':
-            if (!s.points || s.points.length === 0) return { xMin: 0, yMin: 0, xMax: 0, yMax: 0 };
-            let xMin = s.points[0].x, yMin = s.points[0].y, xMax = s.points[0].x, yMax = s.points[0].y;
-            s.points.forEach(p => {
-                xMin = Math.min(xMin, p.x); yMin = Math.min(yMin, p.y);
-                xMax = Math.max(xMax, p.x); yMax = Math.max(yMax, p.y);
-            });
-            return { xMin, yMin, xMax, yMax };
+            if (!s.points || s.points.length === 0) {
+                bounds = { xMin: 0, yMin: 0, xMax: 0, yMax: 0 };
+            } else {
+                let pxMin = s.points[0].x, pyMin = s.points[0].y, pxMax = s.points[0].x, pyMax = s.points[0].y;
+                s.points.forEach(p => {
+                    pxMin = Math.min(pxMin, p.x); pyMin = Math.min(pyMin, p.y);
+                    pxMax = Math.max(pxMax, p.x); pyMax = Math.max(pyMax, p.y);
+                });
+                bounds = { xMin: pxMin, yMin: pyMin, xMax: pxMax, yMax: pyMax };
+            }
+            break;
         case 'text':
         case 'mtext': {
             const lines = s.type === 'mtext' ? s.content.split('\n') : [s.content];
@@ -416,39 +452,101 @@ export const getShapeBounds = (s: Shape, blocks?: Record<string, BlockDefinition
                 const maxChars = Math.max(...lines.map(l => l.length));
                 w = maxChars * s.size * 0.6;
             }
-            const xMin = s.x - (s.justification === 'center' ? w/2 : s.justification === 'right' ? w : 0);
-            return { xMin, yMin: s.y - h, xMax: xMin + w, yMax: s.y };
+            const txMin = s.x - (s.justification === 'center' ? w/2 : s.justification === 'right' ? w : 0);
+            bounds = { xMin: txMin, yMin: s.y - h, xMax: txMin + w, yMax: s.y };
+            break;
         }
         case 'ellipse':
             const maxR = Math.max(s.rx, s.ry);
-            return { xMin: s.x - maxR, yMin: s.y - maxR, xMax: s.x + maxR, yMax: s.y + maxR };
+            bounds = { xMin: s.x - maxR, yMin: s.y - maxR, xMax: s.x + maxR, yMax: s.y + maxR };
+            break;
         case 'point':
-            return { xMin: s.x - 5, yMin: s.y - 5, xMax: s.x + 5, yMax: s.y + 5 };
+            bounds = { xMin: s.x - 5, yMin: s.y - 5, xMax: s.x + 5, yMax: s.y + 5 };
+            break;
         case 'donut':
-            return { xMin: s.x - s.outerRadius, yMin: s.y - s.outerRadius, xMax: s.x + s.outerRadius, yMax: s.y + s.outerRadius };
+            bounds = { xMin: s.x - s.outerRadius, yMin: s.y - s.outerRadius, xMax: s.x + s.outerRadius, yMax: s.y + s.outerRadius };
+            break;
         case 'ray':
         case 'xline': {
-            // Infinite lines don't have finite bounds, but we can return something that doesn't mess up zoom extents
-            return { xMin: Math.min(s.x1, s.x2), yMin: Math.min(s.y1, s.y2), xMax: Math.max(s.x1, s.x2), yMax: Math.max(s.y1, s.y2) };
+            bounds = { xMin: Math.min(s.x1, s.x2), yMin: Math.min(s.y1, s.y2), xMax: Math.max(s.x1, s.x2), yMax: Math.max(s.y1, s.y2) };
+            break;
         }
         case 'dline':
-            if (!s.points || s.points.length === 0) return { xMin: 0, yMin: 0, xMax: 0, yMax: 0 };
-            let dxMin = s.points[0].x, dyMin = s.points[0].y, dxMax = s.points[0].x, dyMax = s.points[0].y;
-            s.points.forEach(p => {
-                dxMin = Math.min(dxMin, p.x); dyMin = Math.min(dyMin, p.y);
-                dxMax = Math.max(dxMax, p.x); dyMax = Math.max(dyMax, p.y);
-            });
-            return { xMin: dxMin - s.thickness/2, yMin: dyMin - s.thickness/2, xMax: dxMax + s.thickness/2, yMax: dyMax + s.thickness/2 };
+            if (!s.points || s.points.length === 0) {
+                bounds = { xMin: 0, yMin: 0, xMax: 0, yMax: 0 };
+            } else {
+                let dxMin = s.points[0].x, dyMin = s.points[0].y, dxMax = s.points[0].x, dyMax = s.points[0].y;
+                s.points.forEach(p => {
+                    dxMin = Math.min(dxMin, p.x); dyMin = Math.min(dyMin, p.y);
+                    dxMax = Math.max(dxMax, p.x); dyMax = Math.max(dyMax, p.y);
+                });
+                bounds = { xMin: dxMin - s.thickness/2, yMin: dyMin - s.thickness/2, xMax: dxMax + s.thickness/2, yMax: dyMax + s.thickness/2 };
+            }
+            break;
         case 'dimension':
-            return { 
+            bounds = { 
                 xMin: Math.min(s.x1, s.x2, s.dimX), 
                 yMin: Math.min(s.y1, s.y2, s.dimY), 
                 xMax: Math.max(s.x1, s.x2, s.dimX), 
                 yMax: Math.max(s.y1, s.y2, s.dimY) 
             };
+            break;
         default:
-            return { xMin: -1e9, yMin: -1e9, xMax: 1e9, yMax: 1e9 };
+            bounds = { xMin: -1e9, yMin: -1e9, xMax: 1e9, yMax: 1e9 };
     }
+    
+    if (!s.isPreview) s._bounds = bounds;
+    return bounds;
+};
+
+export const calculateShapeLength = (s: Shape): number => {
+    if (s._length !== undefined) return s._length;
+    let len = 0;
+    switch (s.type) {
+        case 'line': len = distance({x: s.x1, y: s.y1}, {x: s.x2, y: s.y2}); break;
+        case 'circle': len = Math.PI * 2 * s.radius; break;
+        case 'rect': len = 2 * (s.width + s.height); break;
+        case 'pline': case 'polygon': case 'spline': case 'dline': case 'hatch': 
+            len = calculatePolylineLength(s.points, (s as any).closed || s.type === 'polygon' || s.type === 'hatch'); 
+            break;
+        case 'arc': len = s.radius * Math.abs(s.endAngle - s.startAngle); break;
+        case 'ellipse': {
+            // Ramanujan approximation
+            const a = s.rx, b = s.ry;
+            len = Math.PI * (3*(a+b) - Math.sqrt((3*a+b) * (a+3*b)));
+            break;
+        }
+        default: len = 1000; // Fallback
+    }
+    if (!s.isPreview) s._length = len;
+    return len;
+};
+
+export const getAllShapesBounds = (layers: Record<string, Shape[]>, blocks?: Record<string, BlockDefinition>, limits?: { min: Point, max: Point }): { xMin: number, yMin: number, xMax: number, yMax: number } | null => {
+    let xMin = Infinity, yMin = Infinity, xMax = -Infinity, yMax = -Infinity;
+    let hasShapes = false;
+
+    Object.values(layers).forEach(layerShapes => {
+        layerShapes.forEach(s => {
+            if (s.type === 'ray' || s.type === 'xline') return; 
+            const b = getShapeBounds(s, blocks);
+            if (b.xMin === -1e9 || b.yMin === -1e9) return;
+            xMin = Math.min(xMin, b.xMin); yMin = Math.min(yMin, b.yMin);
+            xMax = Math.max(xMax, b.xMax); yMax = Math.max(yMax, b.yMax);
+            hasShapes = true;
+        });
+    });
+
+    if (limits) {
+        xMin = Math.min(xMin, limits.min.x, limits.max.x);
+        yMin = Math.min(yMin, limits.min.y, limits.max.y);
+        xMax = Math.max(xMax, limits.min.x, limits.max.x);
+        yMax = Math.max(yMax, limits.min.y, limits.max.y);
+        hasShapes = true;
+    }
+
+    if (!hasShapes) return null;
+    return { xMin, yMin, xMax, yMax };
 };
 
 export const isRectIntersecting = (r1: { xMin: number, yMin: number, xMax: number, yMax: number }, r2: { xMin: number, yMin: number, xMax: number, yMax: number }): boolean => {
@@ -863,6 +961,46 @@ export const resolvePointInput = (input: string, lastPoint: Point | null, isImpe
     return null;
 };
 
+export const getPolylineOffsetPoints = (pts: Point[], dist: number, isClosed: boolean = false): Point[] => {
+    if (!pts || pts.length < 2) return [];
+    if (Math.abs(dist) < 0.0001) return [...pts];
+
+    const segments: { p1: Point, p2: Point }[] = [];
+    for (let i = 0; i < (isClosed ? pts.length : pts.length - 1); i++) {
+        const p1 = pts[i], p2 = pts[(i + 1) % pts.length];
+        if (distance(p1, p2) > 0.0001) segments.push({ p1, p2 });
+    }
+
+    if (segments.length === 0) return [];
+
+    const offsetSegments = segments.map(seg => {
+        const dx = seg.p2.x - seg.p1.x, dy = seg.p2.y - seg.p1.y;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        const nx = -dy / len, ny = dx / len;
+        return { 
+            p1: { x: seg.p1.x + nx * dist, y: seg.p1.y + ny * dist }, 
+            p2: { x: seg.p2.x + nx * dist, y: seg.p2.y + ny * dist } 
+        };
+    });
+
+    const newPts: Point[] = [];
+    if (!isClosed) {
+        newPts.push(offsetSegments[0].p1);
+        for (let i = 0; i < offsetSegments.length - 1; i++) {
+            const inter = getIntersection(offsetSegments[i].p1, offsetSegments[i].p2, offsetSegments[i+1].p1, offsetSegments[i+1].p2, true);
+            newPts.push(inter || offsetSegments[i].p2);
+        }
+        newPts.push(offsetSegments[offsetSegments.length - 1].p2);
+    } else {
+        for (let i = 0; i < offsetSegments.length; i++) {
+            const cur = offsetSegments[i], next = offsetSegments[(i + 1) % offsetSegments.length];
+            const inter = getIntersection(cur.p1, cur.p2, next.p1, next.p2, true);
+            newPts.push(inter || cur.p2);
+        }
+    }
+    return newPts;
+};
+
 export const offsetShape = (s: Shape, dist: number, sidePoint: Point): Shape | null => {
     const id = generateId();
     switch (s.type) {
@@ -931,33 +1069,7 @@ export const offsetShape = (s: Shape, dist: number, sidePoint: Point): Shape | n
                 }
             });
 
-            const offsetSegments = segments.map(seg => {
-                const dx = seg.p2.x - seg.p1.x, dy = seg.p2.y - seg.p1.y;
-                const len = Math.sqrt(dx * dx + dy * dy);
-                const nx = -dy / len, ny = dx / len;
-                const finalOffset = useLeft ? dist : -dist;
-                return { 
-                    p1: { x: seg.p1.x + nx * finalOffset, y: seg.p1.y + ny * finalOffset }, 
-                    p2: { x: seg.p2.x + nx * finalOffset, y: seg.p2.y + ny * finalOffset } 
-                };
-            });
-
-            const newPts: Point[] = [];
-            if (!isClosed) {
-                newPts.push(offsetSegments[0].p1);
-                for (let i = 0; i < offsetSegments.length - 1; i++) {
-                    const inter = getIntersection(offsetSegments[i].p1, offsetSegments[i].p2, offsetSegments[i+1].p1, offsetSegments[i+1].p2, true);
-                    newPts.push(inter || offsetSegments[i].p2);
-                }
-                newPts.push(offsetSegments[offsetSegments.length - 1].p2);
-            } else {
-                for (let i = 0; i < offsetSegments.length; i++) {
-                    const cur = offsetSegments[i], next = offsetSegments[(i + 1) % offsetSegments.length];
-                    const inter = getIntersection(cur.p1, cur.p2, next.p1, next.p2, true);
-                    newPts.push(inter || cur.p2);
-                }
-            }
-            
+            const newPts = getPolylineOffsetPoints(pts, useLeft ? dist : -dist, isClosed);
             return { ...s, id, points: newPts } as PolyShape;
         }
         case 'ray': case 'xline': {
@@ -1394,7 +1506,7 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
     return candidates[0];
 };
 
-export const getShapesInRect = (p1: Point, p2: Point, shapes: Shape[], crossing: boolean): Shape[] => {
+export const getShapesInRect = (p1: Point, p2: Point, shapes: Shape[], crossing: boolean, blocks?: Record<string, BlockDefinition>): Shape[] => {
     const xMin = Math.min(p1.x, p2.x), xMax = Math.max(p1.x, p2.x);
     const yMin = Math.min(p1.y, p2.y), yMax = Math.max(p1.y, p2.y);
     const rectSegs = [
@@ -1407,7 +1519,7 @@ export const getShapesInRect = (p1: Point, p2: Point, shapes: Shape[], crossing:
     const isInside = (p: Point) => isPointInRect(p, xMin, yMin, xMax, yMax);
 
     return shapes.filter(s => {
-        const bounds = getShapeBounds(s);
+        const bounds = getShapeBounds(s, blocks);
         
         // Quick rejection
         if (!isRectIntersecting({xMin, yMin, xMax, yMax}, bounds)) return false;
