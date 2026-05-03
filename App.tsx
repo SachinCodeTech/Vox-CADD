@@ -789,7 +789,7 @@ const App: React.FC = () => {
       case 'rename': {
         const oldName = currentFileName;
         let newName = payload;
-        if (newName && !newName.toLowerCase().endsWith('.vox') && !newName.toLowerCase().endsWith('.dxf') && !newName.toLowerCase().endsWith('.dwg')) {
+        if (newName && !newName.toLowerCase().endsWith('.vox') && !newName.toLowerCase().endsWith('.dxf')) {
           newName += '.vox';
         }
         if (!newName || oldName === newName) return;
@@ -1013,7 +1013,7 @@ const App: React.FC = () => {
             const dataUrl = canvasHandleRef.current.captureImage();
             const link = document.createElement('a');
             link.href = dataUrl;
-            link.download = currentFileName.replace(/\.(vox|dxf|dwg)$/i, '') + '.png';
+            link.download = currentFileName.replace(/\.(vox|dxf)$/i, '') + '.png';
             link.click();
             setLogMessage("IMAGE_EXPORT_COMPLETE");
         }

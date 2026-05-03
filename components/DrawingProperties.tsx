@@ -26,7 +26,7 @@ const DrawingProperties: React.FC<DrawingPropertiesProps> = ({ settings, onConfi
     description: '',
     ...(settings.metadata || {})
   });
-  const [localTitle, setLocalTitle] = useState(currentFileName.replace(/\.(vox|dxf|dwg)$/i, ''));
+  const [localTitle, setLocalTitle] = useState(currentFileName.replace(/\.(vox|dxf)$/i, ''));
 
   useEffect(() => {
     const handleMove = (e: MouseEvent | TouchEvent) => {
@@ -61,11 +61,8 @@ const DrawingProperties: React.FC<DrawingPropertiesProps> = ({ settings, onConfi
   };
 
   const handleConfirm = () => {
-    const currentExtMatch = currentFileName.match(/\.(vox|dxf|dwg)$/i);
-    const ext = currentExtMatch ? currentExtMatch[0].toLowerCase() : '.vox';
-    const finalName = localTitle.toLowerCase().endsWith('.vox') || 
-                      localTitle.toLowerCase().endsWith('.dxf') || 
-                      localTitle.toLowerCase().endsWith('.dwg') ? localTitle : localTitle + ext;
+    const ext = currentFileName.toLowerCase().endsWith('.dxf') ? '.dxf' : '.vox';
+    const finalName = localTitle.endsWith('.vox') || localTitle.endsWith('.dxf') ? localTitle : localTitle + ext;
     
     onConfirm(
       { ...localMetadata, lastModified: new Date().toISOString() },
