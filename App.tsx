@@ -570,11 +570,20 @@ const App: React.FC = () => {
             console.log(`Loading DWG: ${fileName} (${content.byteLength} bytes)`);
             setLogMessage("PARSING_DWG_BINARY...");
             const result = await dwgToShapes(content);
-            const { shapes: importedShapes, stats } = result;
-            console.log(`DWG Import Result: ${importedShapes.length} shapes found`);
+            const { shapes: importedShapes, blocks: importedBlocks, layers: importedLayers, stats } = result;
+            console.log(`DWG Import Result: ${importedShapes.length} shapes found, ${Object.keys(importedBlocks || {}).length} blocks`);
             
             if (importedShapes.length > 0) {
-                finalLayers = { '0': importedShapes, 'defpoints': [] };
+                finalLayers = importedShapes.reduce((acc, s) => {
+                    const l = s.layer || '0';
+                    if (!acc[l]) acc[l] = [];
+                    acc[l].push(s);
+                    return acc;
+                }, {} as Record<string, Shape[]>);
+                
+                if (importedBlocks) setBlocks(prev => ({ ...prev, ...importedBlocks }));
+                if (importedLayers) finalConfig = { ...INITIAL_LAYERS_CONFIG, ...importedLayers };
+                
                 importStats = stats;
                 setLogMessage(`DWG_IMPORT: ${importedShapes.length} ENTITIES`);
             } else {
@@ -598,9 +607,19 @@ const App: React.FC = () => {
             } else {
                 setLogMessage("PARSING_DXF_DATA...");
                 const dxfResult = dxfToShapes(content);
-                const { shapes: importedShapes, stats } = dxfResult;
+                const { shapes: importedShapes, blocks: importedBlocks, layers: importedLayers, stats } = dxfResult;
+                
                 if (importedShapes.length > 0) {
-                    finalLayers = { '0': importedShapes, 'defpoints': [] };
+                    finalLayers = importedShapes.reduce((acc, s) => {
+                        const l = s.layer || '0';
+                        if (!acc[l]) acc[l] = [];
+                        acc[l].push(s);
+                        return acc;
+                    }, {} as Record<string, Shape[]>);
+                    
+                    if (importedBlocks) setBlocks(prev => ({ ...prev, ...importedBlocks }));
+                    if (importedLayers) finalConfig = { ...INITIAL_LAYERS_CONFIG, ...importedLayers };
+                    
                     importStats = stats;
                     setLogMessage(`DXF_IMPORT: ${importedShapes.length} ENTITIES`);
                 } else {
