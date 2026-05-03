@@ -1,30 +1,30 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import CADCanvas, { CADCanvasHandle } from './components/CADCanvas';
-import Toolbar from './components/Toolbar';
-import CommandBar from './components/CommandBar';
-import LayerManager from './components/LayerManager';
-import FileManager from './components/FileManager';
-import MenuBar from './components/MenuBar';
-import PropertiesPanel from './components/PropertiesPanel';
-import CalculatorPanel from './components/CalculatorPanel';
-import DraftingSettings from './components/DraftingSettings';
-import DrawingProperties from './components/DrawingProperties';
-import InfoPanel from './components/InfoPanel';
-import NewFileDialog from './components/NewFileDialog';
-import HatchPatternSelector from './components/HatchPatternSelector';
-import MTextEditor from './components/MTextEditor';
-import DimStyleManager from './components/DimStyleManager';
-import LoadingScreen from './components/LoadingScreen';
+import CADCanvas, { CADCanvasHandle } from './CADCanvas';
+import Toolbar from './Toolbar';
+import CommandBar from './CommandBar';
+import LayerManager from './LayerManager';
+import FileManager from './FileManager';
+import MenuBar from './MenuBar';
+import PropertiesPanel from './PropertiesPanel';
+import CalculatorPanel from './CalculatorPanel';
+import DraftingSettings from './DraftingSettings';
+import DrawingProperties from './DrawingProperties';
+import InfoPanel from './InfoPanel';
+import NewFileDialog from './NewFileDialog';
+import HatchPatternSelector from './HatchPatternSelector';
+import MTextEditor from './MTextEditor';
+import DimStyleManager from './DimStyleManager';
+import LoadingScreen from './LoadingScreen';
 import { Share as CapacitorShare } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Capacitor } from '@capacitor/core';
-import { generateId, hitTestGrip, getAllShapesBounds } from './services/cadService';
-import { getCommandFromAI, connectLiveAgent } from './services/geminiService';
-import { shapesToDXF, dxfToShapes } from './services/dxfService';
-import { shapesToVox, voxToShapes } from './services/voxService';
-import { dwgToShapes } from './services/DwgService';
+import { generateId, hitTestGrip, getAllShapesBounds } from '../services/cadService';
+import { getCommandFromAI, connectLiveAgent } from '../services/geminiService';
+import { shapesToDXF, dxfToShapes } from '../services/dxfService';
+import { shapesToVox, voxToShapes } from '../services/voxService';
+import { dwgToShapes } from '../services/DwgService';
 import { 
   CADCommand, CommandEngine, LineCommand, DoubleLineCommand, CircleCommand, RectCommand, PolyCommand, 
   ArcCommand, MoveCommand, EraseCommand, DistanceCommand, AreaCommand, 
@@ -36,13 +36,13 @@ import {
   DonutCommand, PointCommand,
   SelectAllCommand, CopyClipCommand, CutClipCommand, PasteClipCommand, SplineCommand, SketchCommand, StretchCommand, SelectCommand,
   ArrayCommand, BlockCommand, InsertCommand, FilterCommand, FindCommand, ViewportCommand, LayoutCommand, GripEditCommand, ImportCommand
-} from './services/commandEngine';
-import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType, BlockDefinition, LayoutDefinition, LayoutViewport } from './types';
+} from '../services/commandEngine';
+import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType, BlockDefinition, LayoutDefinition, LayoutViewport } from '../types';
 import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive, AlertTriangle } from 'lucide-react';
 
-import VoxIcon from './components/VoxIcon';
-import ImportSummaryDialog from './components/ImportSummaryDialog';
-import { storageService } from './services/storageService';
+import VoxIcon from './VoxIcon';
+import ImportSummaryDialog from './ImportSummaryDialog';
+import { storageService } from '../services/storageService';
 
 const INITIAL_SETTINGS: AppSettings = {
   ortho: true, snap: true, grid: true,
