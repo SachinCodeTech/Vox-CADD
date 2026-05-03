@@ -555,6 +555,9 @@ const App: React.FC = () => {
     const isDwg = fileName.toLowerCase().endsWith('.dwg');
     const isVox = fileName.toLowerCase().endsWith('.vox');
     
+    setLoadingFile(true);
+    setLoadingStatus(`Importing ${fileName}...`);
+    
     try {
         let finalLayers: Record<string, Shape[]> = { '0': [], 'defpoints': [] };
         let finalConfig: Record<string, LayerConfig> = INITIAL_LAYERS_CONFIG;
@@ -675,6 +678,9 @@ const App: React.FC = () => {
     } catch(err) { 
         console.error(err);
         setLogMessage("LOAD_ERR: CORRUPT_FORMAT"); 
+    } finally {
+        setLoadingFile(false);
+        setLoadingStatus("");
     }
   };
 

@@ -387,6 +387,42 @@ export const dxfToShapes = (dxfString: string): {
                     return { id, layer, color, thickness, type: 'point', x: entity.position.x, y: entity.position.y, size: 5 } as any;
                 case 'INSERT':
                     return { id, layer, color, thickness, type: 'block', x: entity.position.x, y: entity.position.y, blockId: entity.name, scaleX: entity.xScale || 1, scaleY: entity.yScale || 1, rotation: (entity.rotation || 0) * Math.PI / 180 } as any;
+                case 'SPLINE':
+                    if (entity.controlPoints && entity.controlPoints.length > 1) {
+                        return { id, layer, color, thickness, type: 'pline', points: entity.controlPoints.map((v: any) => ({ x: v.x, y: v.y })), closed: entity.closed } as any;
+                    }
+                    break;
+                case 'DIMENSION':
+                    return { 
+                        id, layer, color, thickness, type: 'dimension', 
+                        dimType: 'aligned', 
+                        x1: entity.definitionPoint.x, y1: entity.definitionPoint.y,
+                        x2: entity.definitionPoint2?.x || entity.definitionPoint.x, 
+                        y2: entity.definitionPoint2?.y || entity.definitionPoint.y,
+                        dimX: entity.textMidPoint?.x || entity.definitionPoint.x,
+                        dimY: entity.textMidPoint?.y || entity.definitionPoint.y,
+                        text: entity.text || ''
+                    } as any;
+                case 'LEADER':
+                    if (entity.vertices && entity.vertices.length > 1) {
+                        return { id, layer, color, thickness, type: 'leader', x1: entity.vertices[0].x, y1: entity.vertices[0].y, x2: entity.vertices[1].x, y2: entity.vertices[1].y, text: '', size: 2.5 } as any;
+                    }
+                    break;
+                case 'HATCH':
+                    if (entity.boundaryPaths && entity.boundaryPaths.length > 0) {
+                        const path = entity.boundaryPaths[0];
+                        if (path.edges && path.edges.length > 0) {
+                            const pts: Point[] = [];
+                            path.edges.forEach((e: any) => {
+                                if (e.startPoint) pts.push({ x: e.startPoint.x, y: e.startPoint.y });
+                                if (e.endPoint) pts.push({ x: e.endPoint.x, y: e.endPoint.y });
+                            });
+                            if (pts.length > 1) {
+                                return { id, layer, color, thickness, type: 'hatch', pattern: 'ansi31', points: pts, scale: 1, rotation: 0 } as any;
+                            }
+                        }
+                    }
+                    break;
             }
             return null;
         };

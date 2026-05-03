@@ -14,7 +14,7 @@ import {
   ArrowRightLeft, Radius, Diameter, Settings
 } from 'lucide-react';
 import { AppSettings } from '../types';
-import { ToolbarCategory } from '../App';
+import { ToolbarCategory } from './App';
 
 interface ToolbarProps {
   category: ToolbarCategory;

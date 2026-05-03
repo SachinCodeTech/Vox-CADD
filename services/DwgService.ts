@@ -97,7 +97,8 @@ export const dwgToShapes = async (buffer: ArrayBuffer): Promise<DwgImportResult>
                             id, type: 'line', layer, color,
                             x1: ent.startPoint.x, y1: ent.startPoint.y,
                             x2: ent.endPoint.x, y2: ent.endPoint.y,
-                            thickness: ent.thickness || 0.25
+                            thickness: ent.thickness || 0.25,
+                            lineType: ent.lineType || 'continuous'
                         } as any;
                     }
                     break;
@@ -133,7 +134,8 @@ export const dwgToShapes = async (buffer: ArrayBuffer): Promise<DwgImportResult>
                             id, type: 'pline', layer, color,
                             points: ent.vertices.map((v: any) => ({ x: v.x, y: v.y })),
                             closed: !!(ent.flag & 1),
-                            thickness: ent.thickness || 0.25
+                            thickness: ent.thickness || 0.25,
+                            lineType: ent.lineType || 'continuous'
                         } as any;
                     }
                     break;
@@ -146,7 +148,7 @@ export const dwgToShapes = async (buffer: ArrayBuffer): Promise<DwgImportResult>
                             x: pos.x, y: pos.y,
                             size: ent.height || 2.5,
                             content: (ent.text || ent.content || '').replace(/\\P/g, '\n').replace(/\{|}/g, ''),
-                            rotation: ent.rotation || 0,
+                            rotation: (ent.rotation || 0) * (180 / Math.PI),
                             thickness: 0.25
                         } as any;
                     }
@@ -158,7 +160,7 @@ export const dwgToShapes = async (buffer: ArrayBuffer): Promise<DwgImportResult>
                             x: ent.center.x, y: ent.center.y,
                             rx: Math.sqrt(ent.majorAxis.x ** 2 + ent.majorAxis.y ** 2),
                             ry: Math.sqrt(ent.majorAxis.x ** 2 + ent.majorAxis.y ** 2) * ent.ratio,
-                            rotation: Math.atan2(ent.majorAxis.y, ent.majorAxis.x),
+                            rotation: Math.atan2(ent.majorAxis.y, ent.majorAxis.x) * (180 / Math.PI),
                             thickness: 0.25
                         } as any;
                     }
@@ -171,7 +173,7 @@ export const dwgToShapes = async (buffer: ArrayBuffer): Promise<DwgImportResult>
                             blockId: ent.blockName,
                             scaleX: ent.scale?.x || 1,
                             scaleY: ent.scale?.y || 1,
-                            rotation: ent.rotation || 0,
+                            rotation: (ent.rotation || 0) * (180 / Math.PI),
                             thickness: 0.25
                         } as any;
                     }
@@ -196,14 +198,45 @@ export const dwgToShapes = async (buffer: ArrayBuffer): Promise<DwgImportResult>
                         } as any;
                     }
                     break;
+                case 'DIMENSION':
+                    if (ent.definitionPoint && ent.textMidPoint) {
+                        return {
+                            id, type: 'dimension', layer, color,
+                            dimType: 'aligned',
+                            x1: ent.definitionPoint.x || 0,
+                            y1: ent.definitionPoint.y || 0,
+                            x2: ent.definitionPoint2?.x || 0,
+                            y2: ent.definitionPoint2?.y || 0,
+                            dimX: ent.textMidPoint.x,
+                            dimY: ent.textMidPoint.y,
+                            text: ent.text || '',
+                            thickness: 0.25
+                        } as any;
+                    }
+                    break;
+                case 'LEADER':
+                    if (ent.vertices && ent.vertices.length > 1) {
+                        return {
+                            id, type: 'leader', layer, color,
+                            x1: ent.vertices[0].x, y1: ent.vertices[0].y,
+                            x2: ent.vertices[1].x, y2: ent.vertices[1].y,
+                            text: '', size: 2.5,
+                            thickness: 0.25
+                        } as any;
+                    }
+                    break;
                 case 'HATCH':
                     if (ent.boundaryPaths && Array.isArray(ent.boundaryPaths)) {
+                        // For simplicity, we create a polyline for each boundary path
+                        // but only return one for now as a shape to keep it clean.
                         const path = ent.boundaryPaths[0];
                         if (path && path.vertices && path.vertices.length > 1) {
                             return {
-                                id, type: 'pline', layer, color,
+                                id, type: 'hatch', layer, color,
                                 points: path.vertices.map((v: any) => ({ x: v.x, y: v.y })),
-                                closed: true, filled: true, opacity: 0.3,
+                                pattern: 'ansi31',
+                                scale: 1,
+                                rotation: 0,
                                 thickness: 0.1
                             } as any;
                         }
@@ -253,10 +286,19 @@ export const dwgToShapes = async (buffer: ArrayBuffer): Promise<DwgImportResult>
 
         // Parse Entities (Model Space)
         if (db.entities && Array.isArray(db.entities)) {
-            db.entities.forEach((ent: any) => {
-                const s = convertEntity(ent);
-                if (s) shapes.push(s);
-            });
+            // Process in chunks to keep UI responsive for large files
+            const CHUNK_SIZE = 500;
+            for (let i = 0; i < db.entities.length; i += CHUNK_SIZE) {
+                const chunk = db.entities.slice(i, i + CHUNK_SIZE);
+                chunk.forEach((ent: any) => {
+                    const s = convertEntity(ent);
+                    if (s) shapes.push(s);
+                });
+                // Small yield if it's a very large file
+                if (db.entities.length > 2000) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
+            }
         }
 
         return { 

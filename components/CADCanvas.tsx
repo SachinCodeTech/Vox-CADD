@@ -1,5 +1,5 @@
 
-import React, { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo, useImperativeHandle, forwardRef } from 'react';
 import { Shape, ViewState, AppSettings, SnapPoint, LayerConfig, Point, MTextShape, BlockDefinition, LayoutDefinition } from '../types';
 import { hitTestShape, findBestSnap, formatLength, getShapesInRect, getShapeBounds, isRectIntersecting, formatDualLength, isShapeClosed, isPointInsideShape, getPolylineOffsetPoints, calculateShapeLength } from '../services/cadService';
 
@@ -77,21 +77,24 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
 
   const getPixelRatio = () => window.devicePixelRatio || 1;
   
-  const getAllShapesForRendering = () => {
+  const allRenderableShapes = useMemo(() => {
     return (Object.values(layers).flat() as Shape[]).filter(s => {
         const conf = layerConfig[s.layer];
-        if (!conf) return true; // Default to visible if no config
+        if (!conf) return true;
         return conf.visible && !conf.frozen;
     });
-  };
+  }, [layers, layerConfig]);
 
-  const getAllShapesForSelection = () => {
+  const allSelectableShapes = useMemo(() => {
     return (Object.values(layers).flat() as Shape[]).filter(s => {
         const conf = layerConfig[s.layer];
         if (!conf) return true;
         return conf.visible && !conf.frozen && !conf.locked;
     });
-  };
+  }, [layers, layerConfig]);
+
+  const getAllShapesForRendering = useCallback(() => allRenderableShapes, [allRenderableShapes]);
+  const getAllShapesForSelection = useCallback(() => allSelectableShapes, [allSelectableShapes]);
 
   const calculateScreenToWorld = (sx: number, sy: number, v: ViewState, w: number, h: number): Point => {
     const ts = v.scale * settings.drawingScale;
@@ -370,11 +373,21 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       };
       
       const visibleShapes = renderable.filter(s => {
-          const bounds = getShapeBounds(s);
+          const bounds = getShapeBounds(s, blocks);
           return isRectIntersecting(viewportBounds, bounds);
       });
 
-      visibleShapes.forEach(s => drawShape(ctx, s, ts));
+      // LOD: If we have many shapes, skip tiny details
+      const useLOD = visibleShapes.length > 5000;
+
+      visibleShapes.forEach(s => {
+          if (useLOD) {
+              const bounds = getShapeBounds(s, blocks);
+              const pixelSize = Math.max(bounds.xMax - bounds.xMin, bounds.yMax - bounds.yMin) * ts;
+              if (pixelSize < 1) return; // Skip too small to see
+          }
+          drawShape(ctx, s, ts);
+      });
       if (activeSnapRef.current) drawSnapMarker(ctx, activeSnapRef.current, ts);
       if (isCommandActive && previewShapes) previewShapes.forEach(s => drawShape(ctx, s, ts));
       
