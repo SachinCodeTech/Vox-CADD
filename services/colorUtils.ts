@@ -21,7 +21,9 @@ export const aciColors: string[] = [
 // Fill out more colors if needed (AutoCAD has 256)
 // For now, let's just make it return a reasonable fallback for higher indexes
 export const aciToHex = (aci: number | undefined): string => {
-    if (aci === undefined || aci < 0) return '#FFFFFF';
+    if (aci === undefined || aci === 256) return 'bylayer';
+    if (aci === 0) return 'byblock';
+    if (aci < 0) return '#FFFFFF';
     if (aci < aciColors.length) return aciColors[aci];
     
     // Simple heuristic for extended ACI colors
@@ -30,8 +32,10 @@ export const aciToHex = (aci: number | undefined): string => {
 };
 
 export const hexToACI = (hex: string | undefined): number => {
-    if (!hex) return 7;
+    if (!hex) return 256;
     const h = hex.toUpperCase();
+    if (h === 'BYLAYER') return 256;
+    if (h === 'BYBLOCK') return 0;
     if (h === '#FF0000' || h === 'RED') return 1;
     if (h === '#FFFF00' || h === 'YELLOW') return 2;
     if (h === '#00FF00' || h === 'GREEN') return 3;

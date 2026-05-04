@@ -150,6 +150,13 @@ const MenuBar: React.FC<MenuBarProps> = ({ onAction, currentFileName, units }) =
           color="bg-emerald-500" 
           onClick={() => onAction('togglePrivacy')} 
         />
+        <MenuButton 
+          icon={Cpu} 
+          label="Technical Glossary" 
+          desc="Engine Terms & Definitions"
+          color="bg-indigo-500" 
+          onClick={() => onAction('toggleGlossary')} 
+        />
       </div>
 
       <div className="mt-12 text-center opacity-30 flex flex-col items-center gap-1">

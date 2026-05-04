@@ -2,8 +2,8 @@
 import { createModule, LibreDwg, Dwg_File_Type } from '@mlightcad/libredwg-web';
 // @ts-ignore
 import wasmUrl from '../node_modules/@mlightcad/libredwg-web/wasm/libredwg-web.wasm?url';
-import { Shape, BlockDefinition, LayerConfig } from '../types';
-import { generateId } from './cadService';
+import { Shape, BlockDefinition, LayerConfig, Point, VoxProject, AppSettings } from '../types';
+import { generateId, getAllShapesBounds } from './cadService';
 import { aciToHex } from './colorUtils';
 
 let libredwg: any = null;
@@ -40,18 +40,7 @@ export const initDwgService = async () => {
     }
 };
 
-export interface DwgImportResult {
-    shapes: Shape[];
-    blocks?: Record<string, BlockDefinition>;
-    layers?: Record<string, LayerConfig>;
-    stats: {
-        total: number;
-        unsupported: number;
-        counts: Record<string, number>;
-    };
-}
-
-export const dwgToShapes = async (buffer: ArrayBuffer): Promise<DwgImportResult> => {
+export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSettings): Promise<VoxProject> => {
     try {
         const instance = await initDwgService();
         if (!instance) throw new Error("DWG_ENGINE_INIT_FAILED");
@@ -71,7 +60,7 @@ export const dwgToShapes = async (buffer: ArrayBuffer): Promise<DwgImportResult>
         // Free original data pointers
         instance.dwg_free(dwgData);
 
-        const shapes: Shape[] = [];
+        const entities: Shape[] = [];
         const blocks: Record<string, BlockDefinition> = {};
         const layers: Record<string, LayerConfig> = {};
         const stats = {
@@ -227,16 +216,20 @@ export const dwgToShapes = async (buffer: ArrayBuffer): Promise<DwgImportResult>
                     break;
                 case 'HATCH':
                     if (ent.boundaryPaths && Array.isArray(ent.boundaryPaths)) {
-                        // For simplicity, we create a polyline for each boundary path
-                        // but only return one for now as a shape to keep it clean.
-                        const path = ent.boundaryPaths[0];
-                        if (path && path.vertices && path.vertices.length > 1) {
+                        const allPoints: Point[] = [];
+                        ent.boundaryPaths.forEach((path: any) => {
+                            if (path && path.vertices) {
+                                path.vertices.forEach((v: any) => allPoints.push({ x: v.x, y: v.y }));
+                            }
+                        });
+                        
+                        if (allPoints.length > 2) {
                             return {
                                 id, type: 'hatch', layer, color,
-                                points: path.vertices.map((v: any) => ({ x: v.x, y: v.y })),
-                                pattern: 'ansi31',
-                                scale: 1,
-                                rotation: 0,
+                                points: allPoints,
+                                pattern: (ent.patternName || 'ansi31').toLowerCase(),
+                                scale: ent.patternScale || 1,
+                                rotation: (ent.patternAngle || 0) * (180 / Math.PI),
                                 thickness: 0.1
                             } as any;
                         }
@@ -248,6 +241,9 @@ export const dwgToShapes = async (buffer: ArrayBuffer): Promise<DwgImportResult>
         };
 
         // Parse Layers
+        layers['0'] = { id: '0', name: '0', visible: true, locked: false, frozen: false, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' };
+        layers['defpoints'] = { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, color: '#666666', thickness: 0.1, lineType: 'continuous' };
+
         if (db.layers && Array.isArray(db.layers)) {
             db.layers.forEach((l: any) => {
                 const name = l.name || l.id;
@@ -292,7 +288,7 @@ export const dwgToShapes = async (buffer: ArrayBuffer): Promise<DwgImportResult>
                 const chunk = db.entities.slice(i, i + CHUNK_SIZE);
                 chunk.forEach((ent: any) => {
                     const s = convertEntity(ent);
-                    if (s) shapes.push(s);
+                    if (s) entities.push(s);
                 });
                 // Small yield if it's a very large file
                 if (db.entities.length > 2000) {
@@ -301,12 +297,28 @@ export const dwgToShapes = async (buffer: ArrayBuffer): Promise<DwgImportResult>
             }
         }
 
-        return { 
-            shapes, 
-            blocks: Object.keys(blocks).length > 0 ? blocks : undefined,
-            layers: Object.keys(layers).length > 0 ? layers : undefined,
-            stats 
+        const project: VoxProject = {
+            version: "2.0",
+            meta: {
+                createdAt: new Date().toISOString(),
+                lastModified: new Date().toISOString(),
+                ...defaultSettings.metadata
+            },
+            settings: defaultSettings,
+            layers: Object.keys(layers).length > 0 ? layers : { 
+                '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' },
+                'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, color: '#666666', thickness: 0.1, lineType: 'continuous' }
+            },
+            blocks,
+            entities,
+            lineTypes: {},
+            textStyles: {},
+            layouts: {},
+            bounds: getAllShapesBounds(entities, blocks),
+            stats
         };
+
+        return project;
     } catch (error) {
         console.error("DWG_SERVICE_ERROR:", error);
         throw error;

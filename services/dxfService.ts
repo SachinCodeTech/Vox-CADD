@@ -3,15 +3,18 @@ import DxfParser from 'dxf-parser';
 import { 
     Shape, LineShape, CircleShape, RectShape, PolyShape, ArcShape, TextShape, 
     DoubleLineShape, EllipseShape, PointShape, DimensionShape, InfiniteLineShape, 
-    Point, LayerConfig, MTextShape, AppSettings, BlockDefinition 
+    Point, LayerConfig, MTextShape, AppSettings, BlockDefinition, VoxProject, LineTypeDefinition 
 } from '../types';
-import { generateId } from './cadService';
+import { generateId, getAllShapesBounds } from './cadService';
 import { aciToHex, hexToACI } from './colorUtils';
 
-const mmToDXFLineWeight = (mm: number | undefined): number => {
-    if (mm === undefined || isNaN(mm)) return 25;
+const mmToDXFLineWeight = (mm: number | string | undefined): number => {
+    if (mm === undefined || mm === '' || mm === 'bylayer' || mm === 'BYLAYER') return -1;
+    if (mm === 'byblock' || mm === 'BYBLOCK') return -2;
+    const num = typeof mm === 'string' ? parseFloat(mm) : mm;
+    if (isNaN(num)) return -1;
     const weights = [0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120, 140, 158, 200, 211];
-    const val = Math.round(mm * 100);
+    const val = Math.round(num * 100);
     let closest = weights[0];
     let minDiff = Math.abs(val - weights[0]);
     for (const w of weights) {
@@ -67,7 +70,12 @@ class DXFWriter {
     }
 }
 
-export const shapesToDXF = (shapes: Shape[], layerConfigs?: Record<string, LayerConfig>, settings?: AppSettings): string => {
+export const shapesToDXF = (
+    shapes: Shape[], 
+    layerConfigs?: Record<string, LayerConfig>, 
+    settings?: AppSettings,
+    blocks?: Record<string, BlockDefinition>
+): string => {
     try {
         const writer = new DXFWriter();
         const baseLayers = { ...(layerConfigs || {}) };
@@ -228,11 +236,13 @@ export const shapesToDXF = (shapes: Shape[], layerConfigs?: Record<string, Layer
         });
 
         // BLOCK_RECORD
-        const blockRecordHandles: string[] = [];
-        writer.table("BLOCK_RECORD", hBlockRecord, 2, () => {
-            ["*MODEL_SPACE", "*PAPER_SPACE"].forEach(name => {
+        const blockNames = blocks ? Object.keys(blocks) : [];
+        const blockRecordHandles: Record<string, string> = {};
+        
+        writer.table("BLOCK_RECORD", hBlockRecord, 2 + blockNames.length, () => {
+            ["*MODEL_SPACE", "*PAPER_SPACE", ...blockNames].forEach(name => {
                 const h = writer.nextHandle();
-                blockRecordHandles.push(h);
+                blockRecordHandles[name] = h;
                 writer.write(0, "BLOCK_RECORD");
                 writer.write(5, h);
                 writer.write(330, hBlockRecord);
@@ -241,29 +251,57 @@ export const shapesToDXF = (shapes: Shape[], layerConfigs?: Record<string, Layer
                 writer.write(2, name);
             });
         });
-        (writer as any)._blockRecordHandles = blockRecordHandles;
+        (writer as any)._blockRecordHandlesMap = blockRecordHandles;
     });
 
     // BLOCKS SECTION
     writer.section("BLOCKS", () => {
-        const blockRecordHandles = (writer as any)._blockRecordHandles || [];
-        ["*MODEL_SPACE", "*PAPER_SPACE"].forEach((name, i) => {
+        const hMap = (writer as any)._blockRecordHandlesMap || {};
+        
+        // Model and Paper space
+        ["*MODEL_SPACE", "*PAPER_SPACE"].forEach(name => {
             const hBegin = writer.nextHandle();
             writer.write(0, "BLOCK"); writer.write(5, hBegin);
-            writer.write(330, blockRecordHandles[i]);
+            writer.write(330, hMap[name]);
             writer.write(100, "AcDbEntity"); writer.write(8, "0");
             writer.write(100, "AcDbBlockBegin"); writer.write(2, name);
             writer.write(70, 0); writer.write(10, 0.0); writer.write(20, 0.0); writer.write(30, 0.0);
             writer.write(3, name); writer.write(1, "");
             writer.write(0, "ENDBLK"); writer.write(5, writer.nextHandle());
-            writer.write(330, blockRecordHandles[i]);
+            writer.write(330, hMap[name]);
             writer.write(100, "AcDbEntity"); writer.write(8, "0");
             writer.write(100, "AcDbBlockEnd");
         });
+
+        // Custom blocks
+        if (blocks) {
+            Object.values(blocks).forEach(b => {
+                const hBegin = writer.nextHandle();
+                writer.write(0, "BLOCK"); writer.write(5, hBegin);
+                writer.write(330, hMap[b.name]);
+                writer.write(100, "AcDbEntity"); writer.write(8, "0");
+                writer.write(100, "AcDbBlockBegin"); 
+                writer.write(2, b.name);
+                writer.write(70, 0); 
+                writer.write(10, b.basePoint?.x || 0); 
+                writer.write(20, b.basePoint?.y || 0); 
+                writer.write(30, 0.0);
+                writer.write(3, b.name); writer.write(1, "");
+
+                // Block Entities (simplified, skipping nested blocks for now to avoid complexity)
+                // In a full implementation, we'd recursively write entities here.
+                
+                writer.write(0, "ENDBLK"); writer.write(5, writer.nextHandle());
+                writer.write(330, hMap[b.name]);
+                writer.write(100, "AcDbEntity"); writer.write(8, "0");
+                writer.write(100, "AcDbBlockEnd");
+            });
+        }
     });
 
     // ENTITIES SECTION
     writer.section("ENTITIES", () => {
+        const hMap = (writer as any)._blockRecordHandlesMap || {};
         shapes.forEach(s => {
             const layer = (s.layer || "0").toString().toUpperCase();
             const color = hexToACI(s.color);
@@ -272,7 +310,7 @@ export const shapesToDXF = (shapes: Shape[], layerConfigs?: Record<string, Layer
             const writeCommon = (type: string, subclass: string) => {
                 writer.write(0, type);
                 writer.write(5, writer.nextHandle());
-                writer.write(330, (writer as any)._blockRecordHandles?.[0] || "0");
+                writer.write(330, hMap["*MODEL_SPACE"] || "0");
                 writer.write(100, "AcDbEntity");
                 writer.write(8, layer);
                 writer.write(62, color);
@@ -313,6 +351,34 @@ export const shapesToDXF = (shapes: Shape[], layerConfigs?: Record<string, Layer
                     writer.write(40, t.size);
                     writer.write(1, t.content);
                     writer.write(50, (t.rotation || 0) * 180 / Math.PI);
+                    if (t.justification === 'center') {
+                        writer.write(72, 1);
+                        writer.write(11, t.x); writer.write(21, t.y); writer.write(31, 0);
+                    } else if (t.justification === 'right') {
+                        writer.write(72, 2);
+                        writer.write(11, t.x); writer.write(21, t.y); writer.write(31, 0);
+                    }
+                    break;
+                }
+                case 'mtext': {
+                    const t = s as MTextShape;
+                    writeCommon("MTEXT", "AcDbMText");
+                    writer.write(10, t.x); writer.write(20, t.y); writer.write(30, 0.0);
+                    writer.write(40, t.size);
+                    writer.write(41, t.width || 0);
+                    writer.write(1, t.content);
+                    writer.write(50, (t.rotation || 0) * 180 / Math.PI);
+                    break;
+                }
+                case 'block': {
+                    const i = s as any;
+                    writeCommon("INSERT", "AcDbBlockReference");
+                    writer.write(2, i.blockId);
+                    writer.write(10, i.x); writer.write(20, i.y); writer.write(30, 0.0);
+                    writer.write(41, i.scaleX || 1.0);
+                    writer.write(42, i.scaleY || 1.0);
+                    writer.write(43, i.scaleZ || 1.0);
+                    writer.write(50, (i.rotation || 0) * 180 / Math.PI);
                     break;
                 }
             }
@@ -325,76 +391,160 @@ export const shapesToDXF = (shapes: Shape[], layerConfigs?: Record<string, Layer
     }
 };
 
-export const dxfToShapes = (dxfString: string): { 
-    shapes: Shape[], 
-    blocks?: Record<string, BlockDefinition>,
-    layers?: Record<string, LayerConfig>,
-    stats: { total: number, unsupported: number, counts: Record<string, number> } 
-} => {
-    const shapes: Shape[] = [];
-    const blocks: Record<string, BlockDefinition> = {};
+const cleanMText = (text: string): string => {
+    if (!text) return "";
+    // Remove common MTEXT formatting codes: \P (newline), \S (stack), \L (underline start), \l (underline end), etc.
+    // Also {\fArial|b0|i0|c0|p34;Text} style markings
+    return text
+        .replace(/\\P/g, "\n")
+        .replace(/\\L/g, "")
+        .replace(/\\l/g, "")
+        .replace(/\{[^;]*;/g, "")
+        .replace(/\}/g, "")
+        .replace(/\\S[^;]*;/g, "")
+        .replace(/\\f[^;]*;/g, "")
+        .replace(/\\A[^;]*;/g, "")
+        .replace(/\\H[^;]*;/g, "")
+        .replace(/\\C[^;]*;/g, "")
+        .replace(/\\W[^;]*;/g, "")
+        .replace(/\\T[^;]*;/g, "")
+        .replace(/\\Q[^;]*;/g, "")
+        .replace(/\\/g, ""); // Final slash removal if any left
+};
+
+const parseLayers = (dxf: any, lineTypes: Record<string, LineTypeDefinition>): Record<string, LayerConfig> => {
     const layers: Record<string, LayerConfig> = {};
+    
+    // Ensure default layers exist
+    layers['0'] = { id: '0', name: '0', visible: true, locked: false, frozen: false, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' };
+    layers['defpoints'] = { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, color: '#666666', thickness: 0.1, lineType: 'continuous' };
+
+    if (dxf.tables && dxf.tables.layer && dxf.tables.layer.layers) {
+        Object.values(dxf.tables.layer.layers).forEach((l: any) => {
+            const layerName = l.name || '0';
+            const ltName = (l.lineTypeName || 'continuous').toLowerCase();
+            layers[layerName] = {
+                id: layerName,
+                name: layerName,
+                visible: l.color !== undefined ? l.color >= 0 : true,
+                locked: !!l.locked,
+                frozen: !!l.frozen,
+                color: aciToHex(l.color !== undefined ? Math.abs(l.color) : 7) || '#FFFFFF',
+                thickness: l.lineWeight && l.lineWeight > 0 ? l.lineWeight / 100 : 0.25,
+                lineType: ltName as any
+            };
+        });
+    }
+    return layers;
+};
+
+const parseLineTypes = (dxf: any): Record<string, LineTypeDefinition> => {
+    const lineTypes: Record<string, LineTypeDefinition> = {
+        'continuous': { name: 'continuous', description: 'Solid line', pattern: [] }
+    };
+
+    if (dxf.tables && dxf.tables.ltype && dxf.tables.ltype.lineTypes) {
+        Object.values(dxf.tables.ltype.lineTypes).forEach((lt: any) => {
+            const name = (lt.name || '').toLowerCase();
+            if (!name) return;
+
+            const pattern: number[] = [];
+            if (lt.pattern && Array.isArray(lt.pattern)) {
+                // AutoCAD pattern: positive is dash, negative is gap, zero is dot
+                // We'll normalize this for ctx.setLineDash (which expects positive numbers for dash AND gap)
+                lt.pattern.forEach((p: number) => {
+                    pattern.push(Math.abs(p));
+                });
+            }
+
+            lineTypes[name] = {
+                name: name,
+                description: lt.description || '',
+                pattern: pattern
+            };
+        });
+    }
+    return lineTypes;
+};
+
+export const dxfToProject = (dxfString: string, defaultSettings: AppSettings): VoxProject => {
+    const entities: Shape[] = [];
+    const blocks: Record<string, BlockDefinition> = {};
     const stats = { total: 0, unsupported: 0, counts: {} as Record<string, number> };
-    if (!dxfString) return { shapes: [], stats };
+    let lineTypes: Record<string, LineTypeDefinition> = {
+        'continuous': { name: 'continuous', description: 'Solid line', pattern: [] }
+    };
+    let layers: Record<string, LayerConfig> = { 
+        '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' },
+        'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, color: '#666666', thickness: 0.1, lineType: 'continuous' }
+    };
     
     try {
+        if (!dxfString) throw new Error("Empty DXF string");
+        
         const parser = new DxfParser();
         const dxf = parser.parseSync(dxfString);
         
-        if (!dxf) return { shapes: [], stats };
+        if (!dxf) throw new Error("Could not parse DXF");
 
-        if (dxf.tables && dxf.tables.layer && dxf.tables.layer.layers) {
-            Object.values(dxf.tables.layer.layers).forEach((l: any) => {
-                layers[l.name] = {
-                    id: l.name,
-                    name: l.name,
-                    visible: true,
-                    locked: !!(l.frozen || l.locked),
-                    frozen: !!l.frozen,
-                    color: aciToHex(l.color),
-                    thickness: 0.25,
-                    lineType: 'continuous'
-                };
-            });
-        }
+        lineTypes = parseLineTypes(dxf);
+        layers = parseLayers(dxf, lineTypes);
 
         const convertEntity = (entity: any): Shape | null => {
             const id = generateId();
             const layer = entity.layer || '0';
             const color = aciToHex(entity.color);
-            const thickness = 1;
+            const thickness = entity.lineWeight && entity.lineWeight > 0 ? entity.lineWeight / 100 : undefined;
+            const lineType = (entity.lineTypeName || 'byLayer').toLowerCase();
 
             switch (entity.type) {
                 case 'LINE':
-                    return { id, layer, color, thickness, type: 'line', x1: entity.vertices[0].x, y1: entity.vertices[0].y, x2: entity.vertices[1].x, y2: entity.vertices[1].y } as any;
+                    return { id, layer, color, thickness, lineType, type: 'line', x1: entity.vertices[0].x, y1: entity.vertices[0].y, x2: entity.vertices[1].x, y2: entity.vertices[1].y } as any;
                 case 'CIRCLE':
-                    return { id, layer, color, thickness, type: 'circle', x: entity.center.x, y: entity.center.y, radius: entity.radius } as any;
+                    return { id, layer, color, thickness, lineType, type: 'circle', x: entity.center.x, y: entity.center.y, radius: entity.radius } as any;
                 case 'ARC':
-                    return { id, layer, color, thickness, type: 'arc', x: entity.center.x, y: entity.center.y, radius: entity.radius, startAngle: entity.startAngle, endAngle: entity.endAngle, counterClockwise: false } as any;
+                    return { id, layer, color, thickness, lineType, type: 'arc', x: entity.center.x, y: entity.center.y, radius: entity.radius, startAngle: entity.startAngle, endAngle: entity.endAngle, counterClockwise: false } as any;
                 case 'LWPOLYLINE':
                 case 'POLYLINE':
                     if (entity.vertices && entity.vertices.length > 1) {
-                        return { id, layer, color, thickness, type: 'pline', points: entity.vertices.map((v: any) => ({ x: v.x, y: v.y })), closed: entity.shape || entity.closed } as any;
+                        return { id, layer, color, thickness, lineType, type: 'pline', points: entity.vertices.map((v: any) => ({ x: v.x, y: v.y })), closed: entity.shape || entity.closed } as any;
                     }
                     break;
                 case 'TEXT':
+                    return { 
+                        id, layer, color, thickness, lineType, type: 'text', 
+                        x: entity.position?.x || 0, 
+                        y: entity.position?.y || 0, 
+                        size: entity.textHeight || 2.5, 
+                        content: entity.text || '', 
+                        rotation: (entity.rotation || 0) * Math.PI / 180,
+                        justification: entity.halign === 1 ? 'center' : entity.halign === 2 ? 'right' : 'left'
+                    } as any;
                 case 'MTEXT':
-                    return { id, layer, color, thickness, type: 'text', x: entity.position?.x || 0, y: entity.position?.y || 0, size: entity.textHeight || 2.5, content: entity.text || '', rotation: (entity.rotation || 0) * Math.PI / 180 } as any;
+                    return { 
+                        id, layer, color, thickness, lineType, type: 'mtext', 
+                        x: entity.position?.x || 0, 
+                        y: entity.position?.y || 0, 
+                        width: entity.width || 0,
+                        size: entity.textHeight || 2.5, 
+                        content: cleanMText(entity.text || ''), 
+                        rotation: (entity.rotation || 0) * Math.PI / 180 
+                    } as any;
                 case 'ELLIPSE':
                     const rx = Math.sqrt(entity.majorAxisEndPoint.x ** 2 + entity.majorAxisEndPoint.y ** 2);
-                    return { id, layer, color, thickness, type: 'ellipse', x: entity.center.x, y: entity.center.y, rx, ry: rx * entity.axisRatio, rotation: Math.atan2(entity.majorAxisEndPoint.y, entity.majorAxisEndPoint.x) } as any;
+                    return { id, layer, color, thickness, lineType, type: 'ellipse', x: entity.center.x, y: entity.center.y, rx, ry: rx * entity.axisRatio, rotation: Math.atan2(entity.majorAxisEndPoint.y, entity.majorAxisEndPoint.x) } as any;
                 case 'POINT':
-                    return { id, layer, color, thickness, type: 'point', x: entity.position.x, y: entity.position.y, size: 5 } as any;
+                    return { id, layer, color, thickness, lineType, type: 'point', x: entity.position.x, y: entity.position.y, size: 5 } as any;
                 case 'INSERT':
-                    return { id, layer, color, thickness, type: 'block', x: entity.position.x, y: entity.position.y, blockId: entity.name, scaleX: entity.xScale || 1, scaleY: entity.yScale || 1, rotation: (entity.rotation || 0) * Math.PI / 180 } as any;
+                    return { id, layer, color, thickness, lineType, type: 'block', x: entity.position.x, y: entity.position.y, blockId: entity.name, scaleX: entity.xScale || 1, scaleY: entity.yScale || 1, rotation: (entity.rotation || 0) * Math.PI / 180 } as any;
                 case 'SPLINE':
                     if (entity.controlPoints && entity.controlPoints.length > 1) {
-                        return { id, layer, color, thickness, type: 'pline', points: entity.controlPoints.map((v: any) => ({ x: v.x, y: v.y })), closed: entity.closed } as any;
+                        return { id, layer, color, thickness, lineType, type: 'pline', points: entity.controlPoints.map((v: any) => ({ x: v.x, y: v.y })), closed: entity.closed } as any;
                     }
                     break;
                 case 'DIMENSION':
                     return { 
-                        id, layer, color, thickness, type: 'dimension', 
+                        id, layer, color, thickness, lineType, type: 'dimension', 
                         dimType: 'aligned', 
                         x1: entity.definitionPoint.x, y1: entity.definitionPoint.y,
                         x2: entity.definitionPoint2?.x || entity.definitionPoint.x, 
@@ -405,21 +555,31 @@ export const dxfToShapes = (dxfString: string): {
                     } as any;
                 case 'LEADER':
                     if (entity.vertices && entity.vertices.length > 1) {
-                        return { id, layer, color, thickness, type: 'leader', x1: entity.vertices[0].x, y1: entity.vertices[0].y, x2: entity.vertices[1].x, y2: entity.vertices[1].y, text: '', size: 2.5 } as any;
+                        return { id, layer, color, thickness, lineType, type: 'leader', x1: entity.vertices[0].x, y1: entity.vertices[0].y, x2: entity.vertices[1].x, y2: entity.vertices[1].y, text: '', size: 2.5 } as any;
                     }
                     break;
                 case 'HATCH':
                     if (entity.boundaryPaths && entity.boundaryPaths.length > 0) {
-                        const path = entity.boundaryPaths[0];
-                        if (path.edges && path.edges.length > 0) {
-                            const pts: Point[] = [];
-                            path.edges.forEach((e: any) => {
-                                if (e.startPoint) pts.push({ x: e.startPoint.x, y: e.startPoint.y });
-                                if (e.endPoint) pts.push({ x: e.endPoint.x, y: e.endPoint.y });
-                            });
-                            if (pts.length > 1) {
-                                return { id, layer, color, thickness, type: 'hatch', pattern: 'ansi31', points: pts, scale: 1, rotation: 0 } as any;
+                        const pts: Point[] = [];
+                        entity.boundaryPaths.forEach((path: any) => {
+                            if (path.edges) {
+                                path.edges.forEach((e: any) => {
+                                    if (e.startPoint) pts.push({ x: e.startPoint.x, y: e.startPoint.y });
+                                    if (e.endPoint) pts.push({ x: e.endPoint.x, y: e.endPoint.y });
+                                });
+                            } else if (path.vertices) {
+                                path.vertices.forEach((v: any) => pts.push({ x: v.x, y: v.y }));
                             }
+                        });
+                        
+                        if (pts.length > 2) {
+                            return { 
+                                id, layer, color, thickness, lineType, type: 'hatch', 
+                                pattern: (entity.patternName || 'ansi31').toLowerCase(), 
+                                points: pts, 
+                                scale: entity.patternScale || 1, 
+                                rotation: (entity.patternAngle || 0) * Math.PI / 180 
+                            } as any;
                         }
                     }
                     break;
@@ -437,7 +597,8 @@ export const dxfToShapes = (dxfString: string): {
                         if (s) blockShapes.push(s);
                     });
                 }
-                blocks[name] = { id: name, name: name, basePoint: { x: 0, y: 0 }, shapes: blockShapes };
+                const basePoint = b.position ? { x: b.position.x, y: b.position.y } : { x: 0, y: 0 };
+                blocks[name] = { id: name, name: name, basePoint, shapes: blockShapes };
             });
         }
 
@@ -446,7 +607,7 @@ export const dxfToShapes = (dxfString: string): {
                 stats.total++;
                 stats.counts[entity.type] = (stats.counts[entity.type] || 0) + 1;
                 const s = convertEntity(entity);
-                if (s) shapes.push(s);
+                if (s) entities.push(s);
                 else stats.unsupported++;
             });
         }
@@ -454,5 +615,21 @@ export const dxfToShapes = (dxfString: string): {
         console.error("DXF Parsing error:", error);
     }
     
-    return { shapes, blocks, layers, stats };
+    return {
+        version: "2.0",
+        meta: {
+            createdAt: new Date().toISOString(),
+            lastModified: new Date().toISOString(),
+            ...defaultSettings.metadata
+        },
+        settings: defaultSettings,
+        layers,
+        blocks,
+        entities,
+        lineTypes,
+        textStyles: {},
+        layouts: {},
+        bounds: getAllShapesBounds(entities, blocks),
+        stats
+    };
 };

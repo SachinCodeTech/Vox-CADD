@@ -22,9 +22,9 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Capacitor } from '@capacitor/core';
 import { generateId, hitTestGrip, getAllShapesBounds } from '../services/cadService';
 import { getCommandFromAI, connectLiveAgent } from '../services/geminiService';
-import { shapesToDXF, dxfToShapes } from '../services/dxfService';
-import { shapesToVox, voxToShapes } from '../services/voxService';
-import { dwgToShapes } from '../services/DwgService';
+import { shapesToDXF, dxfToProject } from '../services/dxfService';
+import { shapesToVox, voxToProject, createEmptyVoxProject } from '../services/voxService';
+import { dwgToProject } from '../services/DwgService';
 import { 
   CADCommand, CommandEngine, LineCommand, DoubleLineCommand, CircleCommand, RectCommand, PolyCommand, 
   ArcCommand, MoveCommand, EraseCommand, DistanceCommand, AreaCommand, 
@@ -37,8 +37,8 @@ import {
   SelectAllCommand, CopyClipCommand, CutClipCommand, PasteClipCommand, SplineCommand, SketchCommand, StretchCommand, SelectCommand,
   ArrayCommand, BlockCommand, InsertCommand, FilterCommand, FindCommand, ViewportCommand, LayoutCommand, GripEditCommand, ImportCommand
 } from '../services/commandEngine';
-import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType, BlockDefinition, LayoutDefinition, LayoutViewport } from '../types';
-import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive, AlertTriangle } from 'lucide-react';
+import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType, BlockDefinition, LayoutDefinition, LayoutViewport, LineTypeDefinition } from '../types';
+import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive, AlertTriangle, Cpu } from 'lucide-react';
 
 import VoxIcon from './VoxIcon';
 import ImportSummaryDialog from './ImportSummaryDialog';
@@ -92,11 +92,11 @@ const INITIAL_SETTINGS: AppSettings = {
 const INITIAL_VIEW: ViewState = { scale: 0.05, originX: 0, originY: 0 };
 const INITIAL_LAYERS_CONFIG: Record<string, LayerConfig> = { 
   '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, color: '#FF0000', thickness: 0.25, lineType: 'continuous' },
-  'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' }
+  'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, color: '#666666', thickness: 0.1, lineType: 'continuous' }
 };
 
 export type ToolbarCategory = 'Draw' | 'Modify' | 'Anno' | 'View' | 'Tools' | 'History' | 'Edit';
-type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 'file' | 'mainmenu' | 'drawing_props' | 'help' | 'about' | 'privacy' | 'new_file' | 'dimstyle';
+type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 'file' | 'mainmenu' | 'drawing_props' | 'help' | 'about' | 'privacy' | 'new_file' | 'dimstyle' | 'glossary';
 
 const STORAGE_PREFIX = 'voxcadd_file_v1_';
 const REGISTRY_KEY = 'voxcadd_recent_files';
@@ -120,6 +120,7 @@ const App: React.FC = () => {
     { id: 'layout1', name: 'Layout 1', paperSize: { width: 297, height: 210 }, viewports: [] }
   ]);
   const [layerConfig, setLayerConfig] = useState<Record<string, LayerConfig>>(INITIAL_LAYERS_CONFIG);
+  const [lineTypes, setLineTypes] = useState<Record<string, LineTypeDefinition>>({ 'continuous': { name: 'continuous', description: 'Solid line', pattern: [] } });
   const [settings, setSettings] = useState<AppSettings>(INITIAL_SETTINGS);
   const [activeTab, setActiveTab] = useState<string>('model');
   const [currentFileName, setCurrentFileName] = useState('Drawing 1.vox');
@@ -446,6 +447,7 @@ const App: React.FC = () => {
   const tabViewsRef = useRef(tabViews);
   const activeTabRef = useRef(activeTab);
   const blocksRef = useRef(blocks);
+  const lineTypesRef = useRef(lineTypes);
   const layoutsRef = useRef(layouts);
   const activeViewportIdRef = useRef(activeViewportId);
 
@@ -456,6 +458,7 @@ const App: React.FC = () => {
   useEffect(() => { tabViewsRef.current = tabViews; }, [tabViews]);
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
   useEffect(() => { blocksRef.current = blocks; }, [blocks]);
+  useEffect(() => { lineTypesRef.current = lineTypes; }, [lineTypes]);
   useEffect(() => { layoutsRef.current = layouts; }, [layouts]);
   useEffect(() => { activeViewportIdRef.current = activeViewportId; }, [activeViewportId]);
 
@@ -465,34 +468,54 @@ const App: React.FC = () => {
       const saved = await storageService.loadActiveWorkspace();
       const savedRecent = localStorage.getItem(REGISTRY_KEY);
       
-      // Seed sample files if empty to demonstrate multi-file switching
-      if (!savedRecent || JSON.parse(savedRecent).length === 0) {
-          const samples = [
-              { name: "1.vox", date: Date.now() - 3000 },
-              { name: "2.vox", date: Date.now() - 2000 },
-              { name: "3.vox", date: Date.now() - 1000 }
-          ];
+      // Seed sample files if empty or if they are missing from IndexedDB
+      let recentFilesParsed = [];
+      try { recentFilesParsed = JSON.parse(savedRecent || "[]"); } catch(e) {}
+      
+      const samples = [
+          { name: "1.vox", date: Date.now() - 3000 },
+          { name: "2.vox", date: Date.now() - 2000 },
+          { name: "3.vox", date: Date.now() - 1000 }
+      ];
+
+      if (recentFilesParsed.length === 0) {
           localStorage.setItem(REGISTRY_KEY, JSON.stringify(samples));
-          setRecentFiles(samples);
-          
-          // Create sample contents
-          samples.forEach(async (s, i) => {
-              const sampleLayers = { 
-                  '0': [
-                      { id: `seed-${i}`, type: 'circle', x: 200 * (i+1), y: 200 * (i+1), radius: 50 * (i+1), color: '#00bcd4', layer: '0' } as Shape
-                  ], 
-                  'defpoints': [] 
-              };
-              await storageService.saveLarge(`${STORAGE_PREFIX}${s.name}`, {
-                  layers: sampleLayers,
-                  layerConfig: INITIAL_LAYERS_CONFIG,
-                  settings: INITIAL_SETTINGS,
-                  fileName: s.name
-              });
-          });
-      } else {
-          try { setRecentFiles(JSON.parse(savedRecent)); } catch(e) {}
+          recentFilesParsed = samples;
       }
+
+      // Ensure that all files in the recent list actually exist in storage
+      const validRecentFiles = [];
+      for (const s of recentFilesParsed) {
+          const data = await storageService.loadLarge(`${STORAGE_PREFIX}${s.name}`);
+          if (data) {
+              validRecentFiles.push(s);
+          } else {
+              // If it's one of our expected samples, recreate if missing
+              const isSample = samples.some(sample => sample.name === s.name);
+              if (isSample) {
+                  const i = samples.findIndex(sample => sample.name === s.name);
+                  const sampleLayers = { 
+                      '0': [
+                          { id: `seed-${s.name}-${i}`, type: 'circle', x: 200 * (i+1), y: 200 * (i+1), radius: 50 * (i+1), color: '#00bcd4', layer: '0' } as Shape
+                      ], 
+                      'defpoints': [] 
+                  };
+                  await storageService.saveLarge(`${STORAGE_PREFIX}${s.name}`, {
+                      layers: sampleLayers,
+                      layerConfig: INITIAL_LAYERS_CONFIG,
+                      settings: INITIAL_SETTINGS,
+                      fileName: s.name
+                  });
+                  validRecentFiles.push(s);
+                  console.log(`RECREATED_MISSING_SAMPLE: ${s.name}`);
+              } else {
+                  console.warn(`REMOVING_MISSING_FILE_FROM_RECENT: ${s.name}`);
+              }
+          }
+      }
+
+      localStorage.setItem(REGISTRY_KEY, JSON.stringify(validRecentFiles));
+      setRecentFiles(validRecentFiles);
 
       if (saved) {
         try {
@@ -559,125 +582,59 @@ const App: React.FC = () => {
     setLoadingStatus(`Importing ${fileName}...`);
     
     try {
-        let finalLayers: Record<string, Shape[]> = { '0': [], 'defpoints': [] };
-        let finalConfig: Record<string, LayerConfig> = INITIAL_LAYERS_CONFIG;
-        let finalSettings: AppSettings = INITIAL_SETTINGS;
-        let importStats: any = null;
+        let project: any = null;
 
         if (isDwg) {
             if (!(content instanceof ArrayBuffer)) {
                 setLogMessage("LOAD_ERR: BINARY_DATA_REQUIRED");
-                console.error("DWG load failed: content is not ArrayBuffer", typeof content);
                 return;
             }
-            console.log(`Loading DWG: ${fileName} (${content.byteLength} bytes)`);
-            setLogMessage("PARSING_DWG_BINARY...");
-            const result = await dwgToShapes(content);
-            const { shapes: importedShapes, blocks: importedBlocks, layers: importedLayers, stats } = result;
-            console.log(`DWG Import Result: ${importedShapes.length} shapes found, ${Object.keys(importedBlocks || {}).length} blocks`);
-            
-            if (importedShapes.length > 0) {
-                finalLayers = importedShapes.reduce((acc, s) => {
-                    const l = s.layer || '0';
-                    if (!acc[l]) acc[l] = [];
-                    acc[l].push(s);
-                    return acc;
-                }, {} as Record<string, Shape[]>);
-                
-                if (importedBlocks) setBlocks(prev => ({ ...prev, ...importedBlocks }));
-                if (importedLayers) finalConfig = { ...INITIAL_LAYERS_CONFIG, ...importedLayers };
-                
-                importStats = stats;
-                setLogMessage(`DWG_IMPORT: ${importedShapes.length} ENTITIES`);
-            } else {
-                setLogMessage("DWG_EMPTY_OR_UNSUPPORTED");
-                return;
-            }
-        } else if (isDxf || isVox) {
+            project = await dwgToProject(content, settingsRef.current);
+        } else if (isDxf) {
             if (typeof content !== 'string') return;
+            project = dxfToProject(content, settingsRef.current);
+        } else if (isVox) {
+            if (typeof content !== 'string') return;
+            project = voxToProject(content);
+        }
+
+        if (project) {
+            // Normalize entities into internal layers map
+            const layerMap: Record<string, Shape[]> = { '0': [], 'defpoints': [] };
+            project.entities.forEach((s: Shape) => {
+                const l = s.layer || '0';
+                if (!layerMap[l]) layerMap[l] = [];
+                layerMap[l].push(s);
+            });
+
+            // Update state
+            setLayers(layerMap);
+            setLayerConfig(project.layers);
+            setLineTypes(project.lineTypes || { 'continuous': { name: 'continuous', description: 'Solid line', pattern: [] } });
+            setSettings(project.settings);
+            setBlocks(project.blocks || {});
+            setCurrentFileName(fileName);
+            setFileSource(source);
+            updateRecentFiles(fileName);
             
-            const voxResult = voxToShapes(content);
-            if (voxResult) {
-                finalLayers = voxResult.shapes.reduce((acc, s) => {
-                    const l = s.layer || '0';
-                    if (!acc[l]) acc[l] = [];
-                    acc[l].push(s);
-                    return acc;
-                }, {} as Record<string, Shape[]>);
-                finalConfig = voxResult.layers;
-                finalSettings = { ...INITIAL_SETTINGS, ...voxResult.settings };
-                setLogMessage("VOX_PROJECT_LOADED");
-            } else {
-                setLogMessage("PARSING_DXF_DATA...");
-                const dxfResult = dxfToShapes(content);
-                const { shapes: importedShapes, blocks: importedBlocks, layers: importedLayers, stats } = dxfResult;
-                
-                if (importedShapes.length > 0) {
-                    finalLayers = importedShapes.reduce((acc, s) => {
-                        const l = s.layer || '0';
-                        if (!acc[l]) acc[l] = [];
-                        acc[l].push(s);
-                        return acc;
-                    }, {} as Record<string, Shape[]>);
-                    
-                    if (importedBlocks) setBlocks(prev => ({ ...prev, ...importedBlocks }));
-                    if (importedLayers) finalConfig = { ...INITIAL_LAYERS_CONFIG, ...importedLayers };
-                    
-                    importStats = stats;
-                    setLogMessage(`DXF_IMPORT: ${importedShapes.length} ENTITIES`);
-                } else {
-                    try {
-                        const data = JSON.parse(content);
-                        if (data.layers || data.shapes) {
-                            if (data.layers && !Array.isArray(data.layers)) finalLayers = data.layers;
-                            else if (data.shapes) finalLayers = { '0': data.shapes };
-                            if (data.layerConfig) finalConfig = data.layerConfig;
-                            if (data.settings) finalSettings = { ...INITIAL_SETTINGS, ...data.settings };
-                            setLogMessage("LEGACY_WORKSPACE_LOADED");
-                        } else {
-                            setLogMessage("LOAD_ERR: NO_RECOGNIZABLE_CAD_DATA");
-                            return;
-                        }
-                    } catch (e) {
-                        setLogMessage("LOAD_ERR: UNRECOGNIZED_FILE_TYPE");
-                        return;
-                    }
-                }
+            // Zoom extents if bounds exist
+            if (project.bounds) {
+                setTimeout(() => handleAction('zoomExtents'), 100);
             }
+
+            if (project.stats) {
+                setImportSummary({ fileName, stats: project.stats });
+            }
+
+            setLogMessage(`${fileName.toUpperCase()}_LOADED_SUCCESS`);
+        } else {
+            setLogMessage("LOAD_ERR: INVALID_PROJECT_CONTENT");
         }
 
-        // Update State
-        setLayers(finalLayers);
-        setLayerConfig(finalConfig);
-        setSettings(finalSettings);
-        setCurrentFileName(fileName);
-        setFileSource(source);
-        updateRecentFiles(fileName);
-        setView(INITIAL_VIEW); 
-        
-        // Immediate Cache
-        const cachePayload = {
-          layers: finalLayers,
-          layerConfig: finalConfig,
-          settings: finalSettings,
-          fileName: fileName
-        };
-        storageService.saveLarge(`${STORAGE_PREFIX}${fileName}`, cachePayload);
-        storageService.saveActiveWorkspace(cachePayload);
         setActivePanel('none');
-        
-        if (importStats) {
-            setImportSummary({ fileName, stats: importStats });
-        }
-        
-        // Auto-zoom extents after a brief delay to allow rendering
-        setTimeout(() => {
-            handleAction('zoomExtents');
-        }, 100);
-
     } catch(err) { 
         console.error(err);
-        setLogMessage("LOAD_ERR: CORRUPT_FORMAT"); 
+        setLogMessage("LOAD_ERR: IMPORT_FAILED"); 
     } finally {
         setLoadingFile(false);
         setLoadingStatus("");
@@ -753,6 +710,7 @@ const App: React.FC = () => {
         break;
       case 'toggleAbout': setActivePanel(activePanel === 'about' ? 'none' : 'about'); break;
       case 'togglePrivacy': setActivePanel(activePanel === 'privacy' ? 'none' : 'privacy'); break;
+      case 'toggleGlossary': setActivePanel(activePanel === 'glossary' ? 'none' : 'glossary'); break;
       case 'zoomExtents':
       case 'zoomAll': {
         const limits = act === 'zoomAll' ? { min: settingsRef.current.limitsMin, max: settingsRef.current.limitsMax } : undefined;
@@ -777,8 +735,28 @@ const App: React.FC = () => {
         }
         break;
       }
-      case 'zoomIn': setView(v => ({ ...v, scale: v.scale * 1.5 })); break;
-      case 'zoomOut': setView(v => ({ ...v, scale: v.scale / 1.5 })); break;
+      case 'zoomIn': 
+      case 'zoomOut': {
+        const factor = act === 'zoomIn' ? 1.5 : 1 / 1.5;
+        setView(v => {
+            const canvasSize = canvasHandleRef.current?.getCanvasSize() || { width: 800, height: 600 };
+            const ts = v.scale * settingsRef.current.drawingScale;
+            // Center of the canvas in world space
+            const cx = -v.originX / ts;
+            const cy = v.originY / ts;
+            
+            const newScale = v.scale * factor;
+            const newTs = newScale * settingsRef.current.drawingScale;
+            
+            return {
+                ...v,
+                scale: newScale,
+                originX: -cx * newTs,
+                originY: cy * newTs
+            };
+        });
+        break;
+      }
       case 'setUnits': setSettings(s => ({ ...s, units: payload })); break;
       case 'new': 
         setActivePanel('new_file'); 
@@ -882,8 +860,39 @@ const App: React.FC = () => {
             setLoadingStatus(`OPENING ${payload}...`);
             await new Promise(r => setTimeout(r, 50)); // Allow UI to breathe
 
-            const data = await storageService.loadLarge<any>(`${STORAGE_PREFIX}${payload}`);
-            if (!data) throw new Error("FILE_MISSING");
+            let data = await storageService.loadLarge<any>(`${STORAGE_PREFIX}${payload}`);
+            
+            // Self-repair: If it's a sample and missing, recreate it
+            if (!data) {
+                const samples = ["1.vox", "2.vox", "3.vox"];
+                const sampleIdx = samples.indexOf(payload);
+                if (sampleIdx !== -1) {
+                    setLoadingStatus(`REPAIRING ${payload}...`);
+                    const sampleLayers = { 
+                        '0': [
+                            { id: `repair-${payload}-${Date.now()}`, type: 'circle', x: 200 * (sampleIdx+1), y: 200 * (sampleIdx+1), radius: 50 * (sampleIdx+1), color: '#00bcd4', layer: '0' } as Shape
+                        ], 
+                        'defpoints': [] 
+                    };
+                    data = {
+                        layers: sampleLayers,
+                        layerConfig: INITIAL_LAYERS_CONFIG,
+                        settings: INITIAL_SETTINGS,
+                        fileName: payload
+                    };
+                    await storageService.saveLarge(`${STORAGE_PREFIX}${payload}`, data);
+                }
+            }
+
+            if (!data) {
+              // If still missing (not a sample), clean up registry
+              setRecentFiles(prev => {
+                const updated = prev.filter(f => f.name !== payload);
+                localStorage.setItem(REGISTRY_KEY, JSON.stringify(updated));
+                return updated;
+              });
+              throw new Error("FILE_DATA_NOT_FOUND");
+            }
 
             setLoadingStatus("PARSING GEOMETRY...");
             await new Promise(r => setTimeout(r, 50));
@@ -904,8 +913,13 @@ const App: React.FC = () => {
             setLogMessage(`INFO: OPENED_${payload}`);
             setActivePanel('none');
           } catch (e) {
+            const errorMsg = (e as Error).message;
             console.error("Load failed", e);
-            setLogMessage(`ERR: LOAD_FAILED_${(e as Error).message}`);
+            if (errorMsg === "FILE_DATA_NOT_FOUND") {
+                setLogMessage(`ERR: FILE_NOT_FOUND_IN_STORAGE`);
+            } else {
+                setLogMessage(`ERR: LOAD_FAILED_${errorMsg}`);
+            }
           } finally {
             setLoadingFile(false);
             setLoadingStatus("");
@@ -936,13 +950,13 @@ const App: React.FC = () => {
 
             let content: string = "";
             try {
-                content = shapesToDXF(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current);
+                content = shapesToDXF(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current, blocksRef.current);
                 if (!content || content.length < 10) {
-                    content = shapesToVox(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current);
+                    content = shapesToVox(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current, lineTypesRef.current, blocksRef.current, layoutsRef.current);
                 }
             } catch (err) {
                 console.error("Save content generation failed:", err);
-                content = shapesToVox(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current);
+                content = shapesToVox(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current, lineTypesRef.current, blocksRef.current, layoutsRef.current);
             }
 
             // Native File System Access
@@ -1062,8 +1076,8 @@ const App: React.FC = () => {
           setLoadingStatus(`COMPILING ${finalExt.substring(1).toUpperCase()} DATA...`);
           
           const content = isDxfExport 
-            ? shapesToDXF(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current) 
-            : shapesToVox(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current);
+            ? shapesToDXF(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current, blocksRef.current) 
+            : shapesToVox(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current, lineTypesRef.current, blocksRef.current, layoutsRef.current);
           
           const fileName = (currentFileName.replace(/\.[^/.]+$/, "") + finalExt).replace(/[^a-zA-Z0-9.\-_]/g, '_');
           const blob = new Blob([content], { type: isDxfExport ? 'application/dxf' : 'application/octet-stream' });
@@ -1730,7 +1744,8 @@ const App: React.FC = () => {
     { id: 'layers', icon: Layers, action: 'toggleLayers', activeOn: 'layers' },
     { id: 'drawing_props', icon: FileText, action: 'toggleDrawingProps', activeOn: 'drawing_props' },
     { id: 'properties', icon: Sliders, action: 'toggleProperties', activeOn: 'properties' },
-    { id: 'calculator', icon: Calculator, action: 'toggleCalculator', activeOn: 'calculator' }
+    { id: 'calculator', icon: Calculator, action: 'toggleCalculator', activeOn: 'calculator' },
+    { id: 'glossary', icon: Cpu, action: 'toggleGlossary', activeOn: 'glossary' }
   ];
 
   return (
@@ -1902,6 +1917,7 @@ const App: React.FC = () => {
             ref={canvasHandleRef} 
             layers={layers} 
             blocks={blocks}
+            lineTypes={lineTypes}
             layouts={layouts}
             layerConfig={layerConfig} 
             view={view} 
@@ -2029,6 +2045,7 @@ const App: React.FC = () => {
         {activePanel === 'help' && <InfoPanel type="help" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
         {activePanel === 'about' && <InfoPanel type="about" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
         {activePanel === 'privacy' && <InfoPanel type="privacy" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
+        {activePanel === 'glossary' && <InfoPanel type="glossary" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
         {activePanel === 'new_file' && <NewFileDialog onSelect={(cfg) => { 
             const name = cfg.name + '.vox';
             setLayers({ '0': [], 'defpoints': [] }); 

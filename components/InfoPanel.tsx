@@ -4,9 +4,9 @@ import { X, HelpCircle, Info, ChevronRight, Cpu, MousePointer2, Zap, Settings, C
 import VoxIcon from './VoxIcon';
 
 interface InfoPanelProps {
-  type: 'about' | 'help' | 'privacy';
+  type: 'about' | 'help' | 'privacy' | 'glossary';
   onClose: () => void;
-  onSwitch?: (type: 'about' | 'help' | 'privacy') => void;
+  onSwitch?: (type: 'about' | 'help' | 'privacy' | 'glossary') => void;
 }
 
 const InfoPanel: React.FC<InfoPanelProps> = ({ type, onClose, onSwitch }) => {
@@ -123,13 +123,22 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ type, onClose, onSwitch }) => {
       </div>
       
       {onSwitch && (
-        <button 
-          onClick={() => onSwitch('privacy')}
-          className="mt-6 flex items-center gap-2 px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl hover:bg-emerald-500/20 transition-all group"
-        >
-          <Zap size={10} className="text-emerald-400 group-hover:scale-110 transition-transform" />
-          <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Privacy Protocol</span>
-        </button>
+        <div className="mt-6 flex flex-wrap justify-center gap-3">
+          <button 
+            onClick={() => onSwitch('privacy')}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl hover:bg-emerald-500/20 transition-all group"
+          >
+            <Zap size={10} className="text-emerald-400 group-hover:scale-110 transition-transform" />
+            <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Privacy Protocol</span>
+          </button>
+          <button 
+            onClick={() => onSwitch('glossary')}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-500/10 border border-indigo-500/20 rounded-xl hover:bg-indigo-500/20 transition-all group"
+          >
+            <Cpu size={10} className="text-indigo-400 group-hover:scale-110 transition-transform" />
+            <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">Engine Glossary</span>
+          </button>
+        </div>
       )}
 
       <p className="mt-8 text-[9px] text-neutral-600 uppercase font-medium">© 2026 Code Tech. All Rights Reserved.</p>
@@ -239,6 +248,74 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ type, onClose, onSwitch }) => {
     </div>
   );
 
+  const renderGlossary = () => (
+    <div className="p-5 space-y-6">
+      <div className="flex items-center gap-4 border-b border-white/10 pb-6 mb-6">
+        <div className="w-12 h-12 bg-indigo-500/10 rounded-2xl flex items-center justify-center shrink-0 border border-indigo-500/20 shadow-lg shadow-indigo-500/5">
+          <Cpu size={24} className="text-indigo-400" />
+        </div>
+        <div>
+          <h2 className="text-lg font-black text-white uppercase tracking-tight leading-none mb-1">Technical Glossary</h2>
+          <p className="text-[9px] text-neutral-500 uppercase font-black tracking-widest">Under the hood of the engine</p>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {[
+          { 
+            term: 'LibreDWG', 
+            meaning: 'The engine\'s core C-based decoding library for legacy DWG data. A performance-critical layer originally developed within the GNU project.',
+            icon: Settings
+          },
+          { 
+            term: 'WASM (WebAssembly)', 
+            meaning: 'A high-performance binary instruction format that allows our C-based LibreDWG components to execute at near-native speeds directly in your browser.',
+            icon: Zap
+          },
+          { 
+            term: 'Parsing', 
+            meaning: 'The sophisticated process of deconstructing raw file streams into precise CAD geometry like Polylines, Layers, and Block references.',
+            icon: Command
+          },
+          { 
+            term: 'Binary Architecture', 
+            meaning: 'A high-efficiency data format stored as bytes. Unlike text-based DXF, binary formats like DWG require specialized decoders for interpretation.',
+            icon: Cpu
+          },
+          { 
+            term: 'DWG Format', 
+            meaning: 'The industry-standard "Drawing" specification. It is one of the most complex binary formats in existence, holding decades of engineering history.',
+            icon: MousePointer2
+          }
+        ].map((item, i) => (
+          <div key={i} className="group p-4 bg-neutral-900/60 rounded-2xl border border-white/5 hover:border-indigo-500/30 hover:bg-neutral-900 transition-all">
+            <div className="flex items-center gap-3 mb-2">
+              <item.icon size={12} className="text-indigo-400/50 group-hover:text-indigo-400 transition-colors" />
+              <h4 className="text-[11px] font-black text-white uppercase tracking-wider">{item.term}</h4>
+            </div>
+            <p className="text-[10px] text-neutral-400 leading-relaxed font-medium">
+              {item.meaning}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-8 p-4 bg-indigo-500/5 rounded-2xl border border-indigo-500/10">
+        <h5 className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-2">System Status: Nominal</h5>
+        <div className="space-y-1">
+          <div className="flex justify-between items-center text-[8px] text-neutral-500 uppercase font-bold">
+            <span>Buffer Load</span>
+            <span className="text-emerald-400">Validated</span>
+          </div>
+          <div className="flex justify-between items-center text-[8px] text-neutral-500 uppercase font-bold">
+            <span>WASM Runtime</span>
+            <span className="text-emerald-400">Connected</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div 
       className="fixed left-1/2 top-10 -translate-x-1/2 w-[340px] max-w-[95vw] bg-[#1a1a1a] border border-neutral-800 rounded-2xl shadow-[0_25px_60px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 select-none"
@@ -258,8 +335,9 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ type, onClose, onSwitch }) => {
           {type === 'help' && <HelpCircle size={18} className="text-cyan-400" />}
           {type === 'about' && <Info size={18} className="text-cyan-400" />}
           {type === 'privacy' && <Zap size={18} className="text-emerald-400" />}
+          {type === 'glossary' && <Cpu size={18} className="text-indigo-400" />}
           <h3 className="text-xs font-black text-neutral-200 uppercase tracking-widest">
-            {type === 'help' ? 'Help & Commands' : type === 'about' ? 'About VoxCADD' : 'Privacy protocol'}
+            {type === 'help' ? 'Help & Commands' : type === 'about' ? 'About VoxCADD' : type === 'privacy' ? 'Privacy protocol' : 'Technical Glossary'}
           </h3>
         </div>
         <button onClick={onClose} className="p-1 hover:bg-neutral-800 rounded-lg text-neutral-500 hover:text-white transition-colors cursor-pointer">
@@ -271,6 +349,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ type, onClose, onSwitch }) => {
         {type === 'help' && renderHelp()}
         {type === 'about' && renderAbout()}
         {type === 'privacy' && renderPrivacy()}
+        {type === 'glossary' && renderGlossary()}
       </div>
 
       <div className="p-4 bg-[#121212] border-t border-neutral-800 flex justify-end shrink-0">

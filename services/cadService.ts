@@ -285,9 +285,18 @@ export const hitTestShape = (x: number, y: number, s: Shape, threshold: number, 
       if (blocks && blocks[s.blockId]) {
         const block = blocks[s.blockId];
         const dx = x - s.x, dy = y - s.y;
-        const cos = Math.cos(s.rotation * Math.PI / 180), sin = Math.sin(s.rotation * Math.PI / 180);
-        const tx = (dx * cos + dy * sin) / s.scaleX, ty = (-dx * sin + dy * cos) / s.scaleY;
-        return block.shapes.some(bs => hitTestShape(tx, ty, bs, threshold / Math.max(s.scaleX, s.scaleY), blocks));
+        const cos = Math.cos(s.rotation || 0), sin = Math.sin(s.rotation || 0);
+        // Inverse transform to local coordinate space
+        let tx = (dx * cos + dy * sin) / (s.scaleX || 1);
+        let ty = (-dx * sin + dy * cos) / (s.scaleY || 1);
+        
+        // Add basePoint because internal shapes are relative to block origin, and insertion is at basePoint
+        if (block.basePoint) {
+            tx += block.basePoint.x;
+            ty += block.basePoint.y;
+        }
+        
+        return block.shapes.some(bs => hitTestShape(tx, ty, bs, threshold / Math.max(Math.abs(s.scaleX || 1), Math.abs(s.scaleY || 1)), blocks));
       }
       return Math.sqrt(Math.pow(x - s.x, 2) + Math.pow(y - s.y, 2)) < threshold * 2;
     case 'circle': {
@@ -301,17 +310,49 @@ export const hitTestShape = (x: number, y: number, s: Shape, threshold: number, 
     }
     case 'text':
     case 'mtext': {
-        const lines = s.type === 'mtext' ? s.content.split('\n') : [s.content];
-        const h = s.size * (s.type === 'mtext' ? (lines.length * 1.2) : 1);
-        // Estimate width if not explicit
-        let w = (s as MTextShape).width;
+        const rawContent = s.content || "";
+        const lineSpacing = 1.2;
+        let lines: string[] = [];
+        let w = (s as MTextShape).width || 0;
+        
+        if (s.type === 'mtext' && w > 0) {
+            // For hit-test, we don't have ctx here, so we approximate wrapping
+            const words = rawContent.split(' ');
+            let currentLine = '';
+            words.forEach(word => {
+                const testLine = currentLine + (currentLine ? ' ' : '') + word;
+                if (testLine.length * s.size * 0.6 > w && currentLine) {
+                    lines.push(currentLine);
+                    currentLine = word;
+                } else {
+                    currentLine = testLine;
+                }
+            });
+            lines.push(currentLine);
+        } else {
+            lines = rawContent.split('\n');
+        }
+
+        const h = lines.length * s.size * lineSpacing;
         if (!w) {
-            const maxChars = Math.max(...lines.map(l => l.length));
-            w = maxChars * s.size * 0.6; // Average monospace char width
+            const maxChars = Math.max(...lines.map(l => l.length), 1);
+            w = maxChars * s.size * 0.6; 
         }
         
-        const xMin = s.x - (s.justification === 'center' ? w/2 : s.justification === 'right' ? w : 0);
-        return x >= xMin - threshold && x <= xMin + w + threshold && y <= s.y + threshold && y >= s.y - h - threshold;
+        // Translate and rotate point back to text local space
+        const dx = x - s.x;
+        const dy = y - s.y;
+        const cos = Math.cos(s.rotation || 0);
+        const sin = Math.sin(s.rotation || 0);
+        const tx = dx * cos + dy * sin;
+        const ty = -dx * sin + dy * cos;
+        
+        const xMin = -(s.justification === 'center' ? w/2 : s.justification === 'right' ? w : 0);
+        const xMax = xMin + w;
+        const yMin = -h;
+        const yMax = 0;
+        
+        return tx >= xMin - threshold && tx <= xMax + threshold && ty >= yMin - threshold && ty <= yMax + threshold;
     }
     case 'arc': {
       const d = Math.sqrt(Math.pow(x - s.x, 2) + Math.pow(y - s.y, 2));
@@ -407,14 +448,43 @@ export const getShapeBounds = (s: Shape, blocks?: Record<string, BlockDefinition
         case 'block':
             if (blocks && blocks[s.blockId]) {
                 const block = blocks[s.blockId];
-                let bxMin = Infinity, byMin = Infinity, bxMax = -Infinity, byMax = -Infinity;
-                block.shapes.forEach(bs => {
-                    const b = getShapeBounds(bs, blocks);
-                    bxMin = Math.min(bxMin, b.xMin); byMin = Math.min(byMin, b.yMin);
-                    bxMax = Math.max(bxMax, b.xMax); byMax = Math.max(byMax, b.yMax);
-                });
-                const r = Math.sqrt(Math.max(bxMin*bxMin, bxMax*bxMax) + Math.max(byMin*byMin, byMax*byMax)) * Math.max(s.scaleX, s.scaleY);
-                bounds = { xMin: s.x - r, yMin: s.y - r, xMax: s.x + r, yMax: s.y + r };
+                if (block.shapes.length === 0) {
+                    bounds = { xMin: s.x - 1, yMin: s.y - 1, xMax: s.x + 1, yMax: s.y + 1 };
+                } else {
+                    let bxMin = Infinity, byMin = Infinity, bxMax = -Infinity, byMax = -Infinity;
+                    block.shapes.forEach(bs => {
+                        const b = getShapeBounds(bs, blocks);
+                        bxMin = Math.min(bxMin, b.xMin); byMin = Math.min(byMin, b.yMin);
+                        bxMax = Math.max(bxMax, b.xMax); byMax = Math.max(byMax, b.yMax);
+                    });
+                    
+                    // Offset by base point if present
+                    if (block.basePoint) {
+                        bxMin -= block.basePoint.x; bxMax -= block.basePoint.x;
+                        byMin -= block.basePoint.y; byMax -= block.basePoint.y;
+                    }
+
+                    // Transform corners for rotation/scale
+                    const cos = Math.cos(s.rotation || 0);
+                    const sin = Math.sin(s.rotation || 0);
+                    const sx = s.scaleX || 1, sy = s.scaleY || 1;
+                    
+                    const corners = [
+                        { x: bxMin * sx, y: byMin * sy },
+                        { x: bxMax * sx, y: byMin * sy },
+                        { x: bxMax * sx, y: byMax * sy },
+                        { x: bxMin * sx, y: byMax * sy }
+                    ];
+                    
+                    let fxMin = Infinity, fyMin = Infinity, fxMax = -Infinity, fyMax = -Infinity;
+                    corners.forEach(p => {
+                        const rx = s.x + (p.x * cos - p.y * sin);
+                        const ry = s.y + (p.x * sin + p.y * cos);
+                        fxMin = Math.min(fxMin, rx); fyMin = Math.min(fyMin, ry);
+                        fxMax = Math.max(fxMax, rx); fyMax = Math.max(fyMax, ry);
+                    });
+                    bounds = { xMin: fxMin, yMin: fyMin, xMax: fxMax, yMax: fyMax };
+                }
             } else {
                 bounds = { xMin: s.x - 5, yMin: s.y - 5, xMax: s.x + 5, yMax: s.y + 5 };
             }
@@ -445,15 +515,59 @@ export const getShapeBounds = (s: Shape, blocks?: Record<string, BlockDefinition
             break;
         case 'text':
         case 'mtext': {
-            const lines = s.type === 'mtext' ? s.content.split('\n') : [s.content];
-            const h = s.size * (s.type === 'mtext' ? (lines.length * 1.2) : 1);
-            let w = (s as MTextShape).width;
+            const rawContent = s.content || "";
+            const lineSpacing = 1.2;
+            let lines: string[] = [];
+            let w = (s as MTextShape).width || 0;
+            
+            if (s.type === 'mtext' && w > 0) {
+                const words = rawContent.split(' ');
+                let currentLine = '';
+                words.forEach(word => {
+                    const testLine = currentLine + (currentLine ? ' ' : '') + word;
+                    if (testLine.length * s.size * 0.6 > w && currentLine) {
+                        lines.push(currentLine);
+                        currentLine = word;
+                    } else {
+                        currentLine = testLine;
+                    }
+                });
+                lines.push(currentLine);
+            } else {
+                lines = rawContent.split('\n');
+            }
+
+            const h = lines.length * s.size * lineSpacing;
             if (!w) {
-                const maxChars = Math.max(...lines.map(l => l.length));
+                const maxChars = Math.max(...lines.map(l => l.length), 1);
                 w = maxChars * s.size * 0.6;
             }
-            const txMin = s.x - (s.justification === 'center' ? w/2 : s.justification === 'right' ? w : 0);
-            bounds = { xMin: txMin, yMin: s.y - h, xMax: txMin + w, yMax: s.y };
+
+            const lxMin = -(s.justification === 'center' ? w/2 : s.justification === 'right' ? w : 0);
+            const lxMax = lxMin + w;
+            const lyMin = -h;
+            const lyMax = 0;
+
+            const cos = Math.cos(s.rotation || 0);
+            const sin = Math.sin(s.rotation || 0);
+
+            // 4 corners
+            const corners = [
+                { x: lxMin, y: lyMin },
+                { x: lxMax, y: lyMin },
+                { x: lxMax, y: lyMax },
+                { x: lxMin, y: lyMax }
+            ];
+
+            let bxMin = Infinity, byMin = Infinity, bxMax = -Infinity, byMax = -Infinity;
+            corners.forEach(p => {
+                const rx = s.x + (p.x * cos - p.y * sin);
+                const ry = s.y + (p.x * sin + p.y * cos);
+                bxMin = Math.min(bxMin, rx); byMin = Math.min(byMin, ry);
+                bxMax = Math.max(bxMax, rx); byMax = Math.max(byMax, ry);
+            });
+
+            bounds = { xMin: bxMin, yMin: byMin, xMax: bxMax, yMax: byMax };
             break;
         }
         case 'ellipse':
@@ -522,11 +636,17 @@ export const calculateShapeLength = (s: Shape): number => {
     return len;
 };
 
-export const getAllShapesBounds = (layers: Record<string, Shape[]>, blocks?: Record<string, BlockDefinition>, limits?: { min: Point, max: Point }): { xMin: number, yMin: number, xMax: number, yMax: number } | null => {
+export const getAllShapesBounds = (
+    layers: Record<string, Shape[]> | Shape[], 
+    blocks?: Record<string, BlockDefinition>, 
+    limits?: { min: Point, max: Point }
+): { xMin: number, yMin: number, xMax: number, yMax: number } | null => {
     let xMin = Infinity, yMin = Infinity, xMax = -Infinity, yMax = -Infinity;
     let hasShapes = false;
 
-    Object.values(layers).forEach(layerShapes => {
+    const shapesList = Array.isArray(layers) ? [layers] : Object.values(layers);
+
+    shapesList.forEach(layerShapes => {
         layerShapes.forEach(s => {
             if (s.type === 'ray' || s.type === 'xline') return; 
             const b = getShapeBounds(s, blocks);
@@ -570,6 +690,9 @@ export const distToInfiniteLine = (px: number, py: number, x1: number, y1: numbe
 
 export const moveShape = (s: Shape, dx: number, dy: number): Shape => {
     const ns = { ...s };
+    delete (ns as any)._bounds;
+    delete (ns as any)._length;
+    
     switch (ns.type) {
         case 'line': case 'ray': case 'xline': case 'leader':
             (ns as any).x1 += dx; (ns as any).y1 += dy; (ns as any).x2 += dx; (ns as any).y2 += dy; break;

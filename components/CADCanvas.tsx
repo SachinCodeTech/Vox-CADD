@@ -1,11 +1,12 @@
 
 import React, { useRef, useEffect, useState, useCallback, useMemo, useImperativeHandle, forwardRef } from 'react';
-import { Shape, ViewState, AppSettings, SnapPoint, LayerConfig, Point, MTextShape, BlockDefinition, LayoutDefinition } from '../types';
+import { Shape, ViewState, AppSettings, SnapPoint, LayerConfig, Point, MTextShape, BlockDefinition, LayoutDefinition, LineTypeDefinition } from '../types';
 import { hitTestShape, findBestSnap, formatLength, getShapesInRect, getShapeBounds, isRectIntersecting, formatDualLength, isShapeClosed, isPointInsideShape, getPolylineOffsetPoints, calculateShapeLength } from '../services/cadService';
 
 interface CADCanvasProps {
   layers: Record<string, Shape[]>;
   blocks: Record<string, BlockDefinition>;
+  lineTypes: Record<string, LineTypeDefinition>;
   layouts: LayoutDefinition[];
   layerConfig: Record<string, LayerConfig>; 
   view: ViewState;
@@ -37,7 +38,7 @@ export interface CADCanvasHandle {
 }
 
 const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({ 
-    layers, blocks, layouts, layerConfig, view, setView, settings, isCommandActive, activeTab, 
+    layers, blocks, lineTypes, layouts, layerConfig, view, setView, settings, isCommandActive, activeTab, 
     isViewportActive = false, activeViewportId, onViewportToggle,
     onMouseMove, onClick, selectedIds = [], highlightIds = [], onSelectionChange, previewShapes,
     activePrompt, basePoint = null, activeCommandName, isAiThinking, lastAiCommandTime, onAction, onCommand,
@@ -499,7 +500,49 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     ctx.restore();
   };
 
-  const drawShape = (ctx: CanvasRenderingContext2D, s: Shape, ts: number) => {
+  const resolveColor = (s: Shape, layerConf?: LayerConfig, activeTab: string = 'model', blockContext?: { color: string }): string => {
+    // 1. Check entity color
+    const entColor = (s.color || '').toLowerCase();
+    
+    // BYBLOCK logic: use block insertion color
+    if (entColor === 'byblock' && blockContext?.color) {
+        return blockContext.color;
+    }
+    
+    // BYLAYER or missing logic: use layer color
+    if (!entColor || entColor === 'bylayer') {
+        const lColor = layerConf?.color || "#FFFFFF";
+        if (activeTab !== 'model' && (lColor.toUpperCase() === '#FFF' || lColor.toUpperCase() === '#FFFFFF')) {
+            return '#111111';
+        }
+        return lColor;
+    }
+
+    // Direct color
+    if (activeTab !== 'model' && (entColor === '#fff' || entColor === '#ffffff' || entColor === 'white')) {
+        return '#111111';
+    }
+    return s.color!;
+  };
+
+  const resolveLineWeight = (s: Shape, layerConf?: LayerConfig, blockContext?: { thickness: number }): number => {
+      // Direct thickness
+      if (s.thickness !== undefined && typeof s.thickness === 'number' && s.thickness >= 0) {
+          return s.thickness;
+      }
+      
+      const entThick = (s.thickness as any);
+
+      // BYBLOCK logic
+      if (entThick === 'byblock' && blockContext?.thickness !== undefined) {
+          return blockContext.thickness;
+      }
+
+      // BYLAYER logic
+      return layerConf?.thickness || 0.25;
+  };
+
+  const drawShape = (ctx: CanvasRenderingContext2D, s: Shape, ts: number, blockContext?: { color: string, thickness: number }) => {
     const isS = selectedIds.includes(s.id), isH = highlightIds.includes(s.id) || highlightedIds.includes(s.id);
     const conf = layerConfig[s.layer]; 
     if (!s.isPreview && conf && (!conf.visible || conf.frozen)) return;
@@ -508,11 +551,14 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     if ((s.type === 'text' || s.type === 'mtext') && s.size * ts < 5) return;
 
     ctx.save(); ctx.beginPath();
-    let baseColor = s.color || conf?.color || "#FFFFFF";
-    if (s.isPreview && isCommandActive) baseColor = layerConfig[settings.currentLayer]?.color || "#FFFFFF";
-    if (activeTab !== 'model' && (baseColor.toUpperCase() === '#FFF' || baseColor.toUpperCase() === '#FFFFFF')) baseColor = '#111111';
     
-    let weight = (s.type === 'dline' ? (conf?.thickness || 1) : (s.thickness || conf?.thickness || 1));
+    let baseColor = resolveColor(s, conf, activeTab, blockContext);
+    if (s.isPreview && isCommandActive) baseColor = layerConfig[settings.currentLayer]?.color || "#FFFFFF";
+    
+    let weight = resolveLineWeight(s, conf, blockContext);
+    // Special case for double lines: thickness in VOX/DXF is often distance between lines, but here we also have stroke weight
+    if (s.type === 'dline') weight = conf?.thickness || 0.25;
+
     if (!settings.showLineWeights && !isS && !isH && !s.isPreview) weight = 1;
 
     if (s.isPreview) { 
@@ -520,38 +566,57 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         ctx.setLineDash([6/ts, 4/ts]); 
         ctx.globalAlpha = 0.5; 
         ctx.lineWidth = 1/ts; 
-        // For dline preview specifically, we might want a slightly thicker visual or distinct look
         if (s.type === 'dline') ctx.lineWidth = 1.5/ts;
     }
     else if (isS) { ctx.strokeStyle = "#00bcd4"; ctx.lineWidth = 2.5/ts; ctx.setLineDash([2/ts, 2/ts]); }
     else if (isH) { ctx.strokeStyle = "#00bcd4"; ctx.lineWidth = 1.5/ts; ctx.setLineDash([4/ts, 4/ts]); }
     else { ctx.strokeStyle = baseColor; if (conf?.locked) ctx.globalAlpha = 0.45; ctx.lineWidth = weight/ts; }
     
-    // Auto-scaling logic: Adjust base L based on entity size if it's very small
-    const currentLineType = s.lineType || conf?.lineType || 'continuous';
+    // Line Type implementation
+    const currentLineType = (s.lineType || conf?.lineType || 'continuous').toLowerCase();
+    
     if (currentLineType !== 'continuous' && !s.isPreview && !isH && !isS) {
-        let L = 32 / ts; 
-        const sLen = calculateShapeLength(s);
-        if (sLen > 0 && sLen < L * 10) L = sLen / 10;
-
-        if (currentLineType === 'dashed') ctx.setLineDash([L * 2.0, L * 1.5]);
-        else if (currentLineType === 'dotted') ctx.setLineDash([1/ts, L * 1.0]);
-        else if (currentLineType === 'center') ctx.setLineDash([L * 6, L * 1.5, L * 1, L * 1.5]);
-        else if (currentLineType === 'dashdot') ctx.setLineDash([L * 5, L * 1.5, L * 0.8, L * 1.5]);
-        else if (currentLineType === 'border') ctx.setLineDash([L * 8, L * 1.5, L * 2.5, L * 1.5]);
-        else if (currentLineType === 'divide') ctx.setLineDash([L * 4, L * 1, L * 1, L * 1, L * 1, L * 1]);
-        else if (currentLineType === 'phantom') ctx.setLineDash([L * 8, L * 1.2, L * 1.2, L * 1.2, L * 1.2, L * 1.2]);
-        else if (currentLineType === 'zigzag') ctx.setLineDash([L * 5, L * 1.5, L * 1.5, L * 1.5]);
-        else if (currentLineType === 'hotwater') ctx.setLineDash([L * 7, L * 2, L * 1, L * 2, L * 1, L * 2]);
-        else if (currentLineType === 'hidden') ctx.setLineDash([L * 1.2, L * 1.2]);
-        else if (currentLineType === 'gasLine') ctx.setLineDash([L * 12, L * 4, L * 1.5, L * 4]);
-        else if (currentLineType === 'fenceLine') ctx.setLineDash([L * 8, L * 1.2, L * 1.2, L * 1.2]);
-        else if (currentLineType === 'tracks') ctx.setLineDash([L * 3, L * 1.5, L * 3, L * 1.5]);
-        else if (currentLineType === 'batt') ctx.setLineDash([L * 3.5, L * 0.5, L * 0.5, L * 0.5, L * 3.5, L * 0.5]);
-        else if (currentLineType === 'zigzag2') ctx.setLineDash([L * 2, L * 1]);
-        else if (currentLineType === 'dots2') ctx.setLineDash([1/ts, L * 0.5]);
-        else if (currentLineType === 'dash2') ctx.setLineDash([L * 1, L * 1]);
+        const ltDef = lineTypes[currentLineType];
+        if (ltDef && ltDef.pattern && ltDef.pattern.length > 0) {
+            // Apply scale to pattern based on drawing scale and zoom
+            const scale = settings.drawingScale / ts;
+            const scaledPattern = ltDef.pattern.map(p => p / ts); 
+            ctx.setLineDash(scaledPattern);
+        } else {
+            // Fallback for legacy names if not found in lineTypes map
+            let L = 32 / ts; 
+            const sLen = calculateShapeLength(s);
+            if (sLen > 0 && sLen < L * 10) L = sLen / 10;
+    
+            if (currentLineType === 'dashed') ctx.setLineDash([L * 2.0, L * 1.5]);
+            else if (currentLineType === 'dotted') ctx.setLineDash([1/ts, L * 1.0]);
+            else if (currentLineType === 'center') ctx.setLineDash([L * 6, L * 1.5, L * 1, L * 1.5]);
+            else if (currentLineType === 'dashdot') ctx.setLineDash([L * 5, L * 1.5, L * 0.8, L * 1.5]);
+            else if (currentLineType === 'border') ctx.setLineDash([L * 8, L * 1.5, L * 2.5, L * 1.5]);
+            else if (currentLineType === 'divide') ctx.setLineDash([L * 4, L * 1, L * 1, L * 1, L * 1, L * 1]);
+            else if (currentLineType === 'phantom') ctx.setLineDash([L * 8, L * 1.2, L * 1.2, L * 1.2, L * 1.2, L * 1.2]);
+            else if (currentLineType === 'zigzag') ctx.setLineDash([L * 5, L * 1.5, L * 1.5, L * 1.5]);
+            else if (currentLineType === 'hotwater') ctx.setLineDash([L * 7, L * 2, L * 1, L * 2, L * 1, L * 2]);
+            else if (currentLineType === 'hidden') ctx.setLineDash([L * 1.2, L * 1.2]);
+            else if (currentLineType === 'gasLine') ctx.setLineDash([L * 12, L * 4, L * 1.5, L * 4]);
+            else if (currentLineType === 'fenceLine') ctx.setLineDash([L * 8, L * 1.2, L * 1.2, L * 1.2]);
+            else if (currentLineType === 'tracks') ctx.setLineDash([L * 3, L * 1.5, L * 3, L * 1.5]);
+            else if (currentLineType === 'batt') ctx.setLineDash([L * 3.5, L * 0.5, L * 0.5, L * 0.5, L * 3.5, L * 0.5]);
+            else if (currentLineType === 'zigzag2') ctx.setLineDash([L * 2, L * 1]);
+            else if (currentLineType === 'dots2') ctx.setLineDash([1/ts, L * 0.5]);
+            else if (currentLineType === 'dash2') ctx.setLineDash([L * 1, L * 1]);
+        }
     }
+
+    const processText = (txt: string) => {
+        if (!txt) return '';
+        return txt
+            .replace(/%%c/gi, 'Ø')
+            .replace(/%%d/gi, '°')
+            .replace(/%%p/gi, '±')
+            .replace(/\\P/g, '\n')
+            .replace(/\{|}/g, '');
+    };
 
     switch (s.type) {
       case 'line': ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); break;
@@ -638,7 +703,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               if (tAngle < -Math.PI/2) tAngle += Math.PI;
               ctx.rotate(tAngle); ctx.scale(1, -1);
               ctx.font = `${ds.textSize}px monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-              ctx.fillStyle = ctx.strokeStyle; ctx.fillText(s.text, 0, 0);
+              ctx.fillStyle = ctx.strokeStyle; ctx.fillText(processText(s.text), 0, 0);
               ctx.restore();
               break;
           }
@@ -651,7 +716,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               ctx.translate(s.x2, s.y2); ctx.scale(1, -1);
               ctx.font = `${ds.textSize}px monospace`; ctx.textAlign = isX ? 'left' : 'center'; ctx.textBaseline = isX ? 'middle' : 'bottom';
               ctx.fillStyle = ctx.strokeStyle;
-              ctx.fillText(s.text, isX ? ds.textOffset : 0, isX ? 0 : -ds.textOffset);
+              ctx.fillText(processText(s.text), isX ? ds.textOffset : 0, isX ? 0 : -ds.textOffset);
               ctx.restore();
               break;
           }
@@ -698,7 +763,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           if (tAngle < -Math.PI/2) tAngle += Math.PI;
           ctx.rotate(tAngle); ctx.scale(1, -1);
           ctx.font = `${ds.textSize}px monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-          ctx.fillStyle = ctx.strokeStyle; ctx.fillText(s.text, 0, 0);
+          ctx.fillStyle = ctx.strokeStyle; ctx.fillText(processText(s.text), 0, 0);
           ctx.restore();
           break;
       }
@@ -791,7 +856,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       case 'mtext':
         ctx.save(); 
         ctx.translate(s.x, s.y); 
-        if (s.rotation) ctx.rotate(-s.rotation * Math.PI / 180); 
+        if (s.rotation) ctx.rotate(-s.rotation); 
         ctx.scale(1,-1); 
         
         const weight = (s as any).bold ? 'bold' : '400';
@@ -802,11 +867,32 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         ctx.fillStyle=ctx.strokeStyle; 
         ctx.textAlign = s.justification || 'left';
         
+        
+
         if (s.type === 'mtext') {
-            const lines = s.content.split('\n');
+            const rawContent = processText(s.content);
+            let lines: string[] = [];
+            
+            if (s.width > 0) {
+                const words = rawContent.split(' ');
+                let currentLine = '';
+                words.forEach(word => {
+                    const testLine = currentLine + (currentLine ? ' ' : '') + word;
+                    if (ctx.measureText(testLine).width > s.width && currentLine) {
+                        lines.push(currentLine);
+                        currentLine = word;
+                    } else {
+                        currentLine = testLine;
+                    }
+                });
+                lines.push(currentLine);
+            } else {
+                lines = rawContent.split('\n');
+            }
+
             const xOffset = (s.justification === 'center' ? s.width/2 : s.justification === 'right' ? s.width : 0);
             lines.forEach((line, i) => {
-                const ly = (i + 1) * s.size * 1.2;
+                const ly = i * s.size * 1.2;
                 
                 if ((s as any).highlight) {
                     const tw = ctx.measureText(line).width;
@@ -831,20 +917,20 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                 }
             });
         } else {
+            const content = processText(s.content);
             if ((s as any).highlight) {
-                const tw = ctx.measureText(s.content).width;
+                const tw = ctx.measureText(content).width;
                 let hx = 0;
                 if (s.justification === 'center') hx -= tw/2;
                 else if (s.justification === 'right') hx -= tw;
                 ctx.save();
                 ctx.fillStyle = 'rgba(255, 230, 0, 0.4)';
-                // Fix highlighter size to fit text bounds only
                 ctx.fillRect(hx - 2, -s.size * 0.85, tw + 4, s.size * 1.1);
                 ctx.restore();
             }
-            ctx.fillText(s.content, 0, 0);
+            ctx.fillText(content, 0, 0);
             if ((s as any).underline) {
-                const tw = ctx.measureText(s.content).width;
+                const tw = ctx.measureText(content).width;
                 let ux = 0;
                 if (s.justification === 'center') ux -= tw/2;
                 else if (s.justification === 'right') ux -= tw;
@@ -859,7 +945,16 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           ctx.translate(s.x, s.y);
           ctx.rotate(-s.rotation * Math.PI / 180);
           ctx.scale(s.scaleX, s.scaleY);
-          block.shapes.forEach(bs => drawShape(ctx, bs, ts));
+          
+          // Translate by negative basePoint to align the insertion point correctly
+          if (block.basePoint) {
+            ctx.translate(-block.basePoint.x, -block.basePoint.y);
+          }
+          
+          const currentColor = resolveColor(s, layerConfig[s.layer], activeTab, blockContext);
+          const currentThickness = resolveLineWeight(s, layerConfig[s.layer], blockContext);
+          
+          block.shapes.forEach(bs => drawShape(ctx, bs, ts, { color: currentColor, thickness: currentThickness }));
           ctx.restore();
         }
         break;
@@ -903,7 +998,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         const diagonal = Math.sqrt(width*width + height*height) * 2;
         let count = Math.ceil(diagonal / spacing);
         // Safety cap for extremely dense patterns
-        if (count > 300) count = 300; 
+        if (count > 500) count = 500; 
         
         const startX = (xMin + xMax) / 2;
         const startY = (yMin + yMax) / 2;
@@ -914,9 +1009,10 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         if (pattern === 'dots') {
             ctx.beginPath();
             const dotSize = 0.5/ts;
+            const step = spacing;
             for (let i = -count; i <= count; i++) {
                 for (let j = -count; j <= count; j++) {
-                    const px = i * spacing, py = j * spacing;
+                    const px = i * step, py = j * step;
                     ctx.moveTo(px + dotSize, py);
                     ctx.arc(px, py, dotSize, 0, Math.PI * 2);
                 }
@@ -929,7 +1025,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                 const offset = i * spacing;
                 
                 // ANSI patterns
-                if (pattern.startsWith('ansi') || pattern === 'cross' || pattern === 'net') {
+                if (pattern.startsWith('ansi') || pattern === 'cross' || pattern === 'net' || pattern === 'hound' || pattern === 'grid') {
                     const a = (pattern === 'ansi31' || pattern === 'ansi32') ? Math.PI/4 : 
                               (pattern === 'ansi37') ? -Math.PI/4 : 0;
                     
@@ -941,23 +1037,47 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                         ctx.moveTo(-diagonal, offset + spacing/5);
                         ctx.lineTo(diagonal, offset + spacing/5);
                     }
+                    if (pattern === 'net') {
+                         ctx.rotate(Math.PI/2);
+                         ctx.moveTo(-diagonal, offset);
+                         ctx.lineTo(diagonal, offset);
+                    }
                     ctx.restore();
                 }
                 
-                if (pattern === 'cross' || pattern === 'net') {
-                    ctx.save();
-                    ctx.rotate(Math.PI/2);
-                    ctx.moveTo(-diagonal, offset);
-                    ctx.lineTo(diagonal, offset);
-                    ctx.restore();
+                if (pattern === 'grid') {
+                     ctx.moveTo(-diagonal, offset);
+                     ctx.lineTo(diagonal, offset);
+                     ctx.save();
+                     ctx.rotate(Math.PI/2);
+                     ctx.moveTo(-diagonal, offset);
+                     ctx.lineTo(diagonal, offset);
+                     ctx.restore();
                 }
 
-                if (pattern === 'ansi37') {
+                if (pattern === 'ansi37' || pattern === 'hound') {
                     ctx.save();
                     ctx.rotate(Math.PI/4); 
                     ctx.moveTo(-diagonal, offset);
                     ctx.lineTo(diagonal, offset);
+                    if (pattern === 'hound') {
+                         ctx.rotate(Math.PI/2);
+                         ctx.setLineDash([spacing/2, spacing/2]);
+                         ctx.moveTo(-diagonal, offset);
+                         ctx.lineTo(diagonal, offset);
+                    }
                     ctx.restore();
+                }
+                
+                if (pattern === 'brick') {
+                    const s = spacing;
+                    ctx.moveTo(-diagonal, i * s);
+                    ctx.lineTo(diagonal, i * s);
+                    for (let j = -count; j <= count; j++) {
+                        const x = j * s * 2 + (i % 2 === 0 ? 0 : s);
+                        ctx.moveTo(x, i * s);
+                        ctx.lineTo(x, (i + 1) * s);
+                    }
                 }
                 
                 if (pattern === 'gravel') {
@@ -1291,45 +1411,68 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       redraw();
   };
 
-  const handleWheel = (e: React.WheelEvent) => {
-    const canvas = canvasRef.current; if (!canvas) return;
-    const rect = canvas.getBoundingClientRect(), x = e.clientX - rect.left, y = e.clientY - rect.top;
-    const zoomIn = e.deltaY < 0, factor = zoomIn ? 1.25 : 0.8;
-    
-    const wp = screenToWorld(x, y);
-    const currentView = (isViewportActive && activeViewportId) ? 
-        layouts.find(l=>l.id===activeTab)?.viewports.find(vp=>vp.id===activeViewportId)?.viewState : view;
-    
-    if (!currentView) return;
+  const propsRef = useRef({ view, isViewportActive, activeViewportId, layouts, activeTab, settings, setView });
+  useEffect(() => {
+    propsRef.current = { view, isViewportActive, activeViewportId, layouts, activeTab, settings, setView };
+  }, [view, isViewportActive, activeViewportId, layouts, activeTab, settings, setView]);
 
-    const newScale = Math.max(0.000001, currentView.scale * factor);
-    const r = getPixelRatio(), w = canvas.width/r, h = canvas.height/r, ts = newScale * settings.drawingScale;
-    
-    let newOriginX: number, newOriginY: number;
-    
-    if (activeTab === 'model' || !isViewportActive) {
-        newOriginX = x - w/2 - wp.x * ts;
-        newOriginY = y - h/2 + wp.y * ts;
-    } else {
-        const layout = layouts.find(l => l.id === activeTab);
-        const vp = layout?.viewports.find(v => v.id === activeViewportId);
-        if (vp && layout) {
-            const pPoint = calculateScreenToWorld(x, y, view, w, h);
-            const paperW = layout.paperSize.width, paperH = layout.paperSize.height;
-            const papX = pPoint.x + paperW/2, papY = paperH/2 - pPoint.y;
-            const relX = papX - vp.x, relY = papY - vp.y;
-            
-            const vts = newScale; 
-            newOriginX = relX - vp.width/2 - wp.x * vts;
-            newOriginY = relY - vp.height/2 + wp.y * vts;
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const onWheel = (e: WheelEvent) => {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        const { view, isViewportActive, activeViewportId, layouts, activeTab, settings, setView } = propsRef.current;
+        
+        let delta = e.deltaY;
+        if (e.deltaMode === 1) delta *= 33; // Lines to pixels
+        if (e.deltaMode === 2) delta *= 500; // Pages to pixels
+        
+        const factor = Math.pow(1.002, -delta);
+        const wp = screenToWorld(x, y);
+        
+        const currentView = (isViewportActive && activeViewportId) ? 
+            layouts.find(l=>l.id===activeTab)?.viewports.find(vp=>vp.id===activeViewportId)?.viewState : view;
+        
+        if (!currentView) return;
+
+        const newScale = Math.max(0.000001, currentView.scale * factor);
+        const r = getPixelRatio(), w = canvas.width/r, h = canvas.height/r;
+        const ts = newScale * settings.drawingScale;
+        
+        let newOriginX: number, newOriginY: number;
+        
+        if (activeTab === 'model' || !isViewportActive) {
+            newOriginX = x - w/2 - wp.x * ts;
+            newOriginY = y - h/2 + wp.y * ts;
         } else {
-            newOriginX = currentView.originX;
-            newOriginY = currentView.originY;
+            const layout = layouts.find(l => l.id === activeTab);
+            const vp = layout?.viewports.find(v => v.id === activeViewportId);
+            if (vp && layout) {
+                const pPoint = calculateScreenToWorld(x, y, view, w, h);
+                const paperW = layout.paperSize.width, paperH = layout.paperSize.height;
+                const papX = pPoint.x + paperW/2, papY = paperH/2 - pPoint.y;
+                const relX = papX - vp.x, relY = papY - vp.y;
+                
+                const vts = newScale; 
+                newOriginX = relX - vp.width/2 - wp.x * vts;
+                newOriginY = relY - vp.height/2 + wp.y * vts;
+            } else {
+                newOriginX = currentView.originX;
+                newOriginY = currentView.originY;
+            }
         }
-    }
-    
-    setView({ scale: newScale, originX: newOriginX, originY: newOriginY });
-  };
+        
+        setView({ scale: newScale, originX: newOriginX, originY: newOriginY });
+    };
+
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -1354,7 +1497,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
 
   return (
     <div className="w-full h-full overflow-hidden bg-[#0a0a0c] touch-none">
-        <canvas ref={canvasRef} className="w-full h-full outline-none" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onWheel={handleWheel} onContextMenu={e => e.preventDefault()} />
+        <canvas ref={canvasRef} className="w-full h-full outline-none select-none touch-none" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onContextMenu={e => e.preventDefault()} />
     </div>
   );
 });

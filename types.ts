@@ -23,8 +23,8 @@ export interface BaseShape {
   id: string;
   type: ShapeType;
   layer: string;
-  color: string;
-  thickness?: number; 
+  color?: string;
+  thickness?: number | string; 
   lineType?: LineType;
   filled?: boolean; 
   opacity?: number;
@@ -294,6 +294,20 @@ export interface DimensionStyle {
   precision: number;
 }
 
+export interface LineTypeDefinition {
+  name: string;
+  description: string;
+  pattern: number[]; // dash-space-dash-space
+}
+
+export interface TextStyleDefinition {
+  name: string;
+  font: string;
+  height: number;
+  widthFactor: number;
+  obliqueAngle: number;
+}
+
 export interface AppSettings {
   ortho: boolean;
   snap: boolean;
@@ -325,6 +339,24 @@ export interface AppSettings {
   limitsMin: Point;
   limitsMax: Point;
   metadata?: ProjectMetadata;
+}
+
+export interface VoxProject {
+  version: string;
+  meta: ProjectMetadata;
+  settings: AppSettings;
+  layers: Record<string, LayerConfig>;
+  lineTypes: Record<string, LineTypeDefinition>;
+  textStyles: Record<string, TextStyleDefinition>;
+  blocks: Record<string, BlockDefinition>;
+  entities: Shape[];
+  layouts: Record<string, LayoutDefinition>;
+  bounds: { xMin: number; yMin: number; xMax: number; yMax: number };
+  stats?: {
+    total: number;
+    unsupported: number;
+    counts: Record<string, number>;
+  };
 }
 
 export interface SnapPoint {
