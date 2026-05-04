@@ -35,9 +35,20 @@ export const shapesToVox = (
   settings: AppSettings,
   lineTypes: Record<string, LineTypeDefinition>,
   blocks?: Record<string, BlockDefinition>,
-  layouts?: Record<string, LayoutDefinition>
+  layouts?: Record<string, LayoutDefinition> | LayoutDefinition[]
 ): string => {
   const bounds = getAllShapesBounds(shapes, blocks);
+  
+  let layoutsRecord: Record<string, LayoutDefinition> = {};
+  if (layouts) {
+    if (Array.isArray(layouts)) {
+      layouts.forEach(l => {
+        layoutsRecord[l.id] = l;
+      });
+    } else {
+      layoutsRecord = layouts;
+    }
+  }
   
   const vox: VoxProject = {
     version: "2.0",
@@ -54,7 +65,7 @@ export const shapesToVox = (
     textStyles: {}, 
     blocks: blocks || {},
     entities: shapes,
-    layouts: layouts || {}, 
+    layouts: layoutsRecord, 
     bounds: bounds || { xMin: 0, yMin: 0, xMax: 100, yMax: 100 }
   };
 

@@ -613,9 +613,22 @@ const App: React.FC = () => {
             setLineTypes(project.lineTypes || { 'continuous': { name: 'continuous', description: 'Solid line', pattern: [] } });
             setSettings(project.settings);
             setBlocks(project.blocks || {});
+            setLayouts(project.layouts ? Object.values(project.layouts) : []);
             setCurrentFileName(fileName);
             setFileSource(source);
             updateRecentFiles(fileName);
+            
+            // Save to internal storage for persistence in Recent Files
+            const stateToSave = {
+                layers: layerMap,
+                layerConfig: project.layers,
+                settings: project.settings,
+                lineTypes: project.lineTypes,
+                blocks: project.blocks,
+                layouts: project.layouts,
+                fileName: fileName
+            };
+            await storageService.saveLarge(`${STORAGE_PREFIX}${fileName}`, stateToSave);
             
             // Zoom extents if bounds exist
             if (project.bounds) {
@@ -948,13 +961,9 @@ const App: React.FC = () => {
             await new Promise(r => setTimeout(r, 50));
 
             let content: string = "";
-            try {
+            if (isDxfExport) {
                 content = shapesToDXF(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current, blocksRef.current);
-                if (!content || content.length < 10) {
-                    content = shapesToVox(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current, lineTypesRef.current, blocksRef.current, layoutsRef.current);
-                }
-            } catch (err) {
-                console.error("Save content generation failed:", err);
+            } else {
                 content = shapesToVox(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current, lineTypesRef.current, blocksRef.current, layoutsRef.current);
             }
 
@@ -983,6 +992,18 @@ const App: React.FC = () => {
                     setCurrentFileName(handle.name);
                     updateRecentFiles(handle.name);
                     setLogMessage(`INFO:_${handle.name}_SAVED`);
+
+                    // Also save to internal storage for "Recent Files" consistency
+                    const stateToSave = {
+                        layers: JSON.parse(JSON.stringify(layersRef.current)),
+                        layerConfig: layerConfigRef.current,
+                        settings: settingsRef.current,
+                        lineTypes: lineTypesRef.current,
+                        blocks: blocksRef.current,
+                        layouts: layoutsRef.current,
+                        fileName: handle.name
+                    };
+                    await storageService.saveLarge(`${STORAGE_PREFIX}${handle.name}`, stateToSave);
                 } catch (e: any) {
                     if (e.name === 'AbortError') {
                       setLogMessage("INFO: SAVE_CANCELLED");
@@ -1010,12 +1031,24 @@ const App: React.FC = () => {
                     document.body.removeChild(a);
                     URL.revokeObjectURL(url);
                     
+                    const finalName = isSaveAs ? name : currentFileName;
                     if (isSaveAs) {
                       setCurrentFileName(name);
-                      updateRecentFiles(name);
-                    } else {
-                      updateRecentFiles(currentFileName);
                     }
+                    updateRecentFiles(finalName);
+
+                    // Also save to internal storage for "Recent Files" consistency
+                    const stateToSave = {
+                        layers: JSON.parse(JSON.stringify(layersRef.current)),
+                        layerConfig: layerConfigRef.current,
+                        settings: settingsRef.current,
+                        lineTypes: lineTypesRef.current,
+                        blocks: blocksRef.current,
+                        layouts: layoutsRef.current,
+                        fileName: finalName
+                    };
+                    storageService.saveLarge(`${STORAGE_PREFIX}${finalName}`, stateToSave);
+
                     setLogMessage(`INFO: DOWNLOADED_${finalExt.toUpperCase()}`);
                 };
 
