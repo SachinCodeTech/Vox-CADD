@@ -2904,7 +2904,7 @@ export class LayoutCommand implements CADCommand {
             const layouts = this.ctx.getLayouts();
             const id = 'layout' + (layouts.length + 1);
             const name = 'Layout' + (layouts.length + 1);
-            this.ctx.setLayouts([...layouts, { id, name, paperSize: { width: 297, height: 210 }, viewports: [] }]);
+            this.ctx.setLayouts([...layouts, { id, name, paperSize: { width: 297, height: 210 }, viewports: [], entities: [] }]);
             this.ctx.addLog(`LAYOUT_CREATED: ${name}`);
             this.ctx.onFinish();
             return true;

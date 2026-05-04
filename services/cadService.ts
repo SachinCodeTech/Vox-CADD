@@ -1,6 +1,27 @@
 
 import { Shape, Point, AppSettings, SnapPoint, LineShape, DoubleLineShape, RectShape, ArcShape, CircleShape, EllipseShape, PolyShape, TextShape, MTextShape, SnapOptions, LeaderShape, ArcData, InfiniteLineShape, DonutShape, BlockDefinition } from '../types';
 
+export const getArcFromBulge = (p1: Point, p2: Point, b: number) => {
+    const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    const s = dist / 2;
+    const h = b * s;
+    const r = (s * s + h * h) / (2 * h);
+    
+    const midX = (p1.x + p2.x) / 2;
+    const midY = (p1.y + p2.y) / 2;
+    const ux = (p2.x - p1.x) / dist;
+    const uy = (p2.y - p1.y) / dist;
+    
+    const bulgeSign = b > 0 ? 1 : -1;
+    const centerX = midX - (r - h) * uy * bulgeSign;
+    const centerY = midY + (r - h) * ux * bulgeSign;
+    
+    const startAngle = Math.atan2(p1.y - centerY, p1.x - centerX);
+    const endAngle = Math.atan2(p2.y - centerY, p2.x - centerX);
+    
+    return { centerX, centerY, r: Math.abs(r), startAngle, endAngle, bulgeSign };
+};
+
 export const generateId = (): string => Math.random().toString(36).substr(2, 9);
 
 export const distance = (p1: Point, p2: Point) => Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
@@ -365,13 +386,41 @@ export const hitTestShape = (x: number, y: number, s: Shape, threshold: number, 
       if (s.counterClockwise) { if (eA < sA) return angle >= sA || angle <= eA; return angle >= sA && angle <= eA; }
       else { if (sA < eA) return angle >= eA || angle <= sA; return angle >= eA && angle <= sA; }
     }
-    case 'pline': case 'polygon': case 'spline': {
-        for(let i=0; i<s.points.length-1; i++) {
-            if (distToSegment(x, y, s.points[i].x, s.points[i].y, s.points[i+1].x, s.points[i+1].y) < threshold) return true;
+    case 'pline': case 'polygon': case 'spline': case 'hatch': {
+        const points = s.points;
+        const isActuallyClosed = s.type === 'polygon' || s.type === 'hatch' || !!(s as any).closed;
+        const isFilled = s.type === 'hatch' || !!s.filled;
+
+        for(let i=0; i<points.length; i++) {
+            const p1 = points[i];
+            const nextIdx = (i + 1) % points.length;
+            if (nextIdx === 0 && !isActuallyClosed) break;
+            const p2 = points[nextIdx];
+
+            if (p1.bulge && Math.abs(p1.bulge) > 0.0001) {
+                const arc = getArcFromBulge(p1, p2, p1.bulge);
+                const d = Math.sqrt(Math.pow(x - arc.centerX, 2) + Math.pow(y - arc.centerY, 2));
+                if (Math.abs(d - arc.r) < threshold) {
+                    let angle = Math.atan2(y - arc.centerY, x - arc.centerX);
+                    let sA = arc.startAngle, eA = arc.endAngle;
+                    while (angle < 0) angle += Math.PI * 2;
+                    while (sA < 0) sA += Math.PI * 2;
+                    while (eA < 0) eA += Math.PI * 2;
+                    if (p1.bulge > 0) { // CCW
+                        if (eA < sA) { if (angle >= sA || angle <= eA) return true; }
+                        else { if (angle >= sA && angle <= eA) return true; }
+                    } else { // CW
+                        if (sA < eA) { if (angle >= eA || angle <= sA) return true; }
+                        else { if (angle >= eA && angle <= sA) return true; }
+                    }
+                }
+            } else {
+                if (distToSegment(x, y, p1.x, p1.y, p2.x, p2.y) < threshold) return true;
+            }
         }
-        if (s.closed && s.points.length > 2) {
-            if (distToSegment(x, y, s.points[s.points.length-1].x, s.points[s.points.length-1].y, s.points[0].x, s.points[0].y) < threshold) return true;
-            if (s.filled && isPointInPoly({x, y}, s.points)) return true;
+        
+        if (isFilled && points.length > 2) {
+            if (isPointInPoly({x, y}, points)) return true;
         }
         return false;
     }
@@ -403,9 +452,6 @@ export const hitTestShape = (x: number, y: number, s: Shape, threshold: number, 
     case 'donut': {
         const d = Math.sqrt(Math.pow(x - s.x, 2) + Math.pow(y - s.y, 2));
         return (d >= s.innerRadius - threshold && d <= s.outerRadius + threshold);
-    }
-    case 'hatch': {
-        return isPointInPoly({x, y}, s.points);
     }
     case 'ray': case 'xline': {
         const d = distToInfiniteLine(x, y, s.x1, s.y1, s.x2, s.y2);
@@ -506,10 +552,45 @@ export const getShapeBounds = (s: Shape, blocks?: Record<string, BlockDefinition
                 bounds = { xMin: 0, yMin: 0, xMax: 0, yMax: 0 };
             } else {
                 let pxMin = s.points[0].x, pyMin = s.points[0].y, pxMax = s.points[0].x, pyMax = s.points[0].y;
-                s.points.forEach(p => {
-                    pxMin = Math.min(pxMin, p.x); pyMin = Math.min(pyMin, p.y);
-                    pxMax = Math.max(pxMax, p.x); pyMax = Math.max(pyMax, p.y);
-                });
+                for (let i = 0; i < s.points.length; i++) {
+                    const p1 = s.points[i];
+                    pxMin = Math.min(pxMin, p1.x); pyMin = Math.min(pyMin, p1.y);
+                    pxMax = Math.max(pxMax, p1.x); pyMax = Math.max(pyMax, p1.y);
+                    
+                    const nextIdx = (i + 1) % s.points.length;
+                    const isActuallyClosed = s.type === 'polygon' || s.type === 'hatch' || !!(s as any).closed;
+                    if (nextIdx === 0 && !isActuallyClosed) continue;
+                    const p2 = s.points[nextIdx];
+                    
+                    if (p1.bulge && Math.abs(p1.bulge) > 0.0001) {
+                        const arc = getArcFromBulge(p1, p2, p1.bulge);
+                        // Approximate arc bounds by checking its 4 extreme points if they're on the arc
+                        const angles = [0, Math.PI/2, Math.PI, 3*Math.PI/2];
+                        angles.forEach(a => {
+                            let sA = arc.startAngle, eA = arc.endAngle;
+                            while (sA < 0) sA += Math.PI * 2;
+                            while (eA < 0) eA += Math.PI * 2;
+                            let normalizedA = a;
+                            while (normalizedA < 0) normalizedA += Math.PI * 2;
+                            
+                            let onArc = false;
+                            if (p1.bulge! > 0) { // CCW
+                                if (eA < sA) onArc = normalizedA >= sA || normalizedA <= eA;
+                                else onArc = normalizedA >= sA && normalizedA <= eA;
+                            } else { // CW
+                                if (sA < eA) onArc = normalizedA >= eA || normalizedA <= sA;
+                                else onArc = normalizedA >= eA && normalizedA <= sA;
+                            }
+                            
+                            if (onArc) {
+                                const ex = arc.centerX + arc.r * Math.cos(a);
+                                const ey = arc.centerY + arc.r * Math.sin(a);
+                                pxMin = Math.min(pxMin, ex); pyMin = Math.min(pyMin, ey);
+                                pxMax = Math.max(pxMax, ex); pyMax = Math.max(pyMax, ey);
+                            }
+                        });
+                    }
+                }
                 bounds = { xMin: pxMin, yMin: pyMin, xMax: pxMax, yMax: pyMax };
             }
             break;
@@ -1544,31 +1625,60 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
                     if (inArc) addCandidate(s.x + s.radius * Math.cos(angle), s.y + s.radius * Math.sin(angle), 'near');
                 }
                 break;
-            case 'pline': case 'polygon':
-                s.points.forEach((pt, i) => {
+            case 'pline': case 'polygon': case 'spline': case 'hatch': {
+                const points = s.points;
+                for (let i = 0; i < points.length; i++) {
+                    const pt = points[i];
                     if (options.endpoint) addCandidate(pt.x, pt.y, 'end');
-                    if (options.midpoint && i < s.points.length - 1) addCandidate((pt.x + s.points[i + 1].x) / 2, (pt.y + s.points[i + 1].y) / 2, 'mid');
-                    if (options.nearest && i < s.points.length - 1) {
-                        const near = projectPointOnLine(p, s.points[i], s.points[i+1]);
-                        const t = ((near.x - s.points[i].x) * (s.points[i+1].x - s.points[i].x) + (near.y - s.points[i].y) * (s.points[i+1].y - s.points[i].y)) / distSq(s.points[i], s.points[i+1]);
-                        if (t >= 0 && t <= 1) addCandidate(near.x, near.y, 'near');
+                    
+                    const nextIdx = (i + 1) % points.length;
+                    const isActuallyClosed = s.type === 'polygon' || !!(s as any).closed;
+                    if (nextIdx === 0 && !isActuallyClosed) continue;
+                    const pt2 = points[nextIdx];
+                    
+                    if (pt.bulge && Math.abs(pt.bulge) > 0.0001) {
+                        const arc = getArcFromBulge(pt, pt2, pt.bulge);
+                        if (options.center) addCandidate(arc.centerX, arc.centerY, 'cen');
+                        if (options.midpoint) {
+                            let sA = arc.startAngle, eA = arc.endAngle;
+                            if (pt.bulge > 0 && eA < sA) eA += Math.PI * 2;
+                            if (pt.bulge < 0 && sA < eA) sA += Math.PI * 2;
+                            const midAngle = (sA + eA) / 2;
+                            addCandidate(arc.centerX + arc.r * Math.cos(midAngle), arc.centerY + arc.r * Math.sin(midAngle), 'mid');
+                        }
+                        if (options.nearest) {
+                            const d = Math.sqrt(Math.pow(p.x - arc.centerX, 2) + Math.pow(p.y - arc.centerY, 2));
+                            if (Math.abs(d - arc.r) < threshold * 2) {
+                                let angle = Math.atan2(p.y - arc.centerY, p.x - arc.centerX);
+                                while (angle < 0) angle += Math.PI * 2;
+                                let sA = arc.startAngle, eA = arc.endAngle;
+                                while (sA < 0) sA += Math.PI * 2;
+                                while (eA < 0) eA += Math.PI * 2;
+                                let inArc = false;
+                                if (pt.bulge > 0) { if (eA < sA) inArc = angle >= sA || angle <= eA; else inArc = angle >= sA && angle <= eA; }
+                                else { if (sA < eA) inArc = angle >= eA || angle <= sA; else inArc = angle >= eA && angle <= sA; }
+                                if (inArc) addCandidate(arc.centerX + arc.r * Math.cos(angle), arc.centerY + arc.r * Math.sin(angle), 'near');
+                            }
+                        }
+                    } else {
+                        if (options.midpoint) addCandidate((pt.x + pt2.x) / 2, (pt.y + pt2.y) / 2, 'mid');
+                        if (options.nearest) {
+                            const near = projectPointOnLine(p, pt, pt2);
+                            const t = ((near.x - pt.x) * (pt2.x - pt.x) + (near.y - pt.y) * (pt2.y - pt.y)) / distSq(pt, pt2);
+                            if (t >= 0 && t <= 1) addCandidate(near.x, near.y, 'near');
+                        }
                     }
-                });
-                if ((s.closed || s.type === 'polygon') && s.points.length > 2) {
-                    const last = s.points[s.points.length - 1], first = s.points[0];
-                    if (options.midpoint) addCandidate((last.x + first.x) / 2, (last.y + first.y) / 2, 'mid');
+                }
+                const isActuallyClosed = s.type === 'polygon' || s.type === 'hatch' || !!(s as any).closed;
+                if (isActuallyClosed && points.length > 2) {
                     if (options.gcenter) {
                         let cx = 0, cy = 0;
-                        s.points.forEach(pt => { cx += pt.x; cy += pt.y; });
-                        addCandidate(cx / s.points.length, cy / s.points.length, 'gcen');
-                    }
-                    if (options.nearest) {
-                        const near = projectPointOnLine(p, last, first);
-                        const t = ((near.x - last.x) * (first.x - last.x) + (near.y - last.y) * (first.y - last.y)) / distSq(last, first);
-                        if (t >= 0 && t <= 1) addCandidate(near.x, near.y, 'near');
+                        points.forEach(pt => { cx += pt.x; cy += pt.y; });
+                        addCandidate(cx / points.length, cy / points.length, 'gcen');
                     }
                 }
                 break;
+            }
             case 'rect':
                 const corners = [{x:s.x, y:s.y}, {x:s.x+s.width, y:s.y}, {x:s.x+s.width, y:s.y+s.height}, {x:s.x, y:s.y+s.height}];
                 if (options.endpoint) corners.forEach(c => addCandidate(c.x, c.y, 'end'));

@@ -96,7 +96,7 @@ const INITIAL_LAYERS_CONFIG: Record<string, LayerConfig> = {
 };
 
 export type ToolbarCategory = 'Draw' | 'Modify' | 'Anno' | 'View' | 'Tools' | 'History' | 'Edit';
-type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 'file' | 'mainmenu' | 'drawing_props' | 'help' | 'about' | 'privacy' | 'new_file' | 'dimstyle' | 'glossary';
+type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 'file' | 'mainmenu' | 'drawing_props' | 'help' | 'about' | 'privacy' | 'new_file' | 'dimstyle';
 
 const STORAGE_PREFIX = 'voxcadd_file_v1_';
 const REGISTRY_KEY = 'voxcadd_recent_files';
@@ -710,7 +710,6 @@ const App: React.FC = () => {
         break;
       case 'toggleAbout': setActivePanel(activePanel === 'about' ? 'none' : 'about'); break;
       case 'togglePrivacy': setActivePanel(activePanel === 'privacy' ? 'none' : 'privacy'); break;
-      case 'toggleGlossary': setActivePanel(activePanel === 'glossary' ? 'none' : 'glossary'); break;
       case 'zoomExtents':
       case 'zoomAll': {
         const limits = act === 'zoomAll' ? { min: settingsRef.current.limitsMin, max: settingsRef.current.limitsMax } : undefined;
@@ -1744,8 +1743,7 @@ const App: React.FC = () => {
     { id: 'layers', icon: Layers, action: 'toggleLayers', activeOn: 'layers' },
     { id: 'drawing_props', icon: FileText, action: 'toggleDrawingProps', activeOn: 'drawing_props' },
     { id: 'properties', icon: Sliders, action: 'toggleProperties', activeOn: 'properties' },
-    { id: 'calculator', icon: Calculator, action: 'toggleCalculator', activeOn: 'calculator' },
-    { id: 'glossary', icon: Cpu, action: 'toggleGlossary', activeOn: 'glossary' }
+    { id: 'calculator', icon: Calculator, action: 'toggleCalculator', activeOn: 'calculator' }
   ];
 
   return (
@@ -2045,7 +2043,6 @@ const App: React.FC = () => {
         {activePanel === 'help' && <InfoPanel type="help" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
         {activePanel === 'about' && <InfoPanel type="about" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
         {activePanel === 'privacy' && <InfoPanel type="privacy" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
-        {activePanel === 'glossary' && <InfoPanel type="glossary" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
         {activePanel === 'new_file' && <NewFileDialog onSelect={(cfg) => { 
             const name = cfg.name + '.vox';
             setLayers({ '0': [], 'defpoints': [] }); 

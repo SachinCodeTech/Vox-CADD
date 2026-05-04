@@ -1,6 +1,6 @@
 
 import React, { useRef, useEffect, useState, useCallback, useMemo, useImperativeHandle, forwardRef } from 'react';
-import { Shape, ViewState, AppSettings, SnapPoint, LayerConfig, Point, MTextShape, BlockDefinition, LayoutDefinition, LineTypeDefinition } from '../types';
+import { Shape, ViewState, AppSettings, SnapPoint, LayerConfig, Point, MTextShape, BlockDefinition, LayoutDefinition, LineTypeDefinition, LineType } from '../types';
 import { hitTestShape, findBestSnap, formatLength, getShapesInRect, getShapeBounds, isRectIntersecting, formatDualLength, isShapeClosed, isPointInsideShape, getPolylineOffsetPoints, calculateShapeLength } from '../services/cadService';
 
 interface CADCanvasProps {
@@ -301,6 +301,17 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               
               ctx.restore();
           });
+
+          // Render Paper Space Entities (Annotations, Title blocks, etc.)
+          if (activeLayout.entities) {
+            ctx.save();
+            ctx.translate(px, py);
+            ctx.scale(ts, -ts);
+            ctx.translate(0, -paperH); // DXF paper space: Y up, (0,0) bottom left
+            
+            activeLayout.entities.forEach(s => drawShape(ctx, s, ts));
+            ctx.restore();
+          }
       }
       
       if (!isViewportActive) {
@@ -542,7 +553,62 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       return layerConf?.thickness || 0.25;
   };
 
-  const drawShape = (ctx: CanvasRenderingContext2D, s: Shape, ts: number, blockContext?: { color: string, thickness: number }) => {
+  const drawPolyline = (ctx: CanvasRenderingContext2D, points: Point[], closed?: boolean) => {
+    if (points.length < 1) return;
+    ctx.moveTo(points[0].x, points[0].y);
+    
+    for (let i = 0; i < points.length; i++) {
+        const p1 = points[i];
+        const nextIdx = (i + 1) % points.length;
+        if (nextIdx === 0 && !closed) break;
+        const p2 = points[nextIdx];
+        
+        if (p1.bulge && Math.abs(p1.bulge) > 0.0001) {
+            const b = p1.bulge;
+            const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+            if (dist > 0.0001) {
+                const s = dist / 2;
+                const h = b * s;
+                const r = (s * s + h * h) / (2 * h);
+                
+                const midX = (p1.x + p2.x) / 2;
+                const midY = (p1.y + p2.y) / 2;
+                const ux = (p2.x - p1.x) / dist;
+                const uy = (p2.y - p1.y) / dist;
+                
+                const bulgeSign = b > 0 ? 1 : -1;
+                const centerX = midX - (r - h) * uy * bulgeSign;
+                const centerY = midY + (r - h) * ux * bulgeSign;
+                
+                const startAngle = Math.atan2(p1.y - centerY, p1.x - centerX);
+                const endAngle = Math.atan2(p2.y - centerY, p2.x - centerX);
+                
+                ctx.arc(centerX, centerY, Math.abs(r), startAngle, endAngle, b < 0);
+            } else {
+                ctx.lineTo(p2.x, p2.y);
+            }
+        } else {
+            ctx.lineTo(p2.x, p2.y);
+        }
+    }
+    if (closed) ctx.closePath();
+  };
+
+  const resolveLineType = (s: Shape, layerConf?: LayerConfig, blockContext?: { lineType: LineType }): LineType => {
+      const entLT = (s.lineType || '').toLowerCase();
+      
+      if (entLT === 'byblock' && blockContext?.lineType) {
+          return blockContext.lineType;
+      }
+      
+      if (!entLT || entLT === 'bylayer') {
+          return layerConf?.lineType || 'continuous';
+      }
+      
+      return entLT as LineType;
+  };
+
+  const drawShape = (ctx: CanvasRenderingContext2D, s: Shape, ts: number, blockContext?: { color: string, thickness: number, lineType: LineType }) => {
     const isS = selectedIds.includes(s.id), isH = highlightIds.includes(s.id) || highlightedIds.includes(s.id);
     const conf = layerConfig[s.layer]; 
     if (!s.isPreview && conf && (!conf.visible || conf.frozen)) return;
@@ -573,14 +639,14 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     else { ctx.strokeStyle = baseColor; if (conf?.locked) ctx.globalAlpha = 0.45; ctx.lineWidth = weight/ts; }
     
     // Line Type implementation
-    const currentLineType = (s.lineType || conf?.lineType || 'continuous').toLowerCase();
+    const currentLineType = resolveLineType(s, conf, blockContext).toLowerCase();
     
     if (currentLineType !== 'continuous' && !s.isPreview && !isH && !isS) {
         const ltDef = lineTypes[currentLineType];
         if (ltDef && ltDef.pattern && ltDef.pattern.length > 0) {
-            // Apply scale to pattern based on drawing scale and zoom
-            const scale = settings.drawingScale / ts;
-            const scaledPattern = ltDef.pattern.map(p => p / ts); 
+            // Apply scale to pattern based on drawing scale, zoom, and entity-specific scale
+            const lScale = s.lineScale || 1;
+            const scaledPattern = ltDef.pattern.map(p => (p * lScale) / ts); 
             ctx.setLineDash(scaledPattern);
         } else {
             // Fallback for legacy names if not found in lineTypes map
@@ -632,22 +698,15 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       case 'hatch':
         if (s.points && s.points.length > 2) {
           ctx.save();
-          // Define clipping path
-          const clipPath = new Path2D();
-          clipPath.moveTo(s.points[0].x, s.points[0].y);
-          s.points.forEach((p, idx) => { if (idx > 0) clipPath.lineTo(p.x, p.y); });
-          clipPath.closePath();
-          
-          ctx.clip(clipPath);
-          
+          ctx.beginPath();
+          drawPolyline(ctx, s.points, true);
+          ctx.clip();
           drawHatchPattern(ctx, s.pattern, s.points, s.scale || 1, s.rotation || 0, ts);
           ctx.restore();
           
           // Render boundary
           ctx.beginPath();
-          ctx.moveTo(s.points[0].x, s.points[0].y);
-          s.points.forEach((p, idx) => { if (idx > 0) ctx.lineTo(p.x, p.y); });
-          ctx.closePath();
+          drawPolyline(ctx, s.points, true);
           ctx.stroke();
           ctx.restore();
           return;
@@ -775,20 +834,18 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       }
       case 'pline': case 'polygon': case 'spline':
         if(s.points && s.points.length > 0) {
-            ctx.moveTo(s.points[0].x, s.points[0].y);
             if (s.type === 'spline' && s.points.length > 2) {
+                ctx.moveTo(s.points[0].x, s.points[0].y);
                 for (let i = 1; i < s.points.length - 2; i++) {
                     const xc = (s.points[i].x + s.points[i + 1].x) / 2;
                     const yc = (s.points[i].y + s.points[i + 1].y) / 2;
                     ctx.quadraticCurveTo(s.points[i].x, s.points[i].y, xc, yc);
                 }
-                // For the last 2 points
                 const n = s.points.length;
                 ctx.quadraticCurveTo(s.points[n-2].x, s.points[n-2].y, s.points[n-1].x, s.points[n-1].y);
             } else {
-                s.points.forEach(p => ctx.lineTo(p.x, p.y));
+                drawPolyline(ctx, s.points, !!(s.closed || s.type === 'polygon'));
             }
-            if(s.closed || s.type === 'polygon') ctx.closePath();
         }
         break;
       case 'dline':
@@ -953,8 +1010,9 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           
           const currentColor = resolveColor(s, layerConfig[s.layer], activeTab, blockContext);
           const currentThickness = resolveLineWeight(s, layerConfig[s.layer], blockContext);
+          const currentLT = resolveLineType(s, layerConfig[s.layer], blockContext);
           
-          block.shapes.forEach(bs => drawShape(ctx, bs, ts, { color: currentColor, thickness: currentThickness }));
+          block.shapes.forEach(bs => drawShape(ctx, bs, ts, { color: currentColor, thickness: currentThickness, lineType: currentLT }));
           ctx.restore();
         }
         break;
@@ -1027,7 +1085,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                 // ANSI patterns
                 if (pattern.startsWith('ansi') || pattern === 'cross' || pattern === 'net' || pattern === 'hound' || pattern === 'grid') {
                     const a = (pattern === 'ansi31' || pattern === 'ansi32') ? Math.PI/4 : 
-                              (pattern === 'ansi37') ? -Math.PI/4 : 0;
+                              (pattern === 'ansi37' || pattern === 'cross') ? -Math.PI/4 : 0;
                     
                     ctx.save();
                     ctx.rotate(a);
@@ -1037,7 +1095,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                         ctx.moveTo(-diagonal, offset + spacing/5);
                         ctx.lineTo(diagonal, offset + spacing/5);
                     }
-                    if (pattern === 'net') {
+                    if (pattern === 'net' || pattern === 'cross') {
                          ctx.rotate(Math.PI/2);
                          ctx.moveTo(-diagonal, offset);
                          ctx.lineTo(diagonal, offset);

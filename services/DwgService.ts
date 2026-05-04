@@ -2,9 +2,9 @@
 import { createModule, LibreDwg, Dwg_File_Type } from '@mlightcad/libredwg-web';
 // @ts-ignore
 import wasmUrl from '../node_modules/@mlightcad/libredwg-web/wasm/libredwg-web.wasm?url';
-import { Shape, BlockDefinition, LayerConfig, Point, VoxProject, AppSettings } from '../types';
+import { Shape, BlockDefinition, LayerConfig, Point, VoxProject, AppSettings, LayoutDefinition } from '../types';
 import { generateId, getAllShapesBounds } from './cadService';
-import { aciToHex } from './colorUtils';
+import { aciToHex, mapLineweight } from './colorUtils';
 
 let libredwg: any = null;
 const WASM_CDN_URL = 'https://unpkg.com/@mlightcad/libredwg-web@0.7.1/wasm/libredwg-web.wasm';
@@ -69,13 +69,41 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
             counts: {} as Record<string, number>
         };
 
+        const cleanLibreDwgText = (text: string): string => {
+            if (!text) return "";
+            return text
+                .replace(/\\P/g, "\n")
+                .replace(/\\L/g, "")
+                .replace(/\\l/g, "")
+                .replace(/\{[^;]*;/g, "")
+                .replace(/\}/g, "")
+                .replace(/\\S[^;]*;/g, "")
+                .replace(/\\f[^;]*|[^;]*;/g, (match) => {
+                    if (match.startsWith('\\f')) return ''; 
+                    return match;
+                })
+                .replace(/\\A\d+;/g, "") 
+                .replace(/\\H[\d\.]+x*;/g, "") 
+                .replace(/\\C\d+;/g, "") 
+                .replace(/\\W[\d\.]+;/g, "") 
+                .replace(/\\T[\d\.]+;/g, "") 
+                .replace(/\\Q[\d\.]+;/g, "") 
+                .replace(/\\/g, ""); 
+        };
+
+        const paperEntities: Shape[] = [];
+        const layouts: Record<string, LayoutDefinition> = {};
+
         // Helper to convert entities to shapes
         const convertEntity = (ent: any): Shape | null => {
             if (!ent) return null;
             const id = generateId();
             const layer = ent.layer || '0';
             const type = ent.type;
-            const color = aciToHex(ent.color);
+            const color = aciToHex(ent.color, ent.true_color || ent.trueColor);
+            const thickness = ent.thickness || mapLineweight(ent.lineweight);
+            const isPaper = !!ent.isPaperSpace || !!(ent.flag & 1); 
+            const lineScale = ent.ltScale || 1;
             stats.total++;
             stats.counts[type] = (stats.counts[type] || 0) + 1;
 
@@ -86,8 +114,8 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             id, type: 'line', layer, color,
                             x1: ent.startPoint.x, y1: ent.startPoint.y,
                             x2: ent.endPoint.x, y2: ent.endPoint.y,
-                            thickness: ent.thickness || 0.25,
-                            lineType: ent.lineType || 'continuous'
+                            thickness,
+                            lineType: ent.lineTypeName || ent.lineType || 'continuous'
                         } as any;
                     }
                     break;
@@ -97,7 +125,7 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             id, type: 'circle', layer, color,
                             x: ent.center.x, y: ent.center.y,
                             radius: ent.radius || 10,
-                            thickness: ent.thickness || 0.25
+                            thickness, lineScale
                         } as any;
                     }
                     break;
@@ -110,7 +138,7 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             startAngle: ent.startAngle || 0,
                             endAngle: ent.endAngle || Math.PI,
                             counterClockwise: false,
-                            thickness: ent.thickness || 0.25
+                            thickness, lineScale
                         } as any;
                     }
                     break;
@@ -121,24 +149,32 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                     if (ent.vertices && ent.vertices.length > 1) {
                         return {
                             id, type: 'pline', layer, color,
-                            points: ent.vertices.map((v: any) => ({ x: v.x, y: v.y })),
+                            points: ent.vertices.map((v: any) => ({ x: v.x, y: v.y, bulge: v.bulge })),
                             closed: !!(ent.flag & 1),
-                            thickness: ent.thickness || 0.25,
+                            thickness, lineScale,
                             lineType: ent.lineType || 'continuous'
                         } as any;
                     }
                     break;
                 case 'TEXT':
                 case 'MTEXT':
+                case 'ATTRIB':
+                case 'ATTDEF':
                     const pos = ent.position || ent.insertPoint || ent.basePoint;
                     if (pos) {
+                        const rawText = ent.text || ent.content || '';
+                        const hasUnderline = /\\L/i.test(rawText);
                         return {
-                            id, type: 'text', layer, color,
+                            id, type: (type === 'MTEXT' || rawText.includes('\n')) ? 'mtext' : 'text', 
+                            layer, color,
                             x: pos.x, y: pos.y,
                             size: ent.height || 2.5,
-                            content: (ent.text || ent.content || '').replace(/\\P/g, '\n').replace(/\{|}/g, ''),
+                            width: ent.width || 0,
+                            content: cleanLibreDwgText(rawText),
                             rotation: (ent.rotation || 0) * (180 / Math.PI),
-                            thickness: 0.25
+                            underline: hasUnderline,
+                            bold: rawText.includes('|b1'),
+                            thickness, lineScale
                         } as any;
                     }
                     break;
@@ -150,12 +186,18 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             rx: Math.sqrt(ent.majorAxis.x ** 2 + ent.majorAxis.y ** 2),
                             ry: Math.sqrt(ent.majorAxis.x ** 2 + ent.majorAxis.y ** 2) * ent.ratio,
                             rotation: Math.atan2(ent.majorAxis.y, ent.majorAxis.x) * (180 / Math.PI),
-                            thickness: 0.25
+                            thickness, lineScale
                         } as any;
                     }
                     break;
                 case 'INSERT':
                     if (ent.insertPoint && ent.blockName) {
+                        const attributes: Record<string, string> = {};
+                        if (ent.attributes && Array.isArray(ent.attributes)) {
+                            ent.attributes.forEach((a: any) => {
+                                if (a.tag) attributes[a.tag] = a.text || a.content;
+                            });
+                        }
                         return {
                             id, type: 'block', layer, color,
                             x: ent.insertPoint.x, y: ent.insertPoint.y,
@@ -163,27 +205,29 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             scaleX: ent.scale?.x || 1,
                             scaleY: ent.scale?.y || 1,
                             rotation: (ent.rotation || 0) * (180 / Math.PI),
-                            thickness: 0.25
+                            thickness,
+                            attributes
                         } as any;
                     }
                     break;
-                case 'SPLINE':
+                case 'SPLINE': {
                     const sPts = ent.controlPoints || ent.fitPoints;
                     if (sPts && sPts.length > 1) {
                         return {
                             id, type: 'pline', layer, color,
                             points: sPts.map((v: any) => ({ x: v.x, y: v.y })),
                             closed: !!(ent.flag & 1),
-                            thickness: 0.25
+                            thickness, lineScale
                         } as any;
                     }
                     break;
+                }
                 case 'POINT':
                     if (ent.position) {
                         return {
                             id, type: 'point', layer, color,
                             x: ent.position.x, y: ent.position.y,
-                            size: 1, thickness: 0.25
+                            size: 1, thickness, lineScale
                         } as any;
                     }
                     break;
@@ -199,7 +243,7 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             dimX: ent.textMidPoint.x,
                             dimY: ent.textMidPoint.y,
                             text: ent.text || '',
-                            thickness: 0.25
+                            thickness, lineScale
                         } as any;
                     }
                     break;
@@ -210,16 +254,55 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             x1: ent.vertices[0].x, y1: ent.vertices[0].y,
                             x2: ent.vertices[1].x, y2: ent.vertices[1].y,
                             text: '', size: 2.5,
-                            thickness: 0.25
+                            thickness, lineScale
                         } as any;
                     }
                     break;
+                case 'XLINE':
+                case 'RAY':
+                    if (ent.startPoint && ent.endPoint) {
+                        return {
+                            id, type: type === 'RAY' ? 'ray' : 'xline', layer, color,
+                            x1: ent.startPoint.x, y1: ent.startPoint.y,
+                            x2: ent.endPoint.x, y2: ent.endPoint.y,
+                            thickness, lineScale
+                        } as any;
+                    }
+                    break;
+                case '3DFACE':
+                    if (ent.vertices && ent.vertices.length >= 3) {
+                        return {
+                            id, type: 'polygon', layer, color,
+                            points: ent.vertices.map((v: any) => ({ x: v.x, y: v.y })),
+                            closed: true, filled: false, thickness, lineScale
+                        } as any;
+                    }
+                    break;
+                case 'SOLID':
+                case 'TRACE': {
+                    const sPts = ent.points || ent.vertices;
+                    if (sPts && sPts.length >= 3) {
+                        const pts = [
+                            { x: sPts[0].x, y: sPts[0].y },
+                            { x: sPts[1].x, y: sPts[1].y },
+                            { x: sPts[3]?.x || sPts[0].x, y: sPts[3]?.y || sPts[0].y },
+                            { x: sPts[2].x, y: sPts[2].y }
+                        ];
+                        if (sPts.length === 3) pts.splice(2, 1);
+                        return { id, layer, color, type: 'polygon', points: pts, closed: true, filled: true, thickness, lineScale } as any;
+                    }
+                    break;
+                }
                 case 'HATCH':
                     if (ent.boundaryPaths && Array.isArray(ent.boundaryPaths)) {
                         const allPoints: Point[] = [];
                         ent.boundaryPaths.forEach((path: any) => {
                             if (path && path.vertices) {
-                                path.vertices.forEach((v: any) => allPoints.push({ x: v.x, y: v.y }));
+                                path.vertices.forEach((v: any) => allPoints.push({ x: v.x, y: v.y, bulge: v.bulge }));
+                            } else if (path && path.edges) {
+                                path.edges.forEach((e: any) => {
+                                    if (e.startPoint) allPoints.push({ x: e.startPoint.x, y: e.startPoint.y });
+                                });
                             }
                         });
                         
@@ -288,13 +371,35 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                 const chunk = db.entities.slice(i, i + CHUNK_SIZE);
                 chunk.forEach((ent: any) => {
                     const s = convertEntity(ent);
-                    if (s) entities.push(s);
+                    if (s) {
+                        if (ent.isPaperSpace) {
+                            paperEntities.push(s);
+                        } else {
+                            entities.push(s);
+                        }
+                    }
                 });
                 // Small yield if it's a very large file
                 if (db.entities.length > 2000) {
                     await new Promise(resolve => setTimeout(resolve, 0));
                 }
             }
+        }
+
+        if (paperEntities.length > 0) {
+            layouts['layout1'] = {
+                id: 'layout1',
+                name: 'Layout1',
+                paperSize: { width: 297, height: 210 },
+                entities: paperEntities,
+                viewports: [
+                    {
+                        id: 'vp1',
+                        x: 0, y: 0, width: 297, height: 210,
+                        viewState: { scale: 1, originX: 0, originY: 0 }
+                    }
+                ]
+            };
         }
 
         const project: VoxProject = {
@@ -313,7 +418,7 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
             entities,
             lineTypes: {},
             textStyles: {},
-            layouts: {},
+            layouts,
             bounds: getAllShapesBounds(entities, blocks),
             stats
         };

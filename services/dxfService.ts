@@ -3,7 +3,8 @@ import DxfParser from 'dxf-parser';
 import { 
     Shape, LineShape, CircleShape, RectShape, PolyShape, ArcShape, TextShape, 
     DoubleLineShape, EllipseShape, PointShape, DimensionShape, InfiniteLineShape, 
-    Point, LayerConfig, MTextShape, AppSettings, BlockDefinition, VoxProject, LineTypeDefinition 
+    Point, LayerConfig, MTextShape, AppSettings, BlockDefinition, VoxProject, LineTypeDefinition,
+    DimensionStyle, LayoutDefinition
 } from '../types';
 import { generateId, getAllShapesBounds } from './cadService';
 import { aciToHex, hexToACI } from './colorUtils';
@@ -467,6 +468,28 @@ const parseLineTypes = (dxf: any): Record<string, LineTypeDefinition> => {
     return lineTypes;
 };
 
+const parseDimStyles = (dxf: any): Record<string, DimensionStyle> => {
+    const styles: Record<string, DimensionStyle> = {
+        'standard': { id: 'standard', name: 'Standard', arrowSize: 2.5, textSize: 2.5, textOffset: 0.625, extendLine: 1.25, offsetLine: 0.625, precision: 2 }
+    };
+    if (dxf.tables && dxf.tables.dimstyle && dxf.tables.dimstyle.styles) {
+        Object.values(dxf.tables.dimstyle.styles).forEach((s: any) => {
+            const name = (s.name || 'standard').toLowerCase();
+            styles[name] = {
+                id: name,
+                name: s.name || 'Standard',
+                arrowSize: s.dimasz || 2.5,
+                textSize: s.dimtxt || 2.5,
+                textOffset: s.dimgap || 0.625,
+                extendLine: s.dimexe || 1.25,
+                offsetLine: s.dimexo || 0.625,
+                precision: s.dimdec || 2
+            };
+        });
+    }
+    return styles;
+};
+
 export const dxfToProject = (dxfString: string, defaultSettings: AppSettings): VoxProject => {
     const entities: Shape[] = [];
     const blocks: Record<string, BlockDefinition> = {};
@@ -478,6 +501,8 @@ export const dxfToProject = (dxfString: string, defaultSettings: AppSettings): V
         '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' },
         'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, color: '#666666', thickness: 0.1, lineType: 'continuous' }
     };
+    let dimStyles: Record<string, DimensionStyle> = {};
+    let layouts: Record<string, LayoutDefinition> = {};
     
     try {
         if (!dxfString) throw new Error("Empty DXF string");
@@ -489,6 +514,8 @@ export const dxfToProject = (dxfString: string, defaultSettings: AppSettings): V
 
         lineTypes = parseLineTypes(dxf);
         layers = parseLayers(dxf, lineTypes);
+        dimStyles = parseDimStyles(dxf);
+        const paperEntities: Shape[] = [];
 
         const convertEntity = (entity: any): Shape | null => {
             const id = generateId();
@@ -496,6 +523,7 @@ export const dxfToProject = (dxfString: string, defaultSettings: AppSettings): V
             const color = aciToHex(entity.color);
             const thickness = entity.lineWeight && entity.lineWeight > 0 ? entity.lineWeight / 100 : undefined;
             const lineType = (entity.lineTypeName || 'byLayer').toLowerCase();
+            const isPaper = !!entity.inPaperSpace;
 
             switch (entity.type) {
                 case 'LINE':
@@ -507,7 +535,11 @@ export const dxfToProject = (dxfString: string, defaultSettings: AppSettings): V
                 case 'LWPOLYLINE':
                 case 'POLYLINE':
                     if (entity.vertices && entity.vertices.length > 1) {
-                        return { id, layer, color, thickness, lineType, type: 'pline', points: entity.vertices.map((v: any) => ({ x: v.x, y: v.y })), closed: entity.shape || entity.closed } as any;
+                        return { 
+                            id, layer, color, thickness, lineType, type: 'pline', 
+                            points: entity.vertices.map((v: any) => ({ x: v.x, y: v.y, bulge: v.bulge })), 
+                            closed: entity.shape || entity.closed 
+                        } as any;
                     }
                     break;
                 case 'TEXT':
@@ -521,14 +553,18 @@ export const dxfToProject = (dxfString: string, defaultSettings: AppSettings): V
                         justification: entity.halign === 1 ? 'center' : entity.halign === 2 ? 'right' : 'left'
                     } as any;
                 case 'MTEXT':
+                    const rawText = entity.text || '';
+                    const hasUnderline = /\\L/i.test(rawText);
                     return { 
                         id, layer, color, thickness, lineType, type: 'mtext', 
                         x: entity.position?.x || 0, 
                         y: entity.position?.y || 0, 
                         width: entity.width || 0,
                         size: entity.textHeight || 2.5, 
-                        content: cleanMText(entity.text || ''), 
-                        rotation: (entity.rotation || 0) * Math.PI / 180 
+                        content: cleanMText(rawText), 
+                        rotation: (entity.rotation || 0) * Math.PI / 180,
+                        underline: hasUnderline,
+                        bold: rawText.includes('|b1')
                     } as any;
                 case 'ELLIPSE':
                     const rx = Math.sqrt(entity.majorAxisEndPoint.x ** 2 + entity.majorAxisEndPoint.y ** 2);
@@ -558,17 +594,35 @@ export const dxfToProject = (dxfString: string, defaultSettings: AppSettings): V
                         return { id, layer, color, thickness, lineType, type: 'leader', x1: entity.vertices[0].x, y1: entity.vertices[0].y, x2: entity.vertices[1].x, y2: entity.vertices[1].y, text: '', size: 2.5 } as any;
                     }
                     break;
+                case 'SOLID':
+                case 'TRACE': {
+                    const pts = [
+                        { x: entity.points[0].x, y: entity.points[0].y },
+                        { x: entity.points[1].x, y: entity.points[1].y },
+                        { x: entity.points[3].x, y: entity.points[3].y }, // AutoCAD solids use 1-2-4-3 sequence for quads
+                        { x: entity.points[2].x, y: entity.points[2].y }
+                    ];
+                    return { id, layer, color, thickness, lineType, type: 'polygon', points: pts, closed: true, filled: true } as any;
+                }
                 case 'HATCH':
                     if (entity.boundaryPaths && entity.boundaryPaths.length > 0) {
-                        const pts: Point[] = [];
+                        let pts: Point[] = [];
                         entity.boundaryPaths.forEach((path: any) => {
-                            if (path.edges) {
+                            if (path.edges && path.edges.length > 0) {
                                 path.edges.forEach((e: any) => {
-                                    if (e.startPoint) pts.push({ x: e.startPoint.x, y: e.startPoint.y });
-                                    if (e.endPoint) pts.push({ x: e.endPoint.x, y: e.endPoint.y });
+                                    if (e.type === 'line') {
+                                        pts.push({ x: e.startPoint.x, y: e.startPoint.y });
+                                    } else if (e.type === 'arc' || e.type === 'ellipseArc') {
+                                        // Approximate arc by points for now, or use bulge if we can calculate it
+                                        // A better way is to use a high-resolution polyline
+                                        const start = Math.atan2(e.startPoint.y - e.center.y, e.startPoint.x - e.center.x);
+                                        const end = Math.atan2(e.endPoint.y - e.center.y, e.endPoint.x - e.center.x);
+                                        // Simple approximation: mid point as bulge point
+                                        pts.push({ x: e.startPoint.x, y: e.startPoint.y });
+                                    }
                                 });
-                            } else if (path.vertices) {
-                                path.vertices.forEach((v: any) => pts.push({ x: v.x, y: v.y }));
+                            } else if (path.vertices && path.vertices.length > 0) {
+                                path.vertices.forEach((v: any) => pts.push({ x: v.x, y: v.y, bulge: v.bulge }));
                             }
                         });
                         
@@ -607,9 +661,31 @@ export const dxfToProject = (dxfString: string, defaultSettings: AppSettings): V
                 stats.total++;
                 stats.counts[entity.type] = (stats.counts[entity.type] || 0) + 1;
                 const s = convertEntity(entity);
-                if (s) entities.push(s);
+                if (s) {
+                    if (entity.inPaperSpace) {
+                        paperEntities.push(s);
+                    } else {
+                        entities.push(s);
+                    }
+                }
                 else stats.unsupported++;
             });
+        }
+
+        if (paperEntities.length > 0) {
+            layouts['layout1'] = {
+                id: 'layout1',
+                name: 'Layout1',
+                paperSize: { width: 297, height: 210 }, // A4 Landscape
+                entities: paperEntities,
+                viewports: [
+                    {
+                        id: 'vp1',
+                        x: 0, y: 0, width: 297, height: 210,
+                        viewState: { scale: 1, originX: 0, originY: 0 }
+                    }
+                ]
+            };
         }
     } catch (error) {
         console.error("DXF Parsing error:", error);
@@ -622,13 +698,16 @@ export const dxfToProject = (dxfString: string, defaultSettings: AppSettings): V
             lastModified: new Date().toISOString(),
             ...defaultSettings.metadata
         },
-        settings: defaultSettings,
+        settings: {
+            ...defaultSettings,
+            dimStyles: { ...defaultSettings.dimStyles, ...dimStyles }
+        },
         layers,
         blocks,
         entities,
         lineTypes,
         textStyles: {},
-        layouts: {},
+        layouts,
         bounds: getAllShapesBounds(entities, blocks),
         stats
     };

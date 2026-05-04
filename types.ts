@@ -11,6 +11,7 @@ export interface ArcData {
 export interface Point {
   x: number;
   y: number;
+  bulge?: number; // Added for Arcs in Polylines
 }
 
 export type ShapeType = 'line' | 'dline' | 'circle' | 'rect' | 'text' | 'mtext' | 'arc' | 'pline' | 'spline' | 'dimension' | 'dimang' | 'ellipse' | 'polygon' | 'point' | 'ray' | 'xline' | 'donut' | 'leader' | 'block' | 'hatch';
@@ -29,6 +30,7 @@ export interface BaseShape {
   filled?: boolean; 
   opacity?: number;
   isPreview?: boolean; 
+  lineScale?: number;
   /** @internal Cached bounding box for performance */
   _bounds?: { xMin: number, yMin: number, xMax: number, yMax: number };
   /** @internal Cached length/perimeter for line type scaling */
@@ -206,7 +208,9 @@ export interface BlockShape extends BaseShape {
   y: number;
   scaleX: number;
   scaleY: number;
+  scaleZ?: number;
   rotation: number;
+  attributes?: Record<string, string>;
 }
 
 export interface BlockDefinition {
@@ -230,6 +234,7 @@ export interface LayoutDefinition {
   name: string;
   paperSize: { width: number; height: number };
   viewports: LayoutViewport[];
+  entities: Shape[]; // Title blocks, annotations in paper space
 }
 
 export type Shape = LineShape | DoubleLineShape | DimensionShape | CircleShape | RectShape | TextShape | MTextShape | ArcShape | PolyShape | EllipseShape | PointShape | LeaderShape | InfiniteLineShape | AngularDimensionShape | DonutShape | BlockShape | HatchShape;
@@ -294,10 +299,19 @@ export interface DimensionStyle {
   precision: number;
 }
 
+export interface LineTypeElement {
+  type: 'dash' | 'text' | 'shape';
+  value: number | string; // length for dash, string for text, shapeName for shape
+  offset?: { x: number, y: number };
+  scale?: number;
+  rotation?: number;
+}
+
 export interface LineTypeDefinition {
   name: string;
   description: string;
-  pattern: number[]; // dash-space-dash-space
+  pattern: number[]; // simple pattern dash-space
+  elements?: LineTypeElement[]; // complex pattern
 }
 
 export interface TextStyleDefinition {

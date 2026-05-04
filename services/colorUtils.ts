@@ -20,15 +20,32 @@ export const aciColors: string[] = [
 
 // Fill out more colors if needed (AutoCAD has 256)
 // For now, let's just make it return a reasonable fallback for higher indexes
-export const aciToHex = (aci: number | undefined): string => {
+export const aciToHex = (aci: number | undefined, trueColor?: number): string => {
+    if (trueColor !== undefined && trueColor !== -1) {
+        // LibreDWG/DXF TrueColor is often 24-bit. Some formats use 32-bit with alpha.
+        const r = (trueColor >> 16) & 0xFF;
+        const g = (trueColor >> 8) & 0xFF;
+        const b = trueColor & 0xFF;
+        return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`.toUpperCase();
+    }
+
     if (aci === undefined || aci === 256) return 'bylayer';
     if (aci === 0) return 'byblock';
     if (aci < 0) return '#FFFFFF';
     if (aci < aciColors.length) return aciColors[aci];
     
-    // Simple heuristic for extended ACI colors
-    // In a real app we'd have the full 256 color table
+    // Heuristic for the rest of 256 colors
     return '#E0E0E0'; 
+};
+
+/**
+ * Standard AutoCAD Lineweight mapping (hundredths of mm)
+ * 0-211
+ */
+export const mapLineweight = (lw: number | undefined): number => {
+    if (lw === undefined || lw < 0) return 0.25; // Default/ByLayer
+    if (lw === 0) return 0.001; // Thinest
+    return lw / 100; // e.g., 50 -> 0.5mm
 };
 
 export const hexToACI = (hex: string | undefined): number => {
