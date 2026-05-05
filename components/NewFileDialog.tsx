@@ -44,11 +44,10 @@ const NewFileDialog: React.FC<NewFileDialogProps> = ({ onSelect, onClose }) => {
   const isMetric = standard === 'metric';
 
   return (
-    <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className="w-full max-w-[380px] bg-[#0c0c0e] rounded-[2rem] overflow-hidden shadow-[0_0_100px_rgba(0,0,0,0.8)] border border-white/[0.08] flex flex-col animate-in zoom-in-95 duration-300">
-        
-        {/* Title Bar */}
-        <div className="px-6 py-5 flex items-center justify-between border-b border-white/[0.05]">
+    <div className="w-full max-w-[380px] bg-[#0c0c0e] rounded-[2rem] overflow-hidden shadow-[0_0_100px_rgba(0,0,0,0.8)] border border-white/[0.08] flex flex-col font-sans">
+      
+      {/* Title Bar */}
+      <div className="px-6 py-5 flex items-center justify-between border-b border-white/[0.05]">
           <div className="flex items-center gap-3">
             <div className="w-2 h-2 bg-cyan-500 rounded-full animate-pulse" />
             <h2 className="text-[13px] font-black text-white uppercase tracking-[0.2em] leading-none">New Workspace</h2>
@@ -181,8 +180,7 @@ const NewFileDialog: React.FC<NewFileDialogProps> = ({ onSelect, onClose }) => {
           </div>
         </div>
       </div>
-    </div>
-  );
+    );
 };
 
 export default NewFileDialog;

@@ -104,18 +104,10 @@ const DrawingProperties: React.FC<DrawingPropertiesProps> = ({ settings, onConfi
 
   return (
     <div 
-      className="fixed left-1/2 top-20 -translate-x-1/2 w-[340px] max-w-[95vw] glass-panel rounded-[2.5rem] shadow-[0_40px_100px_rgba(0,0,0,0.9)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200"
-      style={{ 
-        transform: `translate(calc(-50% + ${pos.x}px), ${pos.y}px)`,
-        zIndex: isInteracting ? 9999 : 500
-      }}
-      onMouseDown={() => setIsInteracting(true)}
-      onTouchStart={() => setIsInteracting(true)}
+      className="relative bg-[#0a0a0c] w-[340px] max-w-[95vw] border border-white/10 rounded-[2.5rem] shadow-[0_40px_100px_rgba(0,0,0,0.9)] flex flex-col overflow-hidden font-sans"
     >
       <div 
-        className="flex justify-between items-center p-6 border-b border-neutral-800/50 bg-[#151517] cursor-grab active:cursor-grabbing touch-none shrink-0"
-        onMouseDown={e => { e.stopPropagation(); startDrag(e.clientX, e.clientY); }}
-        onTouchStart={e => { e.stopPropagation(); if (e.touches.length > 0) startDrag(e.touches[0].clientX, e.touches[0].clientY); }}
+        className="flex justify-between items-center p-6 border-b border-white/5 bg-white/5 shrink-0"
       >
         <div className="flex items-center gap-3 pointer-events-none">
           <Briefcase size={20} className="text-amber-400" />

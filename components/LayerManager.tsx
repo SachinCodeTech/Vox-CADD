@@ -116,8 +116,8 @@ const LayerManager: React.FC<LayerManagerProps> = ({
 
   return (
     <div 
-        className="fixed left-1/2 top-10 -translate-x-1/2 w-[480px] max-w-[98vw] glass-panel rounded-[1.25rem] shadow-[0_40px_100px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden animate-in fade-in slide-in-from-top-4 duration-300 border border-white/5"
-        style={{ transform: `translate(calc(-50% + ${pos.x}px), ${pos.y}px)`, zIndex: 150 }}
+        className="relative w-[500px] max-w-[95vw] h-[80vh] max-h-[600px] glass-panel rounded-[1.5rem] shadow-[0_40px_100px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-300 border border-white/5"
+        style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, zIndex: 150 }}
     >
       <div 
         className="flex justify-between items-center px-4 py-2.5 border-b border-white/5 bg-[#121214] cursor-grab active:cursor-grabbing touch-none shrink-0"

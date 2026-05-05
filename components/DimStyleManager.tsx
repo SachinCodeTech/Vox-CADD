@@ -52,10 +52,9 @@ const DimStyleManager: React.FC<DimStyleManagerProps> = ({ settings, onUpdateSet
   };
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className="bg-[#0e0e11] border border-white/10 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[80vh]">
-        {/* Header */}
-        <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between bg-[#121214]">
+    <div className="bg-[#0e0e11] border border-white/10 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[80vh] font-sans">
+      {/* Header */}
+      <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between bg-[#121214]">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-cyan-500/10 flex items-center justify-center text-cyan-500 border border-cyan-500/20">
               <Ruler size={22} />
@@ -180,9 +179,8 @@ const DimStyleManager: React.FC<DimStyleManagerProps> = ({ settings, onUpdateSet
           </button>
         </div>
       </div>
-    </div>
-  );
-};
+    );
+  };
 
 const PropInput: React.FC<{ label: string, value: number, onChange: (val: number) => void }> = ({ label, value, onChange }) => (
     <div className="space-y-1.5 flex flex-col">

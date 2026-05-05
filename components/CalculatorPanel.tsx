@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { X, ArrowRightLeft, Calculator as CalculatorIcon, Ruler, Square, Box, FunctionSquare } from 'lucide-react';
+import { X, ArrowRightLeft, Calculator as CalculatorIcon, Ruler, Square, Box, FunctionSquare, ChevronDown } from 'lucide-react';
 
 interface CalculatorPanelProps {
     onClose: () => void;
@@ -21,51 +21,6 @@ const UNIT_DATA: Record<UnitCategory, Record<string, number>> = {
 };
 
 const CalculatorPanel: React.FC<CalculatorPanelProps> = ({ onClose }) => {
-    const [pos, setPos] = useState({ x: 0, y: 0 });
-    const [isInteracting, setIsInteracting] = useState(false);
-    const isDragging = useRef(false);
-    const dragStart = useRef({ x: 0, y: 0 });
-
-    useEffect(() => {
-        const handleMove = (e: MouseEvent | TouchEvent) => {
-            if (!isDragging.current) return;
-            const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-            const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-            setPos({
-                x: clientX - dragStart.current.x,
-                y: clientY - dragStart.current.y
-            });
-        };
-        const handleEnd = () => { 
-            isDragging.current = false; 
-            setIsInteracting(false);
-        };
-
-        window.addEventListener('mousemove', handleMove);
-        window.addEventListener('mouseup', handleEnd);
-        window.addEventListener('touchmove', handleMove, { passive: false });
-        window.addEventListener('touchend', handleEnd);
-        return () => {
-            window.removeEventListener('mousemove', handleMove);
-            window.removeEventListener('mouseup', handleEnd);
-            window.removeEventListener('touchmove', handleMove);
-            window.removeEventListener('touchend', handleEnd);
-        };
-    }, []);
-
-    const startDrag = (clientX: number, clientY: number) => {
-        isDragging.current = true;
-        setIsInteracting(true);
-        dragStart.current = { x: clientX - pos.x, y: clientY - pos.y };
-    };
-
-    const handleDragStart = (e: React.MouseEvent) => startDrag(e.clientX, e.clientY);
-    const handleTouchStart = (e: React.TouchEvent) => {
-        if (e.touches.length > 0) {
-            startDrag(e.touches[0].clientX, e.touches[0].clientY);
-        }
-    };
-
     const [mode, setMode] = useState<'calc' | 'conv'>('calc');
     const [sciMode, setSciMode] = useState(false);
     const [display, setDisplay] = useState('');
@@ -126,88 +81,184 @@ const CalculatorPanel: React.FC<CalculatorPanelProps> = ({ onClose }) => {
 
     return (
         <div 
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shadow-[0_0_50px_rgba(0,0,0,0.5)] w-80 bg-[#1e1e1e] border border-neutral-700 rounded-xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 select-none font-sans"
-            style={{ 
-                transform: `translate(calc(-50% + ${pos.x}px), calc(-50% + ${pos.y}px))`,
-                zIndex: isInteracting ? 9999 : 120
-            }}
-            onMouseDown={e => {
-                e.stopPropagation();
-                setIsInteracting(true);
-            }}
-            onTouchStart={e => {
-                e.stopPropagation();
-                setIsInteracting(true);
-            }}
+            className="relative w-80 max-w-[calc(100vw-40px)] bg-[#35353a] border border-white/10 rounded-2xl shadow-[0_30px_100px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden select-none font-sans"
         >
-            <div 
-                className="flex justify-between items-center p-3 border-b border-neutral-800 bg-[#252525] cursor-grab active:cursor-grabbing"
-                onMouseDown={handleDragStart}
-                onTouchStart={handleTouchStart}
-            >
-                <div className="flex items-center gap-2 pointer-events-none">
-                    <div className="w-8 h-8 rounded-lg bg-cyan-900/30 flex items-center justify-center text-cyan-400">
+            {/* Professional Header */}
+            <div className="flex justify-between items-center p-3 border-b border-white/5 bg-[#35353a]">
+                <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
                         <CalculatorIcon size={18} />
                     </div>
-                    <div className="flex gap-1 bg-neutral-900 p-1 rounded-lg pointer-events-auto">
-                        <button onClick={() => setMode('calc')} className={`px-3 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all duration-200 ${mode === 'calc' ? 'bg-cyan-700 text-white shadow-md' : 'text-neutral-500 hover:text-white hover:bg-neutral-800'}`}>Calc</button>
-                        <button onClick={() => setMode('conv')} className={`px-3 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all duration-200 ${mode === 'conv' ? 'bg-cyan-700 text-white shadow-md' : 'text-neutral-500 hover:text-white hover:bg-neutral-800'}`}>Unit</button>
+                    <div className="flex bg-black/20 p-0.5 rounded-lg border border-white/5">
+                        <button 
+                            onClick={() => setMode('calc')} 
+                            className={`px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-widest transition-all duration-300 ${mode === 'calc' ? 'bg-cyan-600 text-white shadow-[0_0_15px_rgba(6,182,212,0.3)]' : 'text-neutral-400 hover:text-white'}`}
+                        >
+                            CALC
+                        </button>
+                        <button 
+                            onClick={() => setMode('conv')} 
+                            className={`px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-widest transition-all duration-300 ${mode === 'conv' ? 'bg-cyan-600 text-white shadow-[0_0_15px_rgba(6,182,212,0.3)]' : 'text-neutral-400 hover:text-white'}`}
+                        >
+                            UNIT
+                        </button>
                     </div>
                 </div>
-                <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-red-900/30 text-neutral-500 hover:text-red-400 transition-colors cursor-pointer"><X size={18} /></button>
+                <button 
+                    onClick={onClose} 
+                    className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 text-neutral-400 hover:text-white transition-all duration-200"
+                >
+                    <X size={18} />
+                </button>
             </div>
 
-            <div className="p-4 bg-[#1e1e1e]">
+            <div className="p-4 space-y-4 bg-[#25252a]">
                 {mode === 'calc' ? (
-                    <div className="flex flex-col gap-3">
-                        <div className="bg-[#121212] border border-neutral-800 rounded-lg p-3 text-right h-20 flex flex-col justify-end shadow-inner relative overflow-hidden group">
-                            <div className="absolute top-2 left-2 text-[10px] text-neutral-600 font-bold uppercase tracking-widest pointer-events-none">LCD DISPLAY</div>
-                            <div className="text-neutral-500 text-xs h-5 overflow-hidden text-ellipsis whitespace-nowrap font-mono">{result}</div>
-                            <div className="text-cyan-50 text-2xl font-mono tracking-wider overflow-hidden text-ellipsis whitespace-nowrap">{display || '0'}</div>
+                    <div className="space-y-3">
+                        {/* High-Contrast Display */}
+                        <div className="bg-[#0f0f12] border border-white/10 rounded-xl p-3 text-right h-20 flex flex-col justify-end shadow-inner relative group">
+                            <div className="absolute top-2 left-3 text-[6px] text-cyan-500/50 font-black uppercase tracking-[0.4em] pointer-events-none">LCD_MATRIX</div>
+                            <div className="text-neutral-400 text-[10px] h-4 overflow-hidden text-ellipsis whitespace-nowrap font-mono tracking-tighter">
+                                {result ? `PREV_RESULT: ${result}` : display}
+                            </div>
+                            <div className="text-white text-2xl font-mono tracking-tighter overflow-hidden text-ellipsis whitespace-nowrap pt-0.5">
+                                {display || '0'}
+                            </div>
                         </div>
-                        <div className="flex justify-between items-center px-1">
-                             <button onClick={() => setSciMode(!sciMode)} className={`text-[9px] font-bold uppercase tracking-tighter px-2 py-0.5 rounded border ${sciMode ? 'bg-cyan-900/30 text-cyan-400 border-cyan-800' : 'text-neutral-600 border-neutral-800 hover:text-neutral-400'}`}>Scientific Mode</button>
+
+
+                        {/* Control Bar */}
+                        <div className="grid grid-cols-4 gap-1.5 bg-[#2a2a2e] rounded-lg p-1 border border-white/10">
+                             <button 
+                                onClick={() => setSciMode(!sciMode)} 
+                                className={`text-[7px] font-black uppercase tracking-widest px-2 py-1 rounded-md transition-all duration-300 ${sciMode ? 'bg-cyan-950/40 text-cyan-400 border border-cyan-500/30' : 'text-neutral-400 hover:text-white'}`}
+                             >
+                                Sci_Mode
+                             </button>
+                             <div className="w-1 h-1 rounded-full bg-cyan-500/30 mr-1" />
                         </div>
+
+                        {/* Keypad */}
                         <div className="grid grid-cols-4 gap-1.5">
                             {sciMode && (
-                                <><button onClick={() => handleCalcInput('sqrt(')} className="btn-sci">sqrt</button><button onClick={() => handleCalcInput('sin(')} className="btn-sci">sin</button><button onClick={() => handleCalcInput('cos(')} className="btn-sci">cos</button><button onClick={() => handleCalcInput('tan(')} className="btn-sci">tan</button><button onClick={() => handleCalcInput('π')} className="btn-sci">π</button><button onClick={() => handleCalcInput('^')} className="btn-sci">xʸ</button><button onClick={() => handleCalcInput('(')} className="btn-sci">(</button><button onClick={() => handleCalcInput(')')} className="btn-sci">)</button></>
+                                <div className="col-span-4 grid grid-cols-4 gap-1.5 pb-1">
+                                    {['sqrt(', 'sin(', 'cos(', 'tan(', 'π', '^', '(', ')'].map(k => (
+                                        <button key={k} onClick={() => handleCalcInput(k)} className="btn-sci text-[9px] py-1.5 rounded-lg bg-white/5 border border-white/5 text-neutral-300 hover:bg-cyan-500/10 hover:text-cyan-400 hover:border-cyan-500/20 transition-all font-mono">
+                                            {k.replace('(', '')}
+                                        </button>
+                                    ))}
+                                </div>
                             )}
                             {['C', '/', '*', 'DEL', '7', '8', '9', '-', '4', '5', '6', '+', '1', '2', '3', '=', '0', '.'].map((key, i) => (
-                                <button key={i} onClick={() => handleCalcInput(key)} className={`h-10 rounded-lg text-sm font-bold transition-all active:scale-95 flex items-center justify-center ${['C', 'DEL'].includes(key) ? 'bg-red-900/10 text-red-400 hover:bg-red-900/20 border border-red-900/20' : key === '=' ? 'bg-cyan-600 text-white hover:bg-cyan-500 col-span-2 border border-cyan-500' : ['/', '*', '-', '+'].includes(key) ? 'bg-neutral-800 text-cyan-400 hover:bg-neutral-700 border border-neutral-700' : 'bg-[#252525] text-neutral-300 hover:bg-[#333] hover:text-white border border-neutral-800 hover:border-neutral-600 shadow-sm'}`}>{key}</button>
+                                <button 
+                                    key={i} 
+                                    onClick={() => handleCalcInput(key)} 
+                                    className={`h-10 rounded-xl text-xs font-black transition-all active:scale-95 flex items-center justify-center uppercase tracking-widest ${
+                                        ['C', 'DEL'].includes(key) 
+                                            ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/20' 
+                                            : key === '=' 
+                                                ? 'bg-cyan-600 text-white hover:bg-cyan-500 col-span-2 border border-cyan-400/30 shadow-[0_0_10px_rgba(6,182,212,0.2)]' 
+                                                : ['/', '*', '-', '+'].includes(key)
+                                                    ? 'bg-[#2a2a2e] text-cyan-400 hover:text-white border border-white/10'
+                                                    : 'bg-[#35353a] text-neutral-200 hover:text-white border border-white/10 hover:bg-[#404045]'
+                                    }`}
+
+                                >
+                                    {key === '*' ? '×' : key === '/' ? '÷' : key}
+                                </button>
                             ))}
                         </div>
                     </div>
                 ) : (
-                    <div className="flex flex-col gap-4">
-                        <div className="grid grid-cols-3 gap-1 bg-[#252525] p-1 rounded-lg">
-                            <button onClick={() => setConvType('length')} className={`flex items-center justify-center gap-1 py-1.5 rounded text-[10px] font-bold uppercase transition-all ${convType === 'length' ? 'bg-cyan-900/50 text-cyan-400 shadow-sm' : 'text-neutral-500 hover:text-white'}`}><Ruler size={12} /> Len</button>
-                            <button onClick={() => setConvType('area')} className={`flex items-center justify-center gap-1 py-1.5 rounded text-[10px] font-bold uppercase transition-all ${convType === 'area' ? 'bg-cyan-900/50 text-cyan-400 shadow-sm' : 'text-neutral-500 hover:text-white'}`}><Square size={12} /> Area</button>
-                            <button onClick={() => setConvType('volume')} className={`flex items-center justify-center gap-1 py-1.5 rounded text-[10px] font-bold uppercase transition-all ${convType === 'volume' ? 'bg-cyan-900/50 text-cyan-400 shadow-sm' : 'text-neutral-500 hover:text-white'}`}><Box size={12} /> Vol</button>
+                    <div className="space-y-3">
+                        {/* Unit Type Selection */}
+                        <div className="grid grid-cols-3 gap-1.5 bg-[#25252a] p-1.5 rounded-xl border border-white/10">
+                            {(['length', 'area', 'volume'] as UnitCategory[]).map(type => (
+                                <button 
+                                    key={type}
+                                    onClick={() => setConvType(type)} 
+                                    className={`flex flex-col items-center justify-center gap-1.5 py-2.5 rounded-lg transition-all duration-300 ${convType === type ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40 shadow-[0_0_15px_rgba(6,182,121,0.1)]' : 'text-neutral-500 hover:text-neutral-300 opacity-60'}`}
+                                >
+                                    {type === 'length' && <Ruler size={16} />}
+                                    {type === 'area' && <Square size={16} />}
+                                    {type === 'volume' && <Box size={16} />}
+                                    <span className="text-[7px] font-black uppercase tracking-[0.2em]">{type}</span>
+                                </button>
+                            ))}
                         </div>
-                        <div className="space-y-1">
-                            <label className="text-[10px] text-neutral-500 uppercase font-bold pl-1">Input</label>
-                            <div className="flex gap-2">
-                                <input type="number" value={convValue} onChange={e => setConvValue(e.target.value)} className="flex-1 bg-[#121212] border border-neutral-700 rounded-lg p-2 text-white text-base outline-none focus:border-cyan-500 font-mono" placeholder="0" />
-                                <select value={fromUnit} onChange={e => setFromUnit(e.target.value)} className="w-24 bg-[#252525] text-white text-xs font-bold border border-neutral-700 rounded-lg outline-none cursor-pointer">{Object.keys(UNIT_DATA[convType]).map(u => <option key={u} value={u}>{u}</option>)}</select>
+
+                        {/* Conversion Interface */}
+                        <div className="space-y-4 relative">
+                            {/* Input Field */}
+                            <div className="space-y-1.5">
+                                <label className="text-[8px] text-cyan-400/80 uppercase font-black px-1 tracking-widest">Input Value</label>
+                                <div className="flex gap-2">
+                                    <div className="flex-1 min-w-0">
+                                        <input 
+                                            type="number" 
+                                            value={convValue} 
+                                            onChange={e => setConvValue(e.target.value)} 
+                                            className="w-full bg-[#151518] border border-white/10 rounded-lg p-3 text-white text-base outline-none focus:border-cyan-500/50 font-mono transition-all shadow-inner" 
+                                            placeholder="0.00" 
+                                        />
+                                    </div>
+                                    <div className="relative w-32 shrink-0">
+                                        <select 
+                                            value={fromUnit} 
+                                            onChange={e => setFromUnit(e.target.value)} 
+                                            className="w-full h-full bg-[#35353a] text-white text-[10px] font-black border border-white/10 rounded-lg outline-none cursor-pointer appearance-none px-3 pr-8 uppercase tracking-widest"
+                                        >
+                                            {Object.keys(UNIT_DATA[convType]).map(u => <option key={u} value={u} className="bg-[#2a2a2e]">{u}</option>)}
+                                        </select>
+                                        <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-cyan-400">
+                                            <ChevronDown size={14} />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Swap Button */}
+                            <div className="flex justify-center -my-4 relative z-10">
+                                <button 
+                                    onClick={() => { const t = fromUnit; setFromUnit(toUnit); setToUnit(t); }}
+                                    className="bg-[#2a2a2e] p-2.5 rounded-full border border-white/20 text-cyan-400 hover:text-white hover:border-cyan-400 shadow-xl transition-all hover:rotate-180 active:scale-90"
+                                >
+                                    <ArrowRightLeft size={16} className="rotate-90" />
+                                </button>
+                            </div>
+
+                            {/* Result Field (renamed from Output Field) */}
+                            <div className="space-y-1.5">
+                                <label className="text-[8px] text-cyan-400/80 uppercase font-black px-1 tracking-widest">Result</label>
+                                <div className="flex gap-2">
+                                    <div className="flex-1 min-w-0 bg-[#0f0f12] border border-cyan-500/20 rounded-lg p-3 text-cyan-400 text-lg font-mono flex items-center overflow-hidden whitespace-nowrap shadow-inner border-l-4 border-l-cyan-500">
+                                        {convResult || '0.000'}
+                                    </div>
+                                    <div className="relative w-32 shrink-0">
+                                        <select 
+                                            value={toUnit} 
+                                            onChange={e => setToUnit(e.target.value)} 
+                                            className="w-full h-full bg-[#35353a] text-white text-[10px] font-black border border-white/10 rounded-lg outline-none cursor-pointer appearance-none px-3 pr-8 uppercase tracking-widest"
+                                        >
+                                            {Object.keys(UNIT_DATA[convType]).map(u => <option key={u} value={u} className="bg-[#2a2a2e]">{u}</option>)}
+                                        </select>
+                                        <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-cyan-400">
+                                            <ChevronDown size={14} />
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                        <div className="flex justify-center -my-1 relative z-10"><div className="bg-[#252525] p-1.5 rounded-full border border-neutral-700 text-cyan-500 shadow-lg cursor-pointer hover:scale-110 transition-transform" onClick={() => { const t = fromUnit; setFromUnit(toUnit); setToUnit(t); }}><ArrowRightLeft size={16} className="rotate-90" /></div></div>
-                        <div className="space-y-1">
-                            <label className="text-[10px] text-neutral-500 uppercase font-bold pl-1">Result</label>
-                            <div className="flex gap-2">
-                                <div className="flex-1 bg-[#252525] border border-neutral-700 rounded-lg p-2 text-cyan-400 text-base font-mono flex items-center overflow-hidden whitespace-nowrap shadow-inner">{convResult || '0'}</div>
-                                <select value={toUnit} onChange={e => setToUnit(e.target.value)} className="w-24 bg-[#252525] text-white text-xs font-bold border border-neutral-700 rounded-lg outline-none cursor-pointer">{Object.keys(UNIT_DATA[convType]).map(u => <option key={u} value={u}>{u}</option>)}</select>
+
+                        {/* Metadata Footer */}
+                        <div className="flex justify-center pt-2">
+                            <div className="text-[6px] text-neutral-500 font-black uppercase tracking-[0.5em] border-t border-white/5 w-full text-center pt-3 opacity-50">
+                                PRECISION_UNIT_CONVERTER_PRO
                             </div>
                         </div>
                     </div>
                 )}
             </div>
-            <style>{`
-                .btn-sci { height: 32px; border-radius: 6px; font-size: 11px; font-weight: bold; background-color: #222; color: #888; border: 1px solid #333; transition: all 0.2s; }
-                .btn-sci:hover { background-color: #333; color: #22d3ee; border-color: #444; }
-                .btn-quick { font-size: 10px; background-color: rgba(38, 38, 38, 0.5); color: #a3a3a3; padding: 8px 0; border-radius: 6px; transition: all 0.2s; border: 1px solid transparent; }
-                .btn-quick:hover { background-color: #262626; color: #22d3ee; border-color: #404040; }
-            `}</style>
         </div>
     );
 };

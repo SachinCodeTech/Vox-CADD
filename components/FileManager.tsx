@@ -140,17 +140,11 @@ const FileManager: React.FC<FileManagerProps> = ({ currentName, recentFiles = []
 
     return (
         <div 
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 glass-panel w-full max-w-[420px] rounded-[3rem] shadow-[0_60px_150px_rgba(0,0,0,0.9)] border border-white/10 overflow-hidden animate-in fade-in zoom-in-95 duration-400 select-none" 
-            style={{ 
-                transform: `translate(calc(-50% + ${pos.x}px), calc(-50% + ${pos.y}px))`,
-                zIndex: 1000
-            }}
+            className="relative bg-[#0a0a0c] w-[95vw] max-w-[420px] max-h-[90vh] rounded-[2.5rem] shadow-[0_60px_150px_rgba(0,0,0,0.9)] border border-white/10 flex flex-col overflow-hidden select-none font-sans" 
         >
             {/* Header Section */}
             <div 
-                className="flex justify-between items-center p-8 pb-4 cursor-grab active:cursor-grabbing"
-                onMouseDown={e => startDrag(e.clientX, e.clientY)}
-                onTouchStart={e => e.touches.length > 0 && startDrag(e.touches[0].clientX, e.touches[0].clientY)}
+                className="flex justify-between items-center p-8 pb-4"
             >
                 <div className="flex items-center gap-4">
                   <div className="w-14 h-14 rounded-[1.2rem] bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">

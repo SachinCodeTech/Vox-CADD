@@ -57,7 +57,7 @@ const INITIAL_SETTINGS: AppSettings = {
   snapOptions: { 
     endpoint: true, midpoint: true, center: true, intersection: true, 
     nearest: false, quadrant: true, perpendicular: true, tangent: true,
-    node: true, extension: true, parallel: true, gcenter: true, appint: true
+    node: true, extension: true, parallel: true, gcenter: true, appint: true, polar: true
   },
   showHUD: true,
   showLineWeights: true,
@@ -618,6 +618,18 @@ const App: React.FC = () => {
             setFileSource(source);
             updateRecentFiles(fileName);
             
+            // Save to internal storage for persistence in Recent Files
+            const stateToSave = {
+                layers: layerMap,
+                layerConfig: project.layers,
+                settings: project.settings,
+                lineTypes: project.lineTypes,
+                blocks: project.blocks,
+                layouts: project.layouts,
+                fileName: fileName
+            };
+            await storageService.saveLarge(`${STORAGE_PREFIX}${fileName}`, stateToSave);
+            
             // Zoom extents if bounds exist
             if (project.bounds) {
                 setTimeout(() => handleAction('zoomExtents'), 100);
@@ -980,6 +992,18 @@ const App: React.FC = () => {
                     setCurrentFileName(handle.name);
                     updateRecentFiles(handle.name);
                     setLogMessage(`INFO:_${handle.name}_SAVED`);
+
+                    // Also save to internal storage for "Recent Files" consistency
+                    const stateToSave = {
+                        layers: JSON.parse(JSON.stringify(layersRef.current)),
+                        layerConfig: layerConfigRef.current,
+                        settings: settingsRef.current,
+                        lineTypes: lineTypesRef.current,
+                        blocks: blocksRef.current,
+                        layouts: layoutsRef.current,
+                        fileName: handle.name
+                    };
+                    await storageService.saveLarge(`${STORAGE_PREFIX}${handle.name}`, stateToSave);
                 } catch (e: any) {
                     if (e.name === 'AbortError') {
                       setLogMessage("INFO: SAVE_CANCELLED");
@@ -1007,12 +1031,24 @@ const App: React.FC = () => {
                     document.body.removeChild(a);
                     URL.revokeObjectURL(url);
                     
+                    const finalName = isSaveAs ? name : currentFileName;
                     if (isSaveAs) {
                       setCurrentFileName(name);
-                      updateRecentFiles(name);
-                    } else {
-                      updateRecentFiles(currentFileName);
                     }
+                    updateRecentFiles(finalName);
+
+                    // Also save to internal storage for "Recent Files" consistency
+                    const stateToSave = {
+                        layers: JSON.parse(JSON.stringify(layersRef.current)),
+                        layerConfig: layerConfigRef.current,
+                        settings: settingsRef.current,
+                        lineTypes: lineTypesRef.current,
+                        blocks: blocksRef.current,
+                        layouts: layoutsRef.current,
+                        fileName: finalName
+                    };
+                    storageService.saveLarge(`${STORAGE_PREFIX}${finalName}`, stateToSave);
+
                     setLogMessage(`INFO: DOWNLOADED_${finalExt.toUpperCase()}`);
                 };
 
@@ -1744,9 +1780,16 @@ const App: React.FC = () => {
   ];
 
   return (
-    <div className="flex flex-col h-[100dvh] w-full bg-black text-neutral-300 overflow-hidden select-none">
-      {isAppLoading && <LoadingScreen onComplete={() => setIsAppLoading(false)} />}
-      <header className="h-10 flex items-center justify-between px-4 shrink-0 bg-black border-b border-white/5 z-[110]">
+    <div className="flex flex-col h-[100dvh] w-full bg-black text-neutral-300 overflow-hidden select-none relative font-sans">
+      <AnimatePresence mode="wait">
+        {isAppLoading && (
+          <LoadingScreen 
+            key="loading"
+            onComplete={() => setIsAppLoading(false)} 
+          />
+        )}
+      </AnimatePresence>
+<header className="h-10 flex items-center justify-between px-4 shrink-0 bg-black border-b border-white/5 z-[110]">
         <div className="flex items-center gap-3 shrink-0">
           <VoxIcon size={22} className="text-cyan-400" />
           <div className="flex items-center gap-2">
@@ -1976,88 +2019,291 @@ const App: React.FC = () => {
           ))}
         </div>
 
-        {activePanel === 'layers' && (
-          <LayerManager 
-            layers={layerConfig} 
-            activeLayer={settings.currentLayer} 
-            onClose={() => setActivePanel('none')} 
-            onUpdateLayer={(id, upd) => setLayerConfig(prev => ({...prev, [id]: {...prev[id], ...upd} }))} 
-            onAddLayer={(name) => { 
-                const id = generateId(); 
-                setLayerConfig(prev => ({...prev, [id]: { id, name, visible: true, locked: false, frozen: false, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' }})); 
-                setLayers(prev => ({ ...prev, [id]: [] }));
-            }} 
-            onRemoveLayer={(id) => {
-                if (id === '0' || id === 'defpoints') return;
-                setPromptDialog({
-                  title: 'Delete Layer',
-                  message: `Delete layer "${layerConfig[id]?.name}" and all shapes in it?`,
-                  initialValue: '',
-                  type: 'confirm',
-                  onConfirm: () => {
-                    setLayerConfig(prev => { const n = {...prev}; delete n[id]; return n; });
-                    setLayers(prev => { const n = {...prev}; delete n[id]; return n; });
-                    if (settings.currentLayer === id) {
-                        setSettings(s => ({ ...s, currentLayer: '0' }));
+        <AnimatePresence>
+          {activePanel === 'layers' && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="pointer-events-auto"
+              >
+                <LayerManager 
+                  layers={layerConfig} 
+                  activeLayer={settings.currentLayer} 
+                  onClose={() => setActivePanel('none')} 
+                  onUpdateLayer={(id, upd) => setLayerConfig(prev => ({...prev, [id]: {...prev[id], ...upd} }))} 
+                  onAddLayer={(name) => { 
+                      const id = generateId(); 
+                      setLayerConfig(prev => ({...prev, [id]: { id, name, visible: true, locked: false, frozen: false, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' }})); 
+                      setLayers(prev => ({ ...prev, [id]: [] }));
+                  }} 
+                  onRemoveLayer={(id) => {
+                      if (id === '0' || id === 'defpoints') return;
+                      setPromptDialog({
+                        title: 'Delete Layer',
+                        message: `Delete layer "${layerConfig[id]?.name}" and all shapes in it?`,
+                        initialValue: '',
+                        type: 'confirm',
+                        onConfirm: () => {
+                          setLayerConfig(prev => { const n = {...prev}; delete n[id]; return n; });
+                          setLayers(prev => { const n = {...prev}; delete n[id]; return n; });
+                          if (settings.currentLayer === id) {
+                              setSettings(s => ({ ...s, currentLayer: '0' }));
+                          }
+                          setLogMessage(`LAYER_REMOVED: ${layerConfig[id]?.name}`);
+                        }
+                      });
+                  }} 
+                  onSetActive={(id) => {
+                      if(navigator.vibrate) navigator.vibrate(5);
+                      setSettings(s => ({ ...s, currentLayer: id }));
+                      setLayerConfig(prev => ({
+                          ...prev,
+                          [id]: { ...prev[id], visible: true, frozen: false }
+                      }));
+                  }} 
+                />
+              </motion.div>
+            </motion.div>
+          )}
+
+          {activePanel === 'properties' && (
+             <motion.div 
+               initial={{ opacity: 0 }}
+               animate={{ opacity: 1 }}
+               exit={{ opacity: 0 }}
+               className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+             >
+                <motion.div 
+                  initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                  animate={{ scale: 1, opacity: 1, y: 0 }}
+                  exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                  className="pointer-events-auto"
+                >
+                  <PropertiesPanel selectedShapes={(Object.values(layers).flat() as Shape[]).filter(s => selectedIds.includes(s.id))} onUpdateShape={(id, upd) => setLayers(prev => { const n = {...prev}; Object.keys(n).forEach(l => n[l] = n[l].map(s => s.id === id ? {...s, ...upd} : s)); return n; })} layers={layerConfig} settings={settings} onUpdateSettings={(upd) => setSettings(s => ({...s, ...upd}))} onCommand={executeCommand} onClose={() => setActivePanel('none')} />
+                </motion.div>
+             </motion.div>
+          )}
+
+          {activePanel === 'calculator' && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="pointer-events-auto"
+              >
+                <CalculatorPanel onClose={() => setActivePanel('none')} />
+              </motion.div>
+            </motion.div>
+          )}
+
+          {activePanel === 'drafting' && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="pointer-events-auto"
+              >
+                <DraftingSettings options={settings.snapOptions} settings={settings} onSettingsChange={(upd) => setSettings(s => ({...s, ...upd}))} onChange={(upd) => setSettings(s => ({...s, snapOptions: { ...s.snapOptions, ...upd }}))} onClose={() => setActivePanel('none')} />
+              </motion.div>
+            </motion.div>
+          )}
+
+          {activePanel === 'file' && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="pointer-events-auto"
+              >
+                <FileManager currentName={currentFileName} recentFiles={recentFiles} onAction={handleAction} onClose={() => setActivePanel('none')} />
+              </motion.div>
+            </motion.div>
+          )}
+
+          {activePanel === 'drawing_props' && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="pointer-events-auto"
+              >
+                <DrawingProperties 
+                  settings={settings} 
+                  onConfirm={(metadata, newTitle) => {
+                    setSettings(s => ({...s, metadata}));
+                    if (newTitle !== currentFileName) {
+                      handleAction('rename', newTitle);
                     }
-                    setLogMessage(`LAYER_REMOVED: ${layerConfig[id]?.name}`);
-                  }
-                });
-            }} 
-            onSetActive={(id) => {
-                if(navigator.vibrate) navigator.vibrate(5);
-                setSettings(s => ({ ...s, currentLayer: id }));
-                // Automatically turn on and thaw the layer if it becomes current
-                setLayerConfig(prev => ({
-                    ...prev,
-                    [id]: { ...prev[id], visible: true, frozen: false }
-                }));
-            }} 
-          />
-        )}
-        {activePanel === 'properties' && <PropertiesPanel selectedShapes={(Object.values(layers).flat() as Shape[]).filter(s => selectedIds.includes(s.id))} onUpdateShape={(id, upd) => setLayers(prev => { const n = {...prev}; Object.keys(n).forEach(l => n[l] = n[l].map(s => s.id === id ? {...s, ...upd} : s)); return n; })} layers={layerConfig} settings={settings} onUpdateSettings={(upd) => setSettings(s => ({...s, ...upd}))} onCommand={executeCommand} onClose={() => setActivePanel('none')} />}
-        {activePanel === 'calculator' && <CalculatorPanel onClose={() => setActivePanel('none')} />}
-        {activePanel === 'drafting' && <DraftingSettings options={settings.snapOptions} settings={settings} onSettingsChange={(upd) => setSettings(s => ({...s, ...upd}))} onChange={(upd) => setSettings(s => ({...s, snapOptions: { ...s.snapOptions, ...upd }}))} onClose={() => setActivePanel('none')} />}
-        {activePanel === 'file' && <FileManager currentName={currentFileName} recentFiles={recentFiles} onAction={handleAction} onClose={() => setActivePanel('none')} />}
-        {activePanel === 'drawing_props' && (
-          <DrawingProperties 
-            settings={settings} 
-            onConfirm={(metadata, newTitle) => {
-              setSettings(s => ({...s, metadata}));
-              if (newTitle !== currentFileName) {
-                handleAction('rename', newTitle);
-              }
-              setActivePanel('none');
-              setLogMessage("PROJECT_PROPERTIES_UPDATED");
-              // Use a slight timeout to allow state refs to sync
-              setTimeout(() => commitToHistory(), 50);
-            }} 
-            onClose={() => setActivePanel('none')} 
-            entityCount={(Object.values(layers).flat() as Shape[]).length} 
-            currentFileName={currentFileName} 
-          />
-        )}
-        {activePanel === 'help' && <InfoPanel type="help" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
-        {activePanel === 'about' && <InfoPanel type="about" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
-        {activePanel === 'privacy' && <InfoPanel type="privacy" onSwitch={(t) => setActivePanel(t)} onClose={() => setActivePanel('none')} />}
-        {activePanel === 'new_file' && <NewFileDialog onSelect={(cfg) => { 
-            const name = cfg.name + '.vox';
-            setLayers({ '0': [], 'defpoints': [] }); 
-            setSettings(s => ({
-              ...s, 
-              units: cfg.units, 
-              unitSubtype: cfg.subUnit,
-              precision: cfg.precision,
-              linearFormat: cfg.linearFormat,
-              angularFormat: cfg.angularFormat,
-              anglePrecision: cfg.anglePrecision
-            })); 
-            setCurrentFileName(name); 
-            setActivePanel('none'); 
-            updateRecentFiles(name);
-            commitToHistory();
-        }} onClose={() => setActivePanel('none')} />}
-        {activePanel === 'dimstyle' && <DimStyleManager settings={settings} onUpdateSettings={setSettings} onClose={() => setActivePanel('none')} />}
+                    setActivePanel('none');
+                    setLogMessage("PROJECT_PROPERTIES_UPDATED");
+                    setTimeout(() => commitToHistory(), 50);
+                  }} 
+                  onClose={() => setActivePanel('none')} 
+                  entityCount={(Object.values(layers).flat() as Shape[]).length} 
+                  currentFileName={currentFileName} 
+                />
+              </motion.div>
+            </motion.div>
+          )}
+
+          {activePanel === 'help' && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="pointer-events-auto"
+              >
+                <InfoPanel type="help" onSwitch={(t) => setActivePanel(t as PanelType)} onClose={() => setActivePanel('none')} />
+              </motion.div>
+            </motion.div>
+          )}
+
+          {activePanel === 'about' && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="pointer-events-auto"
+              >
+                <InfoPanel type="about" onSwitch={(t) => setActivePanel(t as PanelType)} onClose={() => setActivePanel('none')} />
+              </motion.div>
+            </motion.div>
+          )}
+
+          {activePanel === 'privacy' && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="pointer-events-auto"
+              >
+                <InfoPanel type="privacy" onSwitch={(t) => setActivePanel(t as PanelType)} onClose={() => setActivePanel('none')} />
+              </motion.div>
+            </motion.div>
+          )}
+
+          {activePanel === 'new_file' && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="pointer-events-auto"
+              >
+                <NewFileDialog onSelect={(cfg) => { 
+                    const name = cfg.name + '.vox';
+                    setLayers({ '0': [], 'defpoints': [] }); 
+                    setSettings(s => ({
+                      ...s, 
+                      units: cfg.units, 
+                      unitSubtype: cfg.subUnit,
+                      precision: cfg.precision,
+                      linearFormat: cfg.linearFormat,
+                      angularFormat: cfg.angularFormat,
+                      anglePrecision: cfg.anglePrecision
+                    })); 
+                    setCurrentFileName(name); 
+                    setActivePanel('none'); 
+                    updateRecentFiles(name);
+                    commitToHistory();
+                }} onClose={() => setActivePanel('none')} />
+              </motion.div>
+            </motion.div>
+          )}
+
+          {activePanel === 'dimstyle' && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="pointer-events-auto"
+              >
+                <DimStyleManager settings={settings} onUpdateSettings={setSettings} onClose={() => setActivePanel('none')} />
+              </motion.div>
+            </motion.div>
+          )}
+
+          {activePanel === 'mainmenu' && (
+            <motion.div 
+              initial={{ y: '-100%', opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: '-100%', opacity: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed inset-0 z-[1500] bg-[#050507] flex flex-col"
+            >
+               <header className="h-12 flex justify-between items-center px-4 border-b border-white/5 bg-black">
+                  <div className="flex items-center gap-2">
+                    <VoxIcon size={18} className="text-cyan-400" />
+                    <h2 className="text-[10px] font-black text-white uppercase tracking-widest">VOXCADD PANEL</h2>
+                  </div>
+                  <button onClick={() => setActivePanel('none')} className="p-2 text-neutral-500 hover:text-white transition-colors duration-200"><X size={20}/></button>
+               </header>
+               <div className="flex-1 overflow-auto bg-black">
+                 <MenuBar onAction={(a,p) => handleAction(a,p)} currentFileName={currentFileName} units={settings.units} />
+               </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
         {mtextEditor && (
           <MTextEditor 
             initialValue={mtextEditor.initialValue} 
@@ -2100,15 +2346,6 @@ const App: React.FC = () => {
               setHatchSelector(null);
             }}
           />
-        )}
-        {activePanel === 'mainmenu' && (
-          <div className="absolute inset-0 z-[500] bg-black flex flex-col animate-in slide-in-from-top duration-300">
-             <header className="h-12 flex justify-between items-center px-4 border-b border-white/5">
-                <h2 className="text-[10px] font-black text-white uppercase tracking-widest">VOXCADD PANEL</h2>
-                <button onClick={() => setActivePanel('none')} className="p-2 text-neutral-500"><X size={20}/></button>
-             </header>
-             <MenuBar onAction={(a,p) => handleAction(a,p)} currentFileName={currentFileName} units={settings.units} />
-          </div>
         )}
       </main>
 

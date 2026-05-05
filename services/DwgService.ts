@@ -1,7 +1,7 @@
 
 import { createModule, LibreDwg, Dwg_File_Type } from '@mlightcad/libredwg-web';
 // @ts-ignore
-import wasmUrl from '../node_modules/@mlightcad/libredwg-web/wasm/libredwg-web.wasm?url';
+const wasmUrl = new URL('../node_modules/@mlightcad/libredwg-web/wasm/libredwg-web.wasm', import.meta.url).href;
 import { Shape, BlockDefinition, LayerConfig, Point, VoxProject, AppSettings, LayoutDefinition } from '../types';
 import { generateId, getAllShapesBounds } from './cadService';
 import { aciToHex, mapLineweight } from './colorUtils';
@@ -15,21 +15,37 @@ export const initDwgService = async () => {
     try {
         console.log("Initializing DWG Engine...");
         
+        // Check for SharedArrayBuffer support
+        if (typeof SharedArrayBuffer === 'undefined') {
+            console.warn("SharedArrayBuffer is not available. Ensure COOP/COEP headers are set.");
+            // We can't really "fix" this here, but we can log it.
+        }
+
         let module: any;
         
         try {
-            console.log("DWG Service: Attempting to load WASM via managed URL:", wasmUrl);
+            console.log("DWG Service: Attempting to load WASM via prospective URL:", wasmUrl);
             module = await (createModule as any)({
-                locateFile: () => wasmUrl
+                locateFile: (path: string) => {
+                    if (path.endsWith('.wasm')) return wasmUrl;
+                    return path;
+                }
             });
         } catch (localErr) {
             console.warn("DWG Service: Failed to load local WASM, falling back to CDN:", localErr);
             module = await (createModule as any)({
-                locateFile: () => WASM_CDN_URL
+                locateFile: (path: string) => {
+                    if (path.endsWith('.wasm')) return WASM_CDN_URL;
+                    return path;
+                }
             });
         }
 
         // Initialize LibreDwg from the wasm module instance
+        if (!LibreDwg || typeof (LibreDwg as any).createByWasmInstance !== 'function') {
+            throw new Error("LibreDwg not found or invalid. Check package configuration.");
+        }
+
         libredwg = (LibreDwg as any).createByWasmInstance(module);
         
         console.log("DWG Engine Initialized Successfully");

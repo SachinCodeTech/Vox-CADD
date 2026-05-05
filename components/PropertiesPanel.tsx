@@ -384,7 +384,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
   return (
     <div 
-      className="fixed right-4 top-14 glass-panel w-[340px] rounded-[2rem] shadow-[0_50px_120px_rgba(0,0,0,0.95)] flex flex-col overflow-hidden animate-in fade-in slide-in-from-right-4 duration-300 border border-white/10"
+      className="relative glass-panel w-[95vw] max-w-[340px] max-h-[85vh] rounded-[2rem] shadow-[0_50px_120px_rgba(0,0,0,0.95)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-300 border border-white/10"
       style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, zIndex: 160 }}
     >
       <div 

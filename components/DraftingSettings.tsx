@@ -79,16 +79,10 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
 
   return (
     <div 
-        className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[340px] max-w-[90vw] glass-panel rounded-2xl shadow-[0_30px_100px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 select-none"
-        style={{ 
-            transform: `translate(calc(-50% + ${pos.x}px), calc(-50% + ${pos.y}px))`,
-            zIndex: isInteracting ? 9999 : 500
-        }}
-        onPointerDown={() => setIsInteracting(true)}
+        className="relative w-[340px] max-w-[calc(100vw-40px)] bg-[#0a0a0c] border border-white/10 rounded-2xl shadow-[0_30px_100px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden select-none font-sans"
       >
         <div 
-          className="p-5 border-b border-white/5 bg-white/5 cursor-grab active:cursor-grabbing touch-none flex justify-between items-center"
-          onPointerDown={e => { e.stopPropagation(); startDrag(e.clientX, e.clientY); }}
+          className="p-5 border-b border-white/5 bg-white/5 flex justify-between items-center"
         >
           <div className="flex items-center gap-2 pointer-events-none">
             <Target size={18} className="text-cyan-500" />
@@ -127,6 +121,7 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
                     <SnapItem id="tangent" label="Tangent" icon={Compass} active={options.tangent} />
                     <SnapItem id="extension" label="Extension" icon={Maximize} active={options.extension} />
                     <SnapItem id="parallel" label="Parallel" icon={Equal} active={options.parallel} />
+                    <SnapItem id="polar" label="Polar" icon={Compass} active={options.polar} />
                     <SnapItem id="gcenter" label="Geometric Center" icon={Pentagon} active={options.gcenter} />
                     <SnapItem id="appint" label="Apparent Intersection" icon={Scissors} active={options.appint} />
                     

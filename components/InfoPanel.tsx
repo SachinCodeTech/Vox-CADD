@@ -243,18 +243,10 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ type, onClose, onSwitch }) => {
 
   return (
     <div 
-      className="fixed left-1/2 top-10 -translate-x-1/2 w-[340px] max-w-[95vw] bg-[#1a1a1a] border border-neutral-800 rounded-2xl shadow-[0_25px_60px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 select-none"
-      style={{ 
-        transform: `translate(calc(-50% + ${pos.x}px), ${pos.y}px)`,
-        zIndex: isInteracting ? 9999 : 500
-      }}
-      onMouseDown={() => setIsInteracting(true)}
-      onTouchStart={() => setIsInteracting(true)}
+      className="relative w-[340px] max-w-[95vw] bg-[#0a0a0c] border border-white/10 rounded-2xl shadow-[0_25px_60px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden select-none font-sans"
     >
       <div 
-        className="flex justify-between items-center p-4 border-b border-neutral-800 bg-[#222] cursor-grab active:cursor-grabbing touch-none shrink-0"
-        onMouseDown={e => { e.stopPropagation(); startDrag(e.clientX, e.clientY); }}
-        onTouchStart={e => { e.stopPropagation(); if (e.touches.length > 0) startDrag(e.touches[0].clientX, e.touches[0].clientY); }}
+        className="flex justify-between items-center p-4 border-b border-white/5 bg-white/5 shrink-0"
       >
         <div className="flex items-center gap-2 pointer-events-none">
           {type === 'help' && <HelpCircle size={18} className="text-cyan-400" />}

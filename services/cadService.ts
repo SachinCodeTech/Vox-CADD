@@ -1512,6 +1512,7 @@ const SNAP_PRIORITY: Record<string, number> = {
     'end': 1,
     'int': 2,
     'appint': 2.5,
+    'polar': 2.8,
     'mid': 3,
     'cen': 4,
     'gcen': 4.5,
@@ -1524,16 +1525,18 @@ const SNAP_PRIORITY: Record<string, number> = {
     'node': 11
 };
 
-export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts: number, basePoint: Point | null): SnapPoint | null => {
+export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts: number, trackingPoints: SnapPoint[]): SnapPoint | null => {
     const threshold = 15 / ts;
     const candidates: SnapPoint[] = [];
 
-    const addCandidate = (x: number, y: number, type: SnapPoint['type']) => {
+    const addCandidate = (x: number, y: number, type: SnapPoint['type'], lp?: Point) => {
         const d = distance(p, { x, y });
         if (d <= threshold) {
-            candidates.push({ x, y, type });
+            candidates.push({ x, y, type, lastPoint: lp });
         }
     };
+
+    const basePoint = trackingPoints.length > 0 ? trackingPoints[trackingPoints.length - 1] : null;
 
     // Performance: Spatial filtering - only check shapes within a bounding box around the cursor
     const xMin = p.x - threshold * 5, xMax = p.x + threshold * 5;
@@ -1591,6 +1594,11 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
                     addCandidate(s.x + s.radius, s.y, 'quad'); addCandidate(s.x - s.radius, s.y, 'quad');
                     addCandidate(s.x, s.y + s.radius, 'quad'); addCandidate(s.x, s.y - s.radius, 'quad');
                 }
+                if (options.perpendicular && basePoint) {
+                    const angle = Math.atan2(basePoint.y - s.y, basePoint.x - s.x);
+                    addCandidate(s.x + s.radius * Math.cos(angle), s.y + s.radius * Math.sin(angle), 'perp');
+                    addCandidate(s.x - s.radius * Math.cos(angle), s.y - s.radius * Math.sin(angle), 'perp');
+                }
                 if (options.tangent && basePoint) {
                     const d = distance({x: s.x, y: s.y}, basePoint);
                     if (d > s.radius) {
@@ -1612,6 +1620,11 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
                 if (options.endpoint) {
                     addCandidate(s.x + s.radius * Math.cos(s.startAngle), s.y + s.radius * Math.sin(s.startAngle), 'end');
                     addCandidate(s.x + s.radius * Math.cos(s.endAngle), s.y + s.radius * Math.sin(s.endAngle), 'end');
+                }
+                if (options.perpendicular && basePoint) {
+                    const angle = Math.atan2(basePoint.y - s.y, basePoint.x - s.x);
+                    addCandidate(s.x + s.radius * Math.cos(angle), s.y + s.radius * Math.sin(angle), 'perp');
+                    addCandidate(s.x - s.radius * Math.cos(angle), s.y - s.radius * Math.sin(angle), 'perp');
                 }
                 if (options.nearest) {
                     let angle = Math.atan2(p.y - s.y, p.x - s.x);
@@ -1724,6 +1737,30 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
                 }
             }
         }
+    }
+
+    // 3. Polar Snapping
+    if (options.polar) {
+        trackingPoints.forEach(tp => {
+            const dx = p.x - tp.x;
+            const dy = p.y - tp.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > threshold) {
+                const angle = Math.atan2(dy, dx);
+                const degree = (angle * 180 / Math.PI + 360) % 360;
+                // Snaps to every 45 degrees
+                const step = 45;
+                const nearestDegree = Math.round(degree / step) * step;
+                const nearestAngle = nearestDegree * Math.PI / 180;
+
+                const angleDiff = Math.min(Math.abs(degree - nearestDegree), Math.abs(degree - (nearestDegree + 360)), Math.abs(degree - (nearestDegree - 360)));
+                
+                // If very close to a major angle, project the point along that ray
+                if (angleDiff < 5) {
+                    addCandidate(tp.x + dist * Math.cos(nearestAngle), tp.y + dist * Math.sin(nearestAngle), 'polar', tp);
+                }
+            }
+        });
     }
 
     if (candidates.length === 0) return null;

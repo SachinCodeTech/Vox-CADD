@@ -1,7 +1,7 @@
 
 import React, { useRef, useEffect, useState, useCallback, useMemo, useImperativeHandle, forwardRef } from 'react';
 import { Shape, ViewState, AppSettings, SnapPoint, LayerConfig, Point, MTextShape, BlockDefinition, LayoutDefinition, LineTypeDefinition, LineType } from '../types';
-import { hitTestShape, findBestSnap, formatLength, getShapesInRect, getShapeBounds, isRectIntersecting, formatDualLength, isShapeClosed, isPointInsideShape, getPolylineOffsetPoints, calculateShapeLength } from '../services/cadService';
+import { hitTestShape, findBestSnap, formatLength, getShapesInRect, getShapeBounds, isRectIntersecting, formatDualLength, isShapeClosed, isPointInsideShape, getPolylineOffsetPoints, calculateShapeLength, distance } from '../services/cadService';
 
 interface CADCanvasProps {
   layers: Record<string, Shape[]>;
@@ -63,6 +63,8 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   const [isPanning, setIsPanning] = useState(false);
   const [selectionRect, setSelectionRect] = useState<{ start: Point, end: Point, crossing: boolean } | null>(null);
   const [highlightedIds, setHighlightedIds] = useState<string[]>([]);
+  const trackingPoints = useRef<SnapPoint[]>([]);
+  const lastAcquireTime = useRef<number>(0);
   const pointerStartPos = useRef<Point>({ x: 0, y: 0 });
   const lastPos = useRef<Point>({ x: 0, y: 0 });
   const worldCursorRef = useRef<Point>({ x: 0, y: 0 });
@@ -205,9 +207,35 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         const conf = layerConfig[s.layer];
         return conf ? conf.visible : true;
       });
-      const s = findBestSnap(wp, allRenderable, settings.snapOptions, ts, basePoint);
+
+      // Maintain tracking points
+      const tps = [...trackingPoints.current];
+      if (basePoint && !tps.some(p => distance(p, basePoint) < 1/ts)) {
+          // Wrap basePoint into a SnapPoint
+          tps.push({ x: basePoint.x, y: basePoint.y, type: 'polar' });
+      }
+
+      const s = findBestSnap(wp, allRenderable, settings.snapOptions, ts, tps);
+
+      // Acquire logic: if hover over a snap point for 600ms, add to tracking
+      if (s && s.type !== 'polar' && s.type !== 'near') {
+          if (lastAcquireTime.current === 0) {
+              lastAcquireTime.current = Date.now();
+          } else if (Date.now() - lastAcquireTime.current > 600) {
+              const alreadyAcquired = trackingPoints.current.some(tp => distance(tp, s) < 5/ts);
+              if (!alreadyAcquired) {
+                  trackingPoints.current.push(s);
+                  if (navigator.vibrate) navigator.vibrate(10);
+                  if (setLogMessage) setLogMessage(`ACQUIRED_POINT: ${s.type.toUpperCase()}`);
+              }
+              lastAcquireTime.current = -1; // Mark as acquired for this hover
+          }
+      } else {
+          lastAcquireTime.current = 0;
+      }
+
       if (s && !activeSnapRef.current && navigator.vibrate) {
-          navigator.vibrate(5); // Tiny buzz on new snap
+          navigator.vibrate(5); 
       }
       activeSnapRef.current = s;
     } else {
@@ -218,6 +246,10 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       onMouseMove(targetP.x, targetP.y, !!activeSnapRef.current);
     }
   };
+
+  useEffect(() => {
+    trackingPoints.current = [];
+  }, [activeCommandName, isCommandActive]);
 
   const redraw = useCallback(() => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -404,11 +436,62 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       if (isCommandActive && previewShapes) previewShapes.forEach(s => drawShape(ctx, s, ts));
       
       visibleShapes.filter(s => selectedIds.includes(s.id)).forEach(s => drawGrips(ctx, s, ts));
+
+      // Polar / Tracking Line
+      if (activeSnapRef.current && activeSnapRef.current.type === 'polar' && activeSnapRef.current.lastPoint) {
+          const snap = activeSnapRef.current;
+          const lp = snap.lastPoint;
+          ctx.save();
+          ctx.strokeStyle = "rgba(0, 188, 212, 0.6)"; 
+          ctx.lineWidth = 1/ts;
+          ctx.setLineDash([10/ts, 10/ts]);
+          ctx.beginPath();
+          ctx.moveTo(lp.x, lp.y);
+          ctx.lineTo(snap.x, snap.y);
+          // Extend slightly past the snap point for better visual
+          const dx = snap.x - lp.x, dy = snap.y - lp.y;
+          const len = Math.sqrt(dx*dx + dy*dy);
+          if (len > 0) {
+              const ux = dx/len, uy = dy/len;
+              ctx.lineTo(snap.x + ux * (20/ts), snap.y + uy * (20/ts));
+          }
+          ctx.stroke();
+          
+          // Draw tooltip for angle/distance
+          if (len > 0) {
+            const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+            const posAngle = (angle + 360) % 360;
+            const label = `${len.toFixed(1)} < ${posAngle.toFixed(1)}°`;
+            ctx.setLineDash([]);
+            ctx.font = `${11/ts}px Inter`;
+            ctx.fillStyle = "rgba(0, 188, 212, 0.9)";
+            ctx.fillText(label, snap.x + 15/ts, snap.y - 15/ts);
+          }
+          ctx.restore();
+      }
       ctx.restore();
     }
 
     if (isModel) {
       drawUCS(ctx, w, h);
+    }
+
+    // Tracking markers
+    if (trackingPoints.current.length > 0) {
+        ctx.save();
+        ctx.setTransform(r, 0, 0, r, 0, 0); // Use raw pixel pixels for static UI elements?
+        // Actually we want world coords
+        ctx.setTransform(ts, 0, 0, -ts, w/2 + view.originX, h/2 + view.originY);
+        trackingPoints.current.forEach(tp => {
+            ctx.strokeStyle = "rgba(0, 188, 212, 0.4)";
+            ctx.lineWidth = 1/ts;
+            const size = 6/ts;
+            ctx.beginPath();
+            ctx.moveTo(tp.x - size, tp.y); ctx.lineTo(tp.x + size, tp.y);
+            ctx.moveTo(tp.x, tp.y - size); ctx.lineTo(tp.x, tp.y + size);
+            ctx.stroke();
+        });
+        ctx.restore();
     }
 
     // AI Thinking Overlay
@@ -1212,6 +1295,13 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         break;
       case 'near': 
         ctx.moveTo(x, y-size); ctx.lineTo(x+size, y); ctx.lineTo(x, y+size); ctx.lineTo(x-size, y); ctx.closePath();
+        break;
+      case 'polar':
+        // X with circle for polar
+        ctx.moveTo(x-size, y-size); ctx.lineTo(x+size, y+size);
+        ctx.moveTo(x+size, y-size); ctx.lineTo(x-size, y+size);
+        ctx.stroke(); ctx.beginPath();
+        ctx.arc(x, y, size/2, 0, Math.PI*2);
         break;
     }
     ctx.stroke(); ctx.restore();

@@ -277,6 +277,7 @@ export interface SnapOptions {
   parallel: boolean;
   gcenter: boolean;
   appint: boolean;
+  polar: boolean;
 }
 
 export interface ProjectMetadata {
@@ -376,5 +377,6 @@ export interface VoxProject {
 export interface SnapPoint {
   x: number;
   y: number;
-  type: 'end' | 'mid' | 'cen' | 'quad' | 'int' | 'perp' | 'tan' | 'near' | 'node' | 'ext' | 'par' | 'gcen' | 'appint';
+  type: 'end' | 'mid' | 'cen' | 'quad' | 'int' | 'perp' | 'tan' | 'near' | 'node' | 'ext' | 'par' | 'gcen' | 'appint' | 'polar';
+  lastPoint?: Point;
 }
