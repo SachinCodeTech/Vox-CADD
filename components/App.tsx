@@ -17,6 +17,7 @@ import HatchPatternSelector from './HatchPatternSelector';
 import MTextEditor from './MTextEditor';
 import DimStyleManager from './DimStyleManager';
 import LoadingScreen from './LoadingScreen';
+import OfflineIndicator from './OfflineIndicator';
 import { Share as CapacitorShare } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Capacitor } from '@capacitor/core';
@@ -2899,6 +2900,7 @@ const App: React.FC = () => {
            </div>
         </div>
       )}
+      <OfflineIndicator />
     </div>
   );
 };

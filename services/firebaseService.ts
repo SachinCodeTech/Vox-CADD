@@ -1,41 +1,46 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth, onAuthStateChanged, User } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, serverTimestamp, collection, query, getDocs } from 'firebase/firestore';
-import { getAnalytics, logEvent, isSupported } from 'firebase/analytics';
-import firebaseConfigFile from '../firebase-applet-config.json';
+import { initializeApp, FirebaseApp } from 'firebase/app';
+import { getAuth, onAuthStateChanged, User, Auth } from 'firebase/auth';
+import { getFirestore, doc, setDoc, serverTimestamp, Firestore } from 'firebase/firestore';
+import { getAnalytics, logEvent, isSupported, Analytics } from 'firebase/analytics';
 
-// Use environment variables if available (Vite prefixed), otherwise fallback to the config file
+// Attempt to get config from env vars
 const firebaseConfig = {
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || firebaseConfigFile.projectId,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || firebaseConfigFile.appId,
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || firebaseConfigFile.apiKey,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfigFile.authDomain,
-  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_DATABASE_ID || firebaseConfigFile.firestoreDatabaseId,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfigFile.storageBucket,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfigFile.messagingSenderId,
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || firebaseConfigFile.measurementId,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
+  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_DATABASE_ID || '(default)',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || '',
 };
 
-const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+// Check if we have at least a projectId and apiKey to initialize
+const isFirebaseEnabled = !!(firebaseConfig.projectId && firebaseConfig.apiKey);
 
-let analytics: any = null;
+let app: FirebaseApp | null = null;
+let auth: Auth | null = null;
+let db: Firestore | null = null;
+let analytics: Analytics | null = null;
 
-// Initialize analytics asynchronously and only if measurementId is provided
-const initAnalytics = async () => {
-  if (!firebaseConfig.measurementId) return;
-  
+if (isFirebaseEnabled) {
   try {
-    const supported = await isSupported();
-    if (supported) {
-      analytics = getAnalytics(app);
-    }
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app, firebaseConfig.firestoreDatabaseId !== '(default)' ? firebaseConfig.firestoreDatabaseId : undefined);
+
+    // Initialize analytics asynchronously
+    isSupported().then(supported => {
+        if (supported && app) {
+            analytics = getAnalytics(app);
+        }
+    }).catch(() => {});
   } catch (e) {
-    console.warn("Firebase Analytics not initialized:", e);
+    console.error("Firebase Initialization Error:", e);
   }
-};
-initAnalytics();
+}
+
+export { auth, db };
 
 export const logAppEvent = (name: string, params?: any) => {
   if (analytics) {
@@ -45,17 +50,15 @@ export const logAppEvent = (name: string, params?: any) => {
 
 /**
  * Syncs lightweight metadata to Firestore for the authenticated user.
- * This does NOT include any file content, only app state/settings.
  */
 export const syncUserMetadata = async (metadata: { theme?: string; deviceInfo?: string }) => {
-  const user = auth.currentUser;
-  if (!user) return;
+  if (!db || !auth || !auth.currentUser) return;
 
-  const metadataRef = doc(db, 'users', user.uid, 'metadata', 'current');
+  const metadataRef = doc(db, 'users', auth.currentUser.uid, 'metadata', 'current');
   try {
     await setDoc(metadataRef, {
       ...metadata,
-      uid: user.uid,
+      uid: auth.currentUser.uid,
       lastModified: serverTimestamp()
     }, { merge: true });
   } catch (error) {
@@ -67,11 +70,10 @@ export const syncUserMetadata = async (metadata: { theme?: string; deviceInfo?: 
  * Optional: Syncs metadata about a local file (no file content).
  */
 export const trackFileMetadata = async (fileName: string, fileSize: number) => {
-  const user = auth.currentUser;
-  if (!user) return;
+  if (!db || !auth || !auth.currentUser) return;
 
   const fileId = fileName.replace(/[^a-zA-Z0-9]/g, '_');
-  const fileRef = doc(db, 'users', user.uid, 'files', fileId);
+  const fileRef = doc(db, 'users', auth.currentUser.uid, 'files', fileId);
   
   try {
     await setDoc(fileRef, {
@@ -85,5 +87,8 @@ export const trackFileMetadata = async (fileName: string, fileSize: number) => {
 };
 
 export const onAuthChange = (callback: (user: User | null) => void) => {
-  return onAuthStateChanged(auth, callback);
+  if (auth) {
+    return onAuthStateChanged(auth, callback);
+  }
+  return () => {}; // return no-op
 };

@@ -21,35 +21,72 @@ export default defineConfig(({ mode }) => {
         tailwindcss(),
         VitePWA({
           registerType: 'autoUpdate',
-          includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
+          includeAssets: ['favicon.svg'],
           manifest: {
             name: 'VoxCADD Professional',
             short_name: 'VoxCADD',
             description: 'Professional CAD Editor for DWG/DXF/VOX',
             theme_color: '#0f172a',
+            background_color: '#020617',
+            display: 'standalone',
+            orientation: 'any',
+            scope: '/',
+            start_url: '/',
             icons: [
               {
-                src: 'pwa-192x192.png',
+                src: 'favicon.svg',
+                sizes: 'any',
+                type: 'image/svg+xml',
+                purpose: 'any'
+              },
+              {
+                src: 'favicon.svg',
                 sizes: '192x192',
-                type: 'image/png'
+                type: 'image/svg+xml',
+                purpose: 'maskable'
               },
               {
-                src: 'pwa-512x512.png',
+                src: 'favicon.svg',
                 sizes: '512x512',
-                type: 'image/png'
-              },
-              {
-                src: 'pwa-512x512.png',
-                sizes: '512x512',
-                type: 'image/png',
-                purpose: 'any maskable'
+                type: 'image/svg+xml',
+                purpose: 'maskable'
               }
             ]
           },
           workbox: {
-            globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm}'],
-            // Increase the maximum file size for caching (WASM can be large)
-            maximumFileSizeToCacheInBytes: 10 * 1024 * 1024 // 10MB
+            globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm,json}'],
+            // Cache heavy binaries and data
+            maximumFileSizeToCacheInBytes: 20 * 1024 * 1024, // 20MB for library WASM
+            runtimeCaching: [
+              {
+                urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+                handler: 'CacheFirst',
+                options: {
+                  cacheName: 'google-fonts-cache',
+                  expiration: {
+                    maxEntries: 10,
+                    maxAgeSeconds: 60 * 60 * 24 * 365 // 1 year
+                  },
+                  cacheableResponse: {
+                    statuses: [0, 200]
+                  }
+                }
+              },
+              {
+                urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+                handler: 'CacheFirst',
+                options: {
+                  cacheName: 'gstatic-fonts-cache',
+                  expiration: {
+                    maxEntries: 10,
+                    maxAgeSeconds: 60 * 60 * 24 * 365 // 1 year
+                  },
+                  cacheableResponse: {
+                    statuses: [0, 200]
+                  }
+                }
+              }
+            ]
           }
         })
       ],
