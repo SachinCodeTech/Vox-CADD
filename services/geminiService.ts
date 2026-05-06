@@ -48,12 +48,22 @@ export interface AiResponse {
   groundingLinks?: { title: string; uri: string }[];
 }
 
+let genAI: GoogleGenAI | null = null;
+
+const getGenAI = () => {
+  if (!genAI) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("GEMINI_API_KEY environment variable is required");
+    }
+    genAI = new GoogleGenAI({ apiKey });
+  }
+  return genAI;
+};
+
 export const getCommandFromAI = async (prompt: string, contextSummary: string = "", sketchData?: string | null, history: {role: string, parts: any[]}[] = []): Promise<AiResponse> => {
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return { text: "Error: No API Key found.", commands: [] };
-
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = getGenAI();
     const modelName = 'gemini-3.1-pro-preview';
     
     const contextPart = { text: `[ARCHITECTURAL CONTEXT]\n${contextSummary}\n\n[USER REQUEST]\n${prompt || "Produce architectural drafting."}` };
@@ -207,7 +217,7 @@ export interface LiveSessionHandlers {
 }
 
 export const connectLiveAgent = async (handlers: LiveSessionHandlers) => {
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+    const ai = getGenAI();
     const inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({sampleRate: 16000});
     const outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({sampleRate: 24000});
     const outputNode = outputAudioContext.createGain();
