@@ -17,8 +17,8 @@ export const createEmptyVoxProject = (settings: AppSettings): VoxProject => {
     },
     settings,
     layers: { 
-      '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' },
-      'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, color: '#666666', thickness: 0.1, lineType: 'continuous' }
+      '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' },
+      'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, plottable: false, color: '#666666', thickness: 0.1, lineType: 'continuous' }
     },
     lineTypes: {},
     textStyles: {},
@@ -104,8 +104,8 @@ export const voxToProject = (voxString: string): VoxProject | null => {
 
 const migrateLegacyVox = (legacy: any): VoxProject => {
     const layers: Record<string, LayerConfig> = {
-        '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' },
-        'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, color: '#666666', thickness: 0.1, lineType: 'continuous' }
+        '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' },
+        'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, plottable: false, color: '#666666', thickness: 0.1, lineType: 'continuous' }
     };
     if (Array.isArray(legacy.layers)) {
         legacy.layers.forEach((l: any) => { layers[l.id || l.name] = l; });

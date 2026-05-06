@@ -94,20 +94,34 @@ const MenuBar: React.FC<MenuBarProps> = ({ onAction, currentFileName, units }) =
       </div>
 
       <SectionHeader label="Share & Export" />
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-4 gap-1.5">
         <button 
           onClick={() => onAction('share', 'pdf')}
-          className="flex flex-col items-center justify-center p-5 bg-red-500/5 hover:bg-red-500/10 border border-red-500/20 rounded-[1.5rem] transition-all"
+          className="flex flex-col items-center justify-center p-2.5 bg-red-500/5 hover:bg-red-500/10 border border-red-500/20 rounded-xl transition-all"
         >
-          <FileText size={20} className="text-red-500 mb-2" />
-          <span className="text-[9px] font-black text-white uppercase tracking-widest">Share PDF</span>
+          <FileText size={14} className="text-red-500 mb-1" />
+          <span className="text-[7px] font-black text-white uppercase">PDF</span>
+        </button>
+        <button 
+          onClick={() => onAction('share', 'vox')}
+          className="flex flex-col items-center justify-center p-2.5 bg-emerald-500/5 hover:bg-emerald-500/10 border border-emerald-500/20 rounded-xl transition-all"
+        >
+          <VoxIcon size={14} className="text-emerald-500 mb-1" />
+          <span className="text-[7px] font-black text-white uppercase">VOX</span>
         </button>
         <button 
           onClick={() => onAction('share', 'dxf')}
-          className="flex flex-col items-center justify-center p-5 bg-cyan-500/5 hover:bg-cyan-500/10 border border-cyan-500/20 rounded-[1.5rem] transition-all"
+          className="flex flex-col items-center justify-center p-2.5 bg-cyan-500/5 hover:bg-cyan-500/10 border border-cyan-500/20 rounded-xl transition-all"
         >
-          <FileCode size={20} className="text-cyan-500 mb-2" />
-          <span className="text-[9px] font-black text-white uppercase tracking-widest">Share DXF</span>
+          <FileCode size={14} className="text-cyan-500 mb-1" />
+          <span className="text-[7px] font-black text-white uppercase">DXF</span>
+        </button>
+        <button 
+          onClick={() => onAction('publish')}
+          className="flex flex-col items-center justify-center p-2.5 bg-indigo-500/5 hover:bg-indigo-500/10 border border-indigo-500/20 rounded-xl transition-all"
+        >
+          <Globe size={14} className="text-indigo-500 mb-1" />
+          <span className="text-[7px] font-black text-white uppercase">LINK</span>
         </button>
       </div>
 

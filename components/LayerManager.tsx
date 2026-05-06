@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Eye, EyeOff, Trash2, Plus, X, Check, Layers, Lock, Unlock, Snowflake, Sun } from 'lucide-react';
+import { Eye, EyeOff, Trash2, Plus, X, Check, Layers, Lock, Unlock, Snowflake, Sun, Printer } from 'lucide-react';
 import { LayerConfig, LineType } from '../types';
 
 interface LayerManagerProps {
@@ -142,6 +142,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({
               <div className="w-14 text-center py-2.5 shrink-0 border-r border-white/5">On</div>
               <div className="w-14 text-center py-2.5 shrink-0 border-r border-white/5">Frz</div>
               <div className="w-14 text-center py-2.5 shrink-0 border-r border-white/5">Lck</div>
+              <div className="w-14 text-center py-2.5 shrink-0 border-r border-white/5">Plt</div>
               <div className="w-16 text-center py-2.5 shrink-0 border-r border-white/5">Color</div>
               <div className="w-48 text-center py-2.5 shrink-0 border-r border-white/5">Line Type</div>
               <div className="w-32 text-center py-2.5 shrink-0 border-r border-white/5">Line Weight</div>
@@ -213,6 +214,27 @@ const LayerManager: React.FC<LayerManagerProps> = ({
                             className={`p-1.5 rounded transition-all hover:bg-white/5 ${layer.locked ? 'text-amber-600' : 'text-neutral-500'}`}
                         >
                             {layer.locked ? <Lock size={13} strokeWidth={3} /> : <Unlock size={13} className="opacity-40 text-neutral-500" />}
+                        </button>
+                    </div>
+
+                    {/* Plottable */}
+                    <div className="w-14 flex justify-center shrink-0 py-2 border-r border-white/5">
+                        <button 
+                            title="Plot/No Plot"
+                            onClick={(e) => { 
+                                e.stopPropagation(); 
+                                onUpdateLayer(layer.id, { plottable: !layer.plottable }); 
+                            }} 
+                            className={`p-1.5 rounded transition-all hover:bg-white/5 ${layer.plottable ? 'text-neutral-300' : 'text-red-500'}`}
+                        >
+                            <div className="relative">
+                                <Printer size={13} />
+                                {!layer.plottable && (
+                                  <div className="absolute inset-0 flex items-center justify-center opacity-70">
+                                    <div className="w-[1px] h-3.5 bg-current rotate-45" />
+                                  </div>
+                                )}
+                            </div>
                         </button>
                     </div>
 

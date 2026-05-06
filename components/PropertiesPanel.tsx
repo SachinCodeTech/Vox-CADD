@@ -2,8 +2,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 // Fix: Added missing PolyShape import to satisfy type cast on line 154
 import { Shape, AppSettings, LayerConfig, LineType, Point, LineShape, CircleShape, RectShape, ArcShape, TextShape, MTextShape, LeaderShape, PolyShape, EllipseShape, DonutShape, DimensionShape, DoubleLineShape } from '../types';
-import { X, Sliders, Layers, Target, Maximize2, PenTool, FileEdit, Move, Zap, ChevronDown, ChevronRight, Info, Type, Ruler, Box, Compass, Activity, Hash, Layers2, Square, Copy, Scissors, ExternalLink, RefreshCw } from 'lucide-react';
-import { formatLength, parseLength, distance, calculateArea, calculatePolylineLength, formatDualLength, formatDualArea } from '../services/cadService';
+import { X, Sliders, Layers, Target, Maximize2, PenTool, FileEdit, Move, Zap, ChevronDown, ChevronRight, Info, Type, Ruler, Box, Compass, Activity, Hash, Layers2, Square, Copy, Scissors, ExternalLink, RefreshCw, XCircle } from 'lucide-react';
+import { formatLength, parseLength, distance, calculateArea, calculatePolylineLength, formatDualLength, formatDualArea, calculateShapeLength } from '../services/cadService';
 
 const PropertySection = ({ title, icon: Icon, children, defaultOpen = true }: { title: string, icon: any, children?: React.ReactNode, defaultOpen?: boolean }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -32,6 +32,7 @@ interface PropertiesPanelProps {
   onUpdateSettings: (s: Partial<AppSettings>) => void;
   onClose: () => void;
   onCommand?: (cmd: string) => void;
+  onFilterType?: (type: string) => void;
 }
 
 const LineTypePreview = ({ type, color = "#00bcd4", weight = 1 }: { type: LineType, color?: string, weight?: number }) => {
@@ -72,10 +73,12 @@ const LineTypePreview = ({ type, color = "#00bcd4", weight = 1 }: { type: LineTy
 };
 
 const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ 
-    selectedShapes, onUpdateShape, layers, settings, onUpdateSettings, onClose, onCommand
+    selectedShapes, onUpdateShape, layers, settings, onUpdateSettings, onClose, onCommand, onFilterType
 }) => {
   const isImperial = settings.units === 'imperial';
   const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [activePanelTab, setActivePanelTab] = useState<'props' | 'stats'>('props');
+  const [filterType, setFilterType] = useState<string | null>(null);
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
 
@@ -401,142 +404,258 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
         <button onClick={onClose} className="w-8 h-8 flex items-center justify-center hover:bg-white/10 rounded-full text-neutral-500 hover:text-white transition-all"><X size={20} /></button>
       </div>
 
+      <div className="flex bg-[#1a1a1c] border-b border-white/5 shrink-0">
+          <button 
+            onClick={() => setActivePanelTab('props')}
+            className={`flex-1 flex items-center justify-center gap-2 py-3 text-[9px] font-black uppercase tracking-[0.2em] transition-all border-b-2 ${activePanelTab === 'props' ? 'text-[#00bcd4] border-[#00bcd4] bg-[#00bcd4]/5' : 'text-neutral-500 border-transparent hover:text-white'}`}
+          >
+            <Sliders size={12} />
+            Properties
+          </button>
+          <button 
+            onClick={() => setActivePanelTab('stats')}
+            className={`flex-1 flex items-center justify-center gap-2 py-3 text-[9px] font-black uppercase tracking-[0.2em] transition-all border-b-2 ${activePanelTab === 'stats' ? 'text-[#00bcd4] border-[#00bcd4] bg-[#00bcd4]/5' : 'text-neutral-500 border-transparent hover:text-white'}`}
+          >
+            <Activity size={12} />
+            Statistics
+          </button>
+      </div>
       <div className="flex-1 overflow-y-auto max-h-[80vh] scrollbar-none bg-[#0d0d0f]">
           {selectedShapes.length > 0 ? (
               <div className="flex flex-col">
-                <div className="px-6 py-4 bg-[#00bcd4]/5 border-b border-[#00bcd4]/10 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="text-[12px] font-black text-[#00bcd4] uppercase tracking-[0.15em]">{selectedShapes.length === 1 ? selectedShapes[0].type : 'Multiple'}</span>
-                    <span className="px-2.5 py-0.5 rounded-lg bg-[#00bcd4]/20 text-[9px] text-[#00bcd4] font-black border border-[#00bcd4]/30">x{selectedShapes.length}</span>
-                  </div>
-                  <Zap size={14} className="text-[#00bcd4]" />
-                </div>
-
-                {selectedShapes.length > 1 && (
-                  <PropertySection title="Selection Statistics" icon={Activity} defaultOpen={true}>
-                    <div className="px-6 py-2">
-                        <div className="flex flex-wrap gap-2">
-                            {Object.entries(selectedShapes.reduce((acc, s) => {
-                                acc[s.type] = (acc[s.type] || 0) + 1;
-                                return acc;
-                            }, {} as Record<string, number>)).map(([type, count]) => (
-                                <div key={type} className="bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 flex items-center gap-2">
-                                    <span className="text-[8px] text-neutral-500 font-black uppercase tracking-tighter">{type}</span>
-                                    <span className="text-[10px] text-[#00bcd4] font-black leading-none">{count}</span>
-                                </div>
-                            ))}
-                        </div>
+                {activePanelTab === 'props' ? (
+                  <>
+                  <div className="px-6 py-4 bg-[#00bcd4]/5 border-b border-[#00bcd4]/10 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className="text-[12px] font-black text-[#00bcd4] uppercase tracking-[0.15em]">
+                        {filterType ? filterType : (selectedShapes.length === 1 ? selectedShapes[0].type : 'Multiple')}
+                      </span>
+                      <span className="px-2.5 py-0.5 rounded-lg bg-[#00bcd4]/20 text-[9px] text-[#00bcd4] font-black border border-[#00bcd4]/30">
+                        x{filterType ? (selectedShapes.filter(s => s.type === filterType).length) : selectedShapes.length}
+                      </span>
                     </div>
-                    {/* Add shared property editing for multiple selection */}
-                    <div className="mt-4 border-t border-white/5 pt-2">
-                        <PropertyRow label="Set All Layers">
-                            <select 
-                                className="w-full bg-[#121214] border border-white/5 text-[10px] text-white rounded-lg px-3 py-2 outline-none uppercase font-black cursor-pointer appearance-none hover:border-[#00bcd4]/30 transition-all" 
-                                value="" 
-                                onChange={(e) => handleShapeChange('layer', e.target.value)}
-                            >
-                                <option value="" disabled>Select Layer...</option>
-                                {Object.values(layers).map((l: LayerConfig) => <option key={l.id} value={l.id}>{l.name}</option>)}
-                            </select>
-                        </PropertyRow>
-                        <PropertyRow label="Set All Colors">
-                             <div className="relative w-8 h-8 rounded-lg overflow-hidden bg-[#121214] border border-white/5 cursor-pointer shrink-0 ml-3">
-                                <div className="absolute inset-[2px] rounded-[6px]" style={{ backgroundColor: selectedShapes.every(s => s.color === selectedShapes[0].color) ? selectedShapes[0].color || '#ffffff' : '#444' }} />
-                                <input 
+                    {filterType && (
+                        <button 
+                            onClick={() => setFilterType(null)}
+                            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-500/10 border border-red-500/30 text-red-500 text-[8px] font-black uppercase hover:bg-red-500/20 transition-all"
+                        >
+                            <XCircle size={10} />
+                            Clear Filter
+                        </button>
+                    )}
+                    {!filterType && <Zap size={14} className="text-[#00bcd4]" />}
+                  </div>
+
+                  {(() => {
+                    const filtered = filterType ? selectedShapes.filter(s => s.type === filterType) : selectedShapes;
+                    
+                    if (filtered.length === 1) {
+                      const s = filtered[0];
+                      return (
+                        <>
+                          <PropertySection title="Entity Identity" icon={Info} defaultOpen={false}>
+                            <PropertyRow label="Entity Type" readOnly>
+                                <span className="text-[10px] text-[#00bcd4] font-black uppercase tracking-wider px-3">{s.type}</span>
+                            </PropertyRow>
+                            <PropertyRow label="Handle" readOnly>
+                                <span className="text-[10px] text-neutral-500 font-mono px-3">{s.id}</span>
+                            </PropertyRow>
+                          </PropertySection>
+                          
+                          <PropertySection title="General Appearance" icon={Layers}>
+                            <PropertyRow label="Layer">
+                                <select 
+                                  className="w-full bg-[#121214] border border-white/5 text-[10px] text-white rounded-lg px-3 py-2 outline-none uppercase font-black cursor-pointer appearance-none hover:border-[#00bcd4]/30 transition-all" 
+                                  value={s.layer} 
+                                  onChange={(e) => onUpdateShape(s.id, { layer: e.target.value })}
+                                >
+                                    {Object.values(layers).map((l: LayerConfig) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                                </select>
+                            </PropertyRow>
+
+                            <PropertyRow label="Color">
+                              <div className="flex items-center gap-3">
+                                <div className="relative w-8 h-8 rounded-lg overflow-hidden bg-[#121214] border border-white/10 cursor-pointer shadow-lg active:scale-95 transition-transform shrink-0">
+                                  <div 
+                                    className="absolute inset-[2px] rounded-[6px] transition-all" 
+                                    style={{ backgroundColor: s.color || '#ffffff' }}
+                                  />
+                                  <input 
                                     type="color" 
                                     className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" 
-                                    onChange={(e) => handleShapeChange('color', e.target.value)} 
-                                />
-                             </div>
-                        </PropertyRow>
-                    </div>
-                  </PropertySection>
-                )}
+                                    value={s.color || '#ffffff'} 
+                                    onChange={(e) => onUpdateShape(s.id, { color: e.target.value })} 
+                                  />
+                                </div>
+                                <div className="flex flex-col gap-0">
+                                  <span className="text-[10px] font-black font-mono text-[#00bcd4] uppercase tracking-wider leading-none">
+                                      {s.color || 'BYLAYER'}
+                                  </span>
+                                  <span className="text-[7px] font-black text-neutral-600 uppercase tracking-widest mt-1">Entity Color</span>
+                                </div>
+                              </div>
+                            </PropertyRow>
 
-                {selectedShapes.length === 1 && (
-                  <>
-                    <PropertySection title="Entity Identity" icon={Info} defaultOpen={false}>
-                    <PropertyRow label="Entity Type" readOnly>
-                        <span className="text-[10px] text-[#00bcd4] font-black uppercase tracking-wider px-3">{selectedShapes[0].type}</span>
-                    </PropertyRow>
-                    <PropertyRow label="Handle" readOnly>
-                        <span className="text-[10px] text-neutral-500 font-mono px-3">{selectedShapes[0].id}</span>
-                    </PropertyRow>
-                  </PropertySection>
+                            <PropertyRow label="Linetype">
+                                <div className="flex items-center gap-3">
+                                    <select 
+                                      className="flex-1 bg-[#121214] border border-white/5 text-[10px] text-white rounded-lg px-3 py-2 outline-none uppercase font-black cursor-pointer appearance-none hover:border-[#00bcd4]/30 transition-all" 
+                                      value={s.lineType || 'continuous'} 
+                                      onChange={(e) => onUpdateShape(s.id, { lineType: e.target.value as LineType })}
+                                    >
+                                        {lineTypes.map(lt => <option key={lt.value} value={lt.value}>{lt.label}</option>)}
+                                    </select>
+                                    <div className="bg-white/5 rounded-lg px-2 py-2 flex items-center justify-center min-w-[70px]">
+                                      <LineTypePreview 
+                                          type={s.lineType || 'continuous'} 
+                                          color={s.color || '#00bcd4'}
+                                      />
+                                    </div>
+                                </div>
+                            </PropertyRow>
+                          </PropertySection>
+
+                          <PropertySection title="Geometric Data" icon={Target}>
+                            {renderGeometry(s)}
+                          </PropertySection>
+                        </>
+                      );
+                    } else {
+                      return (
+                        <>
+                          <PropertySection title="General appearance" icon={Layers}>
+                             <PropertyRow label="Global Color">
+                               <div className="flex items-center gap-3">
+                                 <div className="relative w-8 h-8 rounded-lg overflow-hidden bg-[#121214] border border-white/10 cursor-pointer shadow-lg active:scale-95 transition-transform shrink-0">
+                                    <div className="absolute inset-[2px] rounded-[6px]" style={{ backgroundColor: filtered.every(s => s.color === filtered[0].color) ? (filtered[0].color || '#ffffff') : '#444' }} />
+                                    <input 
+                                        type="color" 
+                                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" 
+                                        onChange={(e) => filtered.forEach(s => onUpdateShape(s.id, { color: e.target.value }))} 
+                                    />
+                                 </div>
+                                 <span className="text-[9px] text-neutral-500 font-black uppercase tracking-widest leading-tight">Batch color override</span>
+                               </div>
+                             </PropertyRow>
+                             <PropertyRow label="Global Layer">
+                                <select 
+                                    className="w-full bg-[#121214] border border-white/5 text-[10px] text-white rounded-lg px-3 py-2 outline-none uppercase font-black cursor-pointer appearance-none hover:border-[#00bcd4]/30 transition-all" 
+                                    value={filtered.every(s => s.layer === filtered[0].layer) ? filtered[0].layer : ''} 
+                                    onChange={(e) => filtered.forEach(s => onUpdateShape(s.id, { layer: e.target.value }))}
+                                >
+                                    <option value="" disabled>Mixed Layers</option>
+                                    {Object.values(layers).map((l: LayerConfig) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                                </select>
+                             </PropertyRow>
+                          </PropertySection>
+
+                          <PropertySection title="Geometric Data" icon={Target}>
+                            <div className="px-8 py-10 text-center flex flex-col items-center gap-3">
+                                <Box size={24} className="text-neutral-800" />
+                                <p className="text-[10px] text-neutral-600 font-black uppercase tracking-widest leading-relaxed">Multi-Selection Geometry editing restricted</p>
+                            </div>
+                          </PropertySection>
+                        </>
+                      );
+                    }
+                  })()}
                   </>
-                )}
-                
-                <PropertySection title="General Appearance" icon={Layers}>
-                  <PropertyRow label="Layer">
-                      <select 
-                        className="w-full bg-[#121214] border border-white/5 text-[10px] text-white rounded-lg px-3 py-2 outline-none uppercase font-black cursor-pointer appearance-none hover:border-[#00bcd4]/30 transition-all" 
-                        value={selectedShapes.length === 1 ? selectedShapes[0].layer : ''} 
-                        onChange={(e) => handleShapeChange('layer', e.target.value)}
-                      >
-                          {Object.values(layers).map((l: LayerConfig) => <option key={l.id} value={l.id}>{l.name}</option>)}
-                      </select>
-                  </PropertyRow>
-
-                  <PropertyRow label="Color">
-                    <div className="flex items-center gap-3">
-                      <div className="relative w-8 h-8 rounded-lg overflow-hidden bg-[#121214] border border-white/10 cursor-pointer shadow-lg active:scale-95 transition-transform shrink-0">
-                        <div 
-                          className="absolute inset-[2px] rounded-[6px] transition-all" 
-                          style={{ backgroundColor: selectedShapes.length === 1 ? selectedShapes[0].color || '#ffffff' : '#444' }}
-                        />
-                        <input 
-                          type="color" 
-                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" 
-                          value={selectedShapes.length === 1 ? selectedShapes[0].color || '#ffffff' : '#888888'} 
-                          onChange={(e) => handleShapeChange('color', e.target.value)} 
-                        />
-                      </div>
-                      <div className="flex flex-col gap-0">
-                        <span className="text-[10px] font-black font-mono text-[#00bcd4] uppercase tracking-wider leading-none">
-                            {selectedShapes.length === 1 ? selectedShapes[0].color : 'MIXED'}
-                        </span>
-                        <span className="text-[7px] font-black text-neutral-600 uppercase tracking-widest mt-1">Entity Color</span>
-                      </div>
+                ) : (
+                  <div className="flex flex-col animate-in slide-in-from-right duration-300">
+                    <div className="px-6 py-4 bg-[#00bcd4]/5 border-b border-[#00bcd4]/10">
+                        <h4 className="text-[10px] font-black text-[#00bcd4] uppercase tracking-[0.2em] mb-1">Selection Summary</h4>
+                        <p className="text-[8px] text-neutral-500 uppercase tracking-widest">{selectedShapes.length} objects currently selected</p>
                     </div>
-                  </PropertyRow>
 
-                  <PropertyRow label="Linetype">
-                      <div className="flex items-center gap-3">
-                          <select 
-                            className="flex-1 bg-[#121214] border border-white/5 text-[10px] text-white rounded-lg px-3 py-2 outline-none uppercase font-black cursor-pointer appearance-none hover:border-[#00bcd4]/30 transition-all" 
-                            value={selectedShapes.length === 1 ? selectedShapes[0].lineType || 'continuous' : ''} 
-                            onChange={(e) => handleShapeChange('lineType', e.target.value)}
-                          >
-                              {lineTypes.map(lt => <option key={lt.value} value={lt.value}>{lt.label}</option>)}
-                          </select>
-                          <div className="bg-white/5 rounded-lg px-2 py-2 flex items-center justify-center min-w-[70px]">
-                            <LineTypePreview 
-                                type={selectedShapes.length === 1 ? selectedShapes[0].lineType || 'continuous' : 'continuous'} 
-                                color={selectedShapes.length === 1 ? selectedShapes[0].color || '#00bcd4' : '#555'}
-                            />
-                          </div>
-                      </div>
-                  </PropertyRow>
+                    <div className="px-6 py-6 space-y-6">
+                        <div className="space-y-2">
+                           <span className="text-[8px] font-black text-neutral-600 uppercase tracking-widest pl-2">Object Types</span>
+                           <div className="grid grid-cols-2 gap-2">
+                              {Object.entries(selectedShapes.reduce((acc, s) => {
+                                  acc[s.type] = (acc[s.type] || 0) + 1;
+                                  return acc;
+                              }, {} as Record<string, number>)).map(([type, count]) => (
+                                  <button 
+                                      key={type} 
+                                      onClick={() => {
+                                          setFilterType(type);
+                                          setActivePanelTab('props');
+                                      }}
+                                      className="bg-[#121214] border border-white/5 rounded-xl px-4 py-3 flex items-center justify-between hover:bg-[#00bcd4]/10 hover:border-[#00bcd4]/30 transition-all active:scale-95 group/stat"
+                                  >
+                                      <span className="text-[9px] text-neutral-400 group-hover/stat:text-[#00bcd4] font-black uppercase tracking-tighter transition-colors">{type}</span>
+                                      <span className="text-[11px] text-[#00bcd4] font-black leading-none">{count}</span>
+                                  </button>
+                              ))}
+                           </div>
+                        </div>
+                        
+                        <div className="space-y-3 pt-4 border-t border-white/5">
+                            <div className="flex flex-col gap-1.5">
+                                <span className="text-[8px] font-black text-neutral-600 uppercase tracking-widest pl-2">Accumulated Data</span>
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between px-4 py-3 bg-[#121214] border border-white/5 rounded-xl shadow-inner">
+                                      <div className="flex items-center gap-2">
+                                          <Ruler size={14} className="text-neutral-600" />
+                                          <span className="text-[9px] text-neutral-500 font-black uppercase tracking-widest">Total Length</span>
+                                      </div>
+                                      <span className="text-[11px] text-white font-mono">{formatLength(selectedShapes.reduce((sum, s) => sum + (calculateShapeLength(s) || 0), 0), settings)}</span>
+                                  </div>
+                                  
+                                  {selectedShapes.some(s => s.type === 'rect' || (s as any).closed) && (
+                                      <div className="flex items-center justify-between px-4 py-3 bg-[#00bcd4]/5 border border-[#00bcd4]/10 rounded-xl shadow-inner">
+                                          <div className="flex items-center gap-2">
+                                              <Maximize2 size={14} className="text-[#00bcd4]" />
+                                              <span className="text-[9px] text-[#00bcd4] font-black uppercase tracking-widest">Cumulative Area</span>
+                                          </div>
+                                          <span className="text-[11px] text-[#00bcd4] font-mono">
+                                              {formatLength(selectedShapes.reduce((sum, s) => {
+                                                  if (s.type === 'rect') return sum + (s.width * s.height);
+                                                  if (s.type === 'circle') return sum + (Math.PI * s.radius * s.radius);
+                                                  if ((s as any).closed && (s as any).points) return sum + calculateArea((s as any).points);
+                                                  return sum;
+                                              }, 0), settings)}²
+                                          </span>
+                                      </div>
+                                  )}
+                                </div>
+                            </div>
+                        </div>
 
-                  <PropertyRow label="Lineweight">
-                      <select 
-                        className="w-full bg-[#121214] border border-white/5 text-[10px] text-white rounded-lg px-3 py-2 outline-none uppercase font-black cursor-pointer" 
-                        value={selectedShapes.length === 1 ? (selectedShapes[0].thickness !== undefined ? parseFloat(selectedShapes[0].thickness.toString()).toFixed(2) : "0.00") : ''} 
-                        onChange={(e) => handleShapeChange('thickness', parseFloat(e.target.value))}
-                      >
-                          {["0.00", "0.05", "0.25", "0.50", "1.00", "2.11"].map(v => <option key={v} value={v}>{v} mm</option>)}
-                      </select>
-                  </PropertyRow>
-                </PropertySection>
-
-                <PropertySection title="Geometric Data" icon={Target}>
-                   {selectedShapes.length === 1 ? renderGeometry(selectedShapes[0]) : (
-                     <div className="px-8 py-10 text-center flex flex-col items-center gap-3">
-                        <Box size={24} className="text-neutral-800" />
-                        <p className="text-[10px] text-neutral-600 font-black uppercase tracking-widest leading-relaxed">Multi-Selection Geometry editing restricted</p>
-                     </div>
-                   )}
-                </PropertySection>
+                        <div className="pt-6 border-t border-white/5 space-y-4">
+                             <div className="flex items-center gap-2 pl-2">
+                                <FileEdit size={12} className="text-neutral-500" />
+                                <span className="text-[8px] font-black text-neutral-600 uppercase tracking-widest">Bulk Actions</span>
+                             </div>
+                             <div className="space-y-4">
+                                <PropertyRow label="Set All Layers">
+                                    <select 
+                                        className="w-full bg-[#121214] border border-white/5 text-[10px] text-white rounded-lg px-3 py-2 outline-none uppercase font-black cursor-pointer appearance-none hover:border-[#00bcd4]/30 transition-all shadow-inner" 
+                                        value="" 
+                                        onChange={(e) => selectedShapes.forEach(s => onUpdateShape(s.id, { layer: e.target.value }))}
+                                    >
+                                        <option value="" disabled>Select Layer...</option>
+                                        {Object.values(layers).map((l: LayerConfig) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                                    </select>
+                                </PropertyRow>
+                                <PropertyRow label="Set All Colors">
+                                    <div className="flex items-center gap-3">
+                                      <div className="relative w-8 h-8 rounded-lg overflow-hidden bg-[#121214] border border-white/10 cursor-pointer shadow-lg active:scale-95 transition-transform shrink-0">
+                                          <div className="absolute inset-[2px] rounded-[6px]" style={{ backgroundColor: selectedShapes.every(s => s.color === selectedShapes[0].color) ? (selectedShapes[0].color || '#ffffff') : '#444' }} />
+                                          <input 
+                                              type="color" 
+                                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" 
+                                              onChange={(e) => selectedShapes.forEach(s => onUpdateShape(s.id, { color: e.target.value }))} 
+                                          />
+                                      </div>
+                                      <span className="text-[9px] text-neutral-500 font-black uppercase tracking-widest">Global Color Override</span>
+                                    </div>
+                                </PropertyRow>
+                             </div>
+                        </div>
+                    </div>
+                  </div>
+                )}
               </div>
           ) : (
               <div className="flex flex-col py-20 px-8 items-center text-center">

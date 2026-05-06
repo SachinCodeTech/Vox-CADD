@@ -16,6 +16,7 @@
     "@mlightcad/libredwg-web": "^0.7.1",
     "@tailwindcss/vite": "^4.2.4",
     "dxf-parser": "^1.1.2",
+    "firebase": "^12.12.1",
     "idb-keyval": "^6.2.2",
     "lucide-react": "^0.561.0",
     "motion": "^12.38.0",
@@ -26,6 +27,7 @@
     "workbox-window": "^7.4.0"
   },
   "devDependencies": {
+    "@firebase/eslint-plugin-security-rules": "^0.0.2",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",

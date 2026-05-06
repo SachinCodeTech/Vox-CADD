@@ -32,17 +32,18 @@ import {
   RotateCommand, ScaleCommand, MirrorCommand, CopyCommand,
   ExtendCommand, ExplodeCommand,
   RayCommand, XLineCommand,
-  HatchCommand, LeaderCommand, PanCommand, OffsetCommand, TrimCommand, FilletCommand, EllipseCommand, PolygonCommand, MatchPropertiesCommand,
+  HatchCommand, LeaderCommand, PanCommand, OffsetCommand, TrimCommand, FilletCommand, ChamferCommand, EllipseCommand, PolygonCommand, MatchPropertiesCommand,
   DonutCommand, PointCommand,
   SelectAllCommand, CopyClipCommand, CutClipCommand, PasteClipCommand, SplineCommand, SketchCommand, StretchCommand, SelectCommand,
   ArrayCommand, BlockCommand, InsertCommand, FilterCommand, FindCommand, ViewportCommand, LayoutCommand, GripEditCommand, ImportCommand
 } from '../services/commandEngine';
 import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType, BlockDefinition, LayoutDefinition, LayoutViewport, LineTypeDefinition } from '../types';
-import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive, AlertTriangle, Cpu } from 'lucide-react';
+import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive, AlertTriangle, Cpu, Move, Copy, Maximize2, FlipHorizontal, Trash2, History } from 'lucide-react';
 
 import VoxIcon from './VoxIcon';
 import ImportSummaryDialog from './ImportSummaryDialog';
 import { storageService } from '../services/storageService';
+import { trackFileMetadata, syncUserMetadata, onAuthChange, logAppEvent } from '../services/firebaseService';
 
 const INITIAL_SETTINGS: AppSettings = {
   ortho: true, snap: true, grid: true,
@@ -91,8 +92,8 @@ const INITIAL_SETTINGS: AppSettings = {
 
 const INITIAL_VIEW: ViewState = { scale: 0.05, originX: 0, originY: 0 };
 const INITIAL_LAYERS_CONFIG: Record<string, LayerConfig> = { 
-  '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, color: '#FF0000', thickness: 0.25, lineType: 'continuous' },
-  'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, color: '#666666', thickness: 0.1, lineType: 'continuous' }
+  '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FF0000', thickness: 0.25, lineType: 'continuous' },
+  'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, plottable: false, color: '#666666', thickness: 0.1, lineType: 'continuous' }
 };
 
 export type ToolbarCategory = 'Draw' | 'Modify' | 'Anno' | 'View' | 'Tools' | 'History' | 'Edit';
@@ -136,6 +137,13 @@ const App: React.FC = () => {
     type?: 'prompt' | 'confirm';
     onConfirm: (val: string) => void;
   } | null>(null);
+  const [promptValue, setPromptValue] = useState("");
+
+  useEffect(() => {
+    if (promptDialog) {
+      setPromptValue(promptDialog.initialValue || "");
+    }
+  }, [promptDialog]);
   const fileNameBtnRef = useRef<HTMLButtonElement>(null);
 
   const layoutContextMenuRef = useRef<HTMLDivElement>(null);
@@ -165,6 +173,7 @@ const App: React.FC = () => {
   });
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [objectContextMenu, setObjectContextMenu] = useState<{ x: number, y: number } | null>(null);
   const [commandInput, setCommandInput] = useState('');
   const [isLiveActive, setIsLiveActive] = useState(false);
   const [commandPrompt, setCommandPrompt] = useState<string>("COMMAND:");
@@ -181,19 +190,165 @@ const App: React.FC = () => {
 
   const [loadingFile, setLoadingFile] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState<string>("");
+  const [isPlotting, setIsPlotting] = useState(false);
+  const [pendingCapture, setPendingCapture] = useState<{type: 'image' | 'share', payload?: any} | null>(null);
 
-  const withTimeout = useCallback(<T,>(promise: Promise<T>, ms: number = 20000): Promise<T> => {
-    return Promise.race([
-      promise,
-      new Promise<T>((_, reject) => setTimeout(() => reject(new Error("OPERATION_TIMEOUT")), ms))
-    ]);
-  }, []);
+  useEffect(() => {
+    if (pendingCapture && isPlotting) {
+        const handleCapture = async () => {
+            const capture = pendingCapture;
+            setPendingCapture(null); // Clear immediately to avoid loops
+            
+            // Wait a tiny bit for the reactive render to complete
+            await new Promise(r => setTimeout(r, 50));
+            
+            if (canvasHandleRef.current) {
+                const dataUrl = canvasHandleRef.current.captureImage({ isPlotting: true });
+                
+                if (capture.type === 'image') {
+                    const link = document.createElement('a');
+                    link.href = dataUrl;
+                    link.download = currentFileName.replace(/\.(vox|dxf)$/i, '') + '.png';
+                    link.click();
+                    setLogMessage("IMAGE_EXPORT_COMPLETE");
+                } else if (capture.type === 'share') {
+                    const payload = capture.payload;
+                    setLoadingFile(true);
+                    setLoadingStatus("GENERATING EXPORT...");
+
+                    try {
+                        const isDxfExport = payload === 'dxf';
+                        const isPdfExport = payload === 'pdf';
+                        const finalExt = isPdfExport ? '.pdf' : (isDxfExport ? '.dxf' : '.vox');
+                        let mimeType = 'application/octet-stream';
+                        
+                        if (isDxfExport) mimeType = 'application/dxf';
+                        else if (isPdfExport) mimeType = 'application/pdf';
+                        
+                        setLoadingStatus(`COMPILING ${finalExt.substring(1).toUpperCase()} DATA...`);
+                        
+                        let content: string | Blob;
+                        if (isPdfExport) {
+                            const res = await fetch(dataUrl);
+                            content = await res.blob();
+                        } else if (isDxfExport) {
+                            content = shapesToDXF(Object.values(layers).flat() as Shape[], layerConfig, settings, blocks);
+                        } else {
+                            content = shapesToVox(Object.values(layers).flat() as Shape[], layerConfig, settings, lineTypes, blocks, layouts);
+                        }
+                        
+                        const fileName = (currentFileName.replace(/\.[^/.]+$/, "") + finalExt).replace(/[^a-zA-Z0-9.\-_]/g, '_');
+                        
+                        // Capacitor Logic
+                        if (Capacitor.isNativePlatform()) {
+                            try {
+                                const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType });
+                                const reader = new FileReader();
+                                const base64Promise = new Promise<string>((resolve) => {
+                                    reader.onloadend = () => resolve(reader.result as string);
+                                    reader.readAsDataURL(blob);
+                                });
+                                const base64data = await base64Promise;
+                                const savedFile = await Filesystem.writeFile({
+                                    path: fileName,
+                                    data: base64data,
+                                    directory: Directory.Cache
+                                });
+                                await CapacitorShare.share({
+                                    title: `VoxCADD: ${currentFileName}`,
+                                    text: `Project: ${currentFileName}`,
+                                    url: savedFile.uri,
+                                    dialogTitle: 'Share Document'
+                                });
+                                setLogMessage(`SUCCESS: ${fileName.toUpperCase()} SHARED NATIVELY`);
+                                setLoadingFile(false);
+                                setLoadingStatus("");
+                                setIsPlotting(false);
+                                return;
+                            } catch (capErr) {
+                                console.warn("Native share failed", capErr);
+                            }
+                        }
+
+                        const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType });
+                        const shareData: ShareData = {
+                            title: `VoxCADD: ${currentFileName}`,
+                            text: `Check out this CAD drawing: ${currentFileName}`,
+                            url: window.location.href
+                        };
+
+                        if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([blob], fileName, { type: mimeType })] })) {
+                            try {
+                                const file = new File([blob], fileName, { type: mimeType });
+                                await navigator.share({ ...shareData, files: [file] });
+                                setLogMessage("SHARE_SUCCESS");
+                            } catch (e) {
+                                console.error("Share failed", e);
+                                // Fallback to download if sharing failed or cancelled
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = fileName;
+                                a.click();
+                            }
+                        } else {
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = fileName;
+                            a.click();
+                            setLogMessage("DOWNLOAD_STARTED");
+                        }
+                    } catch (err: any) {
+                        setLogMessage(`ERR: ${err.message}`);
+                    } finally {
+                        setLoadingFile(false);
+                        setLoadingStatus("");
+                    }
+                }
+            }
+            setIsPlotting(false);
+        };
+        handleCapture();
+    }
+  }, [pendingCapture, isPlotting, currentFileName, layers, layerConfig, settings, blocks, lineTypes, layouts]);
   const setLogMessage = useCallback((msg: string | null) => {
     _setLogMessage(msg);
     if (msg) setCommandHistory(prev => {
         if (prev[prev.length - 1] === msg) return prev;
         return [...prev.slice(-50), msg];
     });
+  }, []);
+
+  // Firebase Init & Metadata Sync
+  useEffect(() => {
+    const unsubscribe = onAuthChange((user) => {
+      if (user) {
+        syncUserMetadata({ 
+           theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light',
+           deviceInfo: navigator.userAgent.substring(0, 50)
+        });
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Sync settings metadata when units or important state changes
+  useEffect(() => {
+    syncUserMetadata({ theme: settings.units });
+  }, [settings.units]);
+
+  const onFilterType = useCallback((type: string) => {
+    const newSelectedIds = selectedIdsRef.current.filter(id => {
+      const layers = layersRef.current as Record<string, Shape[]>;
+      for (const layer of Object.values(layers)) {
+         const shape = layer.find(s => s.id === id);
+         if (shape) return shape.type === type;
+      }
+      return false;
+    });
+    setSelectedIds(newSelectedIds);
+    setLogMessage(`FILTERED_BY: ${type.toUpperCase()} (${newSelectedIds.length})`);
   }, []);
   const [isCommandActive, setIsCommandActive] = useState(false);
   const [activeCommandName, setActiveCommandName] = useState<string | undefined>(undefined);
@@ -444,6 +599,14 @@ const App: React.FC = () => {
   const liveSessionRef = useRef<any>(null);
   const canvasHandleRef = useRef<CADCanvasHandle>(null);
 
+  const [viewHistory, setViewHistory] = useState<ViewState[]>([]);
+  const saveToViewHistory = useCallback(() => {
+    const current = tabViewsRef.current[activeTabRef.current];
+    if (current) {
+      setViewHistory(prev => [...prev.slice(-10), { ...current }]);
+    }
+  }, []);
+
   const tabViewsRef = useRef(tabViews);
   const activeTabRef = useRef(activeTab);
   const blocksRef = useRef(blocks);
@@ -600,16 +763,43 @@ const App: React.FC = () => {
 
         if (project) {
             // Normalize entities into internal layers map
-            const layerMap: Record<string, Shape[]> = { '0': [], 'defpoints': [] };
+            const layerMap: Record<string, Shape[]> = {};
+            const finalLayerConfig = { ...project.layers };
+
+            // Initialize all defined layers
+            Object.keys(finalLayerConfig).forEach(id => {
+                layerMap[id] = [];
+            });
+
+            // Ensure standard default layers exist
+            if (!finalLayerConfig['0']) {
+                finalLayerConfig['0'] = { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' };
+                layerMap['0'] = [];
+            }
+            if (!finalLayerConfig['defpoints']) {
+                finalLayerConfig['defpoints'] = { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, plottable: false, color: '#666666', thickness: 0.1, lineType: 'continuous' };
+                layerMap['defpoints'] = [];
+            }
+
+            // Map entities and discover any missing layers
             project.entities.forEach((s: Shape) => {
                 const l = s.layer || '0';
-                if (!layerMap[l]) layerMap[l] = [];
+                if (!layerMap[l]) {
+                    layerMap[l] = [];
+                    if (!finalLayerConfig[l]) {
+                        finalLayerConfig[l] = { 
+                            id: l, name: l, visible: true, locked: false, frozen: false, 
+                            plottable: l.toLowerCase() !== 'defpoints', 
+                            color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' 
+                        };
+                    }
+                }
                 layerMap[l].push(s);
             });
 
             // Update state
             setLayers(layerMap);
-            setLayerConfig(project.layers);
+            setLayerConfig(finalLayerConfig);
             setLineTypes(project.lineTypes || { 'continuous': { name: 'continuous', description: 'Solid line', pattern: [] } });
             setSettings(project.settings);
             setBlocks(project.blocks || {});
@@ -687,6 +877,17 @@ const App: React.FC = () => {
   const handleAction = async (act: string, payload?: any) => {
     switch(act) {
       case 'undo': undo(); break;
+      case 'redo': {
+        if (redoStack.length > 0) {
+            const next = redoStack[0];
+            setRedoStack(prev => prev.slice(1));
+            setHistory(prev => [...prev, JSON.parse(JSON.stringify(layersRef.current))]);
+            setLayers(next);
+            setLogMessage("REDO_ACTION_SUCCESS");
+            if(navigator.vibrate) navigator.vibrate(10);
+        }
+        break;
+      }
       case 'cancel': 
         engineRef.current?.cancel(); 
         setCommandInput(''); 
@@ -725,6 +926,7 @@ const App: React.FC = () => {
       case 'togglePrivacy': setActivePanel(activePanel === 'privacy' ? 'none' : 'privacy'); break;
       case 'zoomExtents':
       case 'zoomAll': {
+        saveToViewHistory();
         const limits = act === 'zoomAll' ? { min: settingsRef.current.limitsMin, max: settingsRef.current.limitsMax } : undefined;
         const bounds = getAllShapesBounds(layersRef.current, blocksRef.current, limits);
         if (bounds && canvasHandleRef.current) {
@@ -735,7 +937,7 @@ const App: React.FC = () => {
             
             const canvas = canvasHandleRef.current.getCanvasSize();
             const ts_scale = settingsRef.current.drawingScale;
-            const padding = 1.15;
+            const padding = 1.25; // Slightly more padding
             
             const scale = Math.min(canvas.width / (w * padding * ts_scale), canvas.height / (h * padding * ts_scale));
             
@@ -749,6 +951,7 @@ const App: React.FC = () => {
       }
       case 'zoomIn': 
       case 'zoomOut': {
+        saveToViewHistory();
         const factor = act === 'zoomIn' ? 1.5 : 1 / 1.5;
         setView(v => {
             const canvasSize = canvasHandleRef.current?.getCanvasSize() || { width: 800, height: 600 };
@@ -767,6 +970,17 @@ const App: React.FC = () => {
                 originY: cy * newTs
             };
         });
+        break;
+      }
+      case 'zoomPrevious': {
+        if (viewHistory.length > 0) {
+            const prevView = viewHistory[viewHistory.length - 1];
+            setView(prevView as any);
+            setViewHistory(prev => prev.slice(0, -1));
+            setLogMessage("VOX_Z-P: PREVIOUS_VIEW_LOADED");
+        } else {
+            setLogMessage("VOX_Z-P: NO_HISTORY_DATA");
+        }
         break;
       }
       case 'setUnits': setSettings(s => ({ ...s, units: payload })); break;
@@ -940,12 +1154,42 @@ const App: React.FC = () => {
         break;
       }
 
-      case 'save':
+      case 'save': {
+        if (loadingFile) return;
+        setLoadingFile(true);
+        setLoadingStatus("SAVING TO STORAGE...");
+
+        setTimeout(async () => {
+          try {
+            commitToHistory();
+            const stateToSave = {
+                layers: JSON.parse(JSON.stringify(layersRef.current)),
+                layerConfig: layerConfigRef.current,
+                settings: settingsRef.current,
+                lineTypes: lineTypesRef.current,
+                blocks: blocksRef.current,
+                layouts: layoutsRef.current,
+                fileName: currentFileName
+            };
+            await storageService.saveLarge(`${STORAGE_PREFIX}${currentFileName}`, stateToSave);
+            updateRecentFiles(currentFileName);
+            trackFileMetadata(currentFileName, JSON.stringify(stateToSave).length);
+            logAppEvent('file_save', { name: currentFileName });
+            setLogMessage(`SUCCESS: ${currentFileName} SAVED INTERNALLY`);
+          } catch (e) {
+            setLogMessage("ERR: STORAGE_SAVE_FAILED");
+          } finally {
+            setLoadingFile(false);
+            setLoadingStatus("");
+          }
+        }, 50);
+        break;
+      }
       case 'saveAs':
       case 'saveas':
         if (loadingFile) return;
         setLoadingFile(true);
-        setLoadingStatus("PREPARING DATA...");
+        setLoadingStatus("PREPARING EXPORT...");
 
         setTimeout(async () => {
           try {
@@ -1081,147 +1325,65 @@ const App: React.FC = () => {
         break;
       case 'saveImage': {
         if (canvasHandleRef.current) {
-            const dataUrl = canvasHandleRef.current.captureImage();
-            const link = document.createElement('a');
-            link.href = dataUrl;
-            link.download = currentFileName.replace(/\.(vox|dxf)$/i, '') + '.png';
-            link.click();
-            setLogMessage("IMAGE_EXPORT_COMPLETE");
+            setIsPlotting(true);
+            setPendingCapture({ type: 'image' });
         }
         break;
       }
       case 'share': {
-        if (loadingFile) return; 
+        if (loadingFile) return;
+        setIsPlotting(true);
+        setPendingCapture({ type: 'share', payload });
+        break;
+      }
+      case 'publish': {
+        if (loadingFile) return;
         setLoadingFile(true);
-        setLoadingStatus("GENERATING EXPORT...");
+        setLoadingStatus("PUBLISHING TO GLOBAL STORAGE...");
         
-        const loadingTimeout = setTimeout(() => {
-          if (loadingFile) {
-            setLoadingFile(false);
-            setLogMessage("ERR: OPERATION_TIMEOUT");
-          }
-        }, 60000); // 60s for share
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
         try {
-          const isDxfExport = payload === 'dxf';
-          const finalExt = isDxfExport ? '.dxf' : '.vox';
-          setLoadingStatus(`COMPILING ${finalExt.substring(1).toUpperCase()} DATA...`);
-          
-          const content = isDxfExport 
-            ? shapesToDXF(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current, blocksRef.current) 
-            : shapesToVox(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current, lineTypesRef.current, blocksRef.current, layoutsRef.current);
-          
-          const fileName = (currentFileName.replace(/\.[^/.]+$/, "") + finalExt).replace(/[^a-zA-Z0-9.\-_]/g, '_');
-          const blob = new Blob([content], { type: isDxfExport ? 'application/dxf' : 'application/octet-stream' });
-          
-          const shareData = {
-            title: 'VoxCADD File',
-            text: `File: ${currentFileName} shared from VoxCadd Professional`,
-            url: window.location.href
-          };
-
-          const executeDownload = () => {
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = fileName;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            setLogMessage("INFO: FILE_DOWNLOADED (SHARE_FALLBACK)");
-          };
-
-          setLoadingStatus("SHARE_INIT...");
-
-          // 1. TRY NATIVE SHARE (Capacitor)
-          if (Capacitor.isNativePlatform()) {
-            try {
-               setLoadingStatus("PREPARING NATIVE FILE...");
-               const base64 = await blobToBase64(blob);
-               const tempPath = `vox_share_${Date.now()}_${fileName}`;
-               
-               // Save to local cache
-               await Filesystem.writeFile({
-                 path: tempPath,
-                 data: base64,
-                 directory: Directory.Cache
-               });
-
-               // Get absolute URI for sharing
-               const fileUriInfo = await Filesystem.getUri({
-                 path: tempPath,
-                 directory: Directory.Cache
-               });
-
-               setLoadingStatus("OPENING SHARE DIALOG...");
-               await CapacitorShare.share({
-                 title: shareData.title,
-                 text: shareData.text,
-                 url: shareData.url, // includes link too
-                 files: [fileUriInfo.uri],
-                 dialogTitle: "Share VoxCADD File"
-               });
-               
-               setLogMessage("INFO: NATIVE_SHARE_COMPLETE");
-               setLoadingFile(false);
-               clearTimeout(loadingTimeout);
-               return;
-            } catch (nativeErr: any) {
-               console.error("Native share failed", nativeErr);
-               // fall through to web share if native fails for any reason
+            const content = shapesToVox(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current, lineTypesRef.current, blocksRef.current, layoutsRef.current);
+            const blob = new Blob([content], { type: 'application/octet-stream' });
+            const formData = new FormData();
+            formData.append('file', blob, currentFileName);
+            
+            setLoadingStatus("UPLOADING TO SECURE_NET...");
+            const response = await fetch('https://file.io/?expires=1d', {
+                method: 'POST',
+                body: formData,
+                signal: controller.signal
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                const link = result.link;
+                setPromptDialog({
+                    title: 'Global Share Link',
+                    message: 'Copy this link to share your drawing. It will expire in 24 hours or after first download.',
+                    initialValue: link,
+                    type: 'prompt',
+                    onConfirm: (val) => {
+                        navigator.clipboard.writeText(val);
+                        setLogMessage("SUCCESS: SHARE_LINK_COPIED");
+                    }
+                });
+            } else {
+                throw new Error("UPLOAD_FAILED");
             }
-          }
-
-          // 2. TRY WEB SHARE API
-          if (navigator.share) {
-              const file = new File([blob], fileName, { type: blob.type });
-              if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                try {
-                   await navigator.share({ ...shareData, files: [file] });
-                   setLogMessage(`SUCCESS: ${fileName.toUpperCase()}_SHARED`);
-                   setLoadingFile(false);
-                   clearTimeout(loadingTimeout);
-                   return;
-                } catch (se: any) {
-                  if (se.name === 'AbortError') {
-                    setLogMessage("INFO: SHARE_CANCELLED");
-                    setLoadingFile(false);
-                    clearTimeout(loadingTimeout);
-                    return;
-                  }
-                  // try simple link share if file share fails
-                  try {
-                    await navigator.share(shareData);
-                    setLogMessage("INFO: LINK_SHARED");
-                  } catch (e) { /* ignore */ }
-                }
-              } else {
-                 try {
-                    await navigator.share(shareData);
-                    setLogMessage("INFO: LINK_SHARED (FILE_DOWNLOADING)");
-                 } catch (e) { /* ignore */ }
-                 executeDownload();
-              }
-          } else {
-              // 3. FINAL FALLBACK: Download + Clipboard
-              setLogMessage("INFO: SHARING_NOT_SUPP_DOWNLOADING");
-              try {
-                await navigator.clipboard.writeText(window.location.href);
-                setLogMessage("INFO: FILE_DOWNLOADED. LINK_COPIED.");
-              } catch (e) { 
-                setLogMessage("INFO: FILE_DOWNLOADED.");
-              }
-              executeDownload();
-          }
-
-        } catch (err: any) {
-          console.error("Share system error:", err);
-          setLogMessage(`ERR: SHARE_FAILED (${err.message})`);
+        } catch (e: any) {
+            if (e.name === 'AbortError') {
+                setLogMessage("ERR: UPLOAD_TIMEOUT");
+            } else {
+                setLogMessage("ERR: GLOBAL_PUBLISH_FAILED");
+            }
+            console.error("Publish error:", e);
         } finally {
-          clearTimeout(loadingTimeout);
-          setLoadingFile(false);
-          setLoadingStatus("");
+            clearTimeout(timeoutId);
+            setLoadingFile(false);
+            setLoadingStatus("");
         }
         break;
       }
@@ -1251,27 +1413,14 @@ const App: React.FC = () => {
                     e.preventDefault();
                     if (e.shiftKey) { 
                         // Redo logic
-                        if (redoStack.length > 0) {
-                            const next = redoStack[0];
-                            setRedoStack(prev => prev.slice(1));
-                            setHistory(prev => [...prev, layers]);
-                            setLayers(next);
-                            setLogMessage("REDO_ACTION_SUCCESS");
-                        }
+                        handleAction('redo');
                     }
                     else handleAction('undo');
                     break;
                 case 'y':
                     if (!e.shiftKey) {
                         e.preventDefault();
-                        // Redo logic
-                        if (redoStack.length > 0) {
-                            const next = redoStack[0];
-                            setRedoStack(prev => prev.slice(1));
-                            setHistory(prev => [...prev, layers]);
-                            setLayers(next);
-                            setLogMessage("REDO_ACTION_SUCCESS");
-                        }
+                        handleAction('redo');
                     }
                     break;
             }
@@ -1418,6 +1567,7 @@ const App: React.FC = () => {
       'mi': MirrorCommand, 'mirror': MirrorCommand, 'co': CopyCommand, 'copy': CopyCommand,
       'ex': ExtendCommand, 'extend': ExtendCommand, 'x': ExplodeCommand, 'explode': ExplodeCommand,
       'f': FilletCommand, 'fillet': FilletCommand,
+      'cha': ChamferCommand, 'chamfer': ChamferCommand,
       'ray': RayCommand, 'xl': XLineCommand, 'xline': XLineCommand,
       'ar': ArrayCommand, 'array': ArrayCommand,
       'b': BlockCommand, 'block': BlockCommand,
@@ -1565,6 +1715,8 @@ const App: React.FC = () => {
           const layout = layoutsRef.current.find(l => l.id === activeTabRef.current);
           return layout?.viewports.find(v => v.id === activeViewportIdRef.current);
         },
+        saveToViewHistory,
+        getViewHistory: () => viewHistory,
         onFinish: () => { 
           setPreviewShapes(null); 
           setCommandPrompt("COMMAND:"); 
@@ -1726,7 +1878,7 @@ const App: React.FC = () => {
     }
   };
 
-  const onCanvasClick = (x: number, y: number, snapped: boolean) => {
+  const onCanvasClick = (x: number, y: number, snapped: boolean, shiftKey: boolean = false) => {
     // If no command is active and we have a selection, check for grips first
     if (engineRef.current && !engineRef.current.active && selectedIds.length > 0) {
         const ts = view.scale * settings.drawingScale;
@@ -1744,7 +1896,7 @@ const App: React.FC = () => {
         }
     }
 
-    if(engineRef.current) engineRef.current.click({x,y}, snapped);
+    if(engineRef.current) engineRef.current.click({x,y}, snapped, shiftKey);
   };
 
   const handleLiveToggle = useCallback(async () => {
@@ -1897,7 +2049,7 @@ const App: React.FC = () => {
           </button>
       </div>
 
-      <div className="h-7 bg-black border-b border-white/5 flex items-center px-4 z-[99] shrink-0 gap-0 overflow-x-auto no-scrollbar scroll-smooth">
+      <div className="h-9 bg-black border-b border-white/5 flex items-center px-4 z-[99] shrink-0 gap-0 overflow-x-auto no-scrollbar scroll-smooth">
           {['FILE', 'EDIT', 'VIEW', 'DRAW', 'MODIFY', 'ANNO', 'TOOLS'].map((item, index) => {
             const isSelected = 
               (item === 'FILE' && (activePanel === 'drawing_props' || activePanel === 'file')) ||
@@ -1967,7 +2119,7 @@ const App: React.FC = () => {
             activeViewportId={activeViewportId}
             onViewportToggle={handleViewportToggle} 
             onClick={onCanvasClick} 
-            onMouseMove={(x,y,s) => { if(engineRef.current) engineRef.current.move({x,y}, s); }} 
+            onMouseMove={(x,y,s,shift) => { if(engineRef.current) engineRef.current.move({x,y}, s, shift); }} 
             selectedIds={selectedIds} 
             onSelectionChange={(ids, additive) => {
               if (additive) {
@@ -1993,6 +2145,7 @@ const App: React.FC = () => {
             isAiThinking={isAiThinking}
             lastAiCommandTime={lastAiCommandTime}
             setLogMessage={setLogMessage}
+            onObjectContextMenu={(x, y) => setObjectContextMenu({ x, y })}
           />
         </motion.div>
         
@@ -2040,7 +2193,7 @@ const App: React.FC = () => {
                   onUpdateLayer={(id, upd) => setLayerConfig(prev => ({...prev, [id]: {...prev[id], ...upd} }))} 
                   onAddLayer={(name) => { 
                       const id = generateId(); 
-                      setLayerConfig(prev => ({...prev, [id]: { id, name, visible: true, locked: false, frozen: false, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' }})); 
+                      setLayerConfig(prev => ({...prev, [id]: { id, name, visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' }})); 
                       setLayers(prev => ({ ...prev, [id]: [] }));
                   }} 
                   onRemoveLayer={(id) => {
@@ -2086,7 +2239,15 @@ const App: React.FC = () => {
                   exit={{ scale: 0.9, opacity: 0, y: 20 }}
                   className="pointer-events-auto"
                 >
-                  <PropertiesPanel selectedShapes={(Object.values(layers).flat() as Shape[]).filter(s => selectedIds.includes(s.id))} onUpdateShape={(id, upd) => setLayers(prev => { const n = {...prev}; Object.keys(n).forEach(l => n[l] = n[l].map(s => s.id === id ? {...s, ...upd} : s)); return n; })} layers={layerConfig} settings={settings} onUpdateSettings={(upd) => setSettings(s => ({...s, ...upd}))} onCommand={executeCommand} onClose={() => setActivePanel('none')} />
+                  <PropertiesPanel 
+                    selectedShapes={(Object.values(layers).flat() as Shape[]).filter(s => selectedIds.includes(s.id))} 
+                    onUpdateShape={(id, upd) => setLayers(prev => { const n = {...prev}; Object.keys(n).forEach(l => n[l] = n[l].map(s => s.id === id ? {...s, ...upd} : s)); return n; })} 
+                    layers={layerConfig} 
+                    settings={settings} 
+                    onUpdateSettings={(upd) => setSettings(s => ({...s, ...upd}))} 
+                    onCommand={executeCommand} 
+                    onClose={() => setActivePanel('none')} 
+                  />
                 </motion.div>
              </motion.div>
           )}
@@ -2247,6 +2408,7 @@ const App: React.FC = () => {
                 <NewFileDialog onSelect={(cfg) => { 
                     const name = cfg.name + '.vox';
                     setLayers({ '0': [], 'defpoints': [] }); 
+                    setLayerConfig(INITIAL_LAYERS_CONFIG);
                     setSettings(s => ({
                       ...s, 
                       units: cfg.units, 
@@ -2411,6 +2573,49 @@ const App: React.FC = () => {
           ))}
         </div>
       </div>
+
+      {objectContextMenu && (
+        <>
+          <div className="fixed inset-0 z-[1050]" onClick={() => setObjectContextMenu(null)} />
+          <div 
+            className="fixed bg-[#0a0a0c]/98 backdrop-blur-2xl border border-white/10 rounded-2xl p-2 flex flex-col gap-1 shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[1100] animate-in zoom-in-95 fade-in slide-in-from-top-4 duration-200 min-w-[180px]"
+            style={{ 
+              left: Math.max(10, Math.min(objectContextMenu.x, window.innerWidth - 190)), 
+              top: Math.max(10, Math.min(objectContextMenu.y, window.innerHeight - 300))
+            }}
+          >
+            <div className="px-3 py-1.5 border-b border-white/5 mb-1 flex items-center justify-between">
+              <div className="text-[8px] font-black uppercase text-cyan-500 tracking-widest">Selection Menu</div>
+              <div className="text-[7px] text-neutral-500 font-mono">{selectedIds.length} ITEMS</div>
+            </div>
+            
+            <button onClick={() => { executeCommand('m'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <Move className="text-cyan-500" size={14} /> Move
+            </button>
+            <button onClick={() => { executeCommand('co'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <Copy className="text-cyan-500" size={14} /> Copy
+            </button>
+            <button onClick={() => { executeCommand('ro'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <RotateCw className="text-cyan-500" size={14} /> Rotate
+            </button>
+            <button onClick={() => { executeCommand('sc'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <Maximize2 className="text-cyan-500" size={14} /> Scale
+            </button>
+            <button onClick={() => { executeCommand('mi'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <FlipHorizontal className="text-cyan-500" size={14} /> Mirror
+            </button>
+            
+            <div className="h-px bg-white/5 my-1" />
+            
+            <button onClick={() => { executeCommand('e'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-red-500/80 hover:bg-red-500 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <Trash2 size={14} /> Erase
+            </button>
+            <button onClick={() => { setSelectedIds([]); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-500 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <X size={14} /> Deselect All
+            </button>
+          </div>
+        </>
+      )}
 
       {fileNameMenuOpen && (
         <>
@@ -2662,23 +2867,19 @@ const App: React.FC = () => {
                 <input 
                   type="text" 
                   autoFocus
-                  name={`vox-prompt-${Date.now()}`}
-                  defaultValue={promptDialog.initialValue}
+                  name="vox-prompt-input"
+                  value={promptValue}
+                  onChange={(e) => setPromptValue(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
-                       promptDialog.onConfirm(e.currentTarget.value);
+                       promptDialog.onConfirm(promptValue);
                        setPromptDialog(null);
                     } else if (e.key === 'Escape') {
                        setPromptDialog(null);
                     }
                   }}
-                  id="prompt-input"
-                  autoComplete="one-time-code"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck="false"
-                  data-lpignore="true"
-                  data-form-type="other"
+                  id="vox-prompt-input"
+                  autoComplete="off"
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-xs font-bold focus:outline-none focus:border-cyan-500/50 transition-all mb-6"
                 />
               )}
@@ -2687,11 +2888,8 @@ const App: React.FC = () => {
                  <button onClick={() => setPromptDialog(null)} className="flex-1 py-3 rounded-xl bg-white/5 text-neutral-400 text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-all active:scale-95">Cancel</button>
                  <button 
                    onClick={() => {
-                     const val = (document.getElementById('prompt-input') as HTMLInputElement)?.value || '';
+                     promptDialog.onConfirm(promptValue);
                      setPromptDialog(null);
-                     setTimeout(() => {
-                        promptDialog.onConfirm(val);
-                     }, 10);
                    }} 
                    className="flex-1 py-3 rounded-xl bg-cyan-500 text-black text-[9px] font-black uppercase tracking-widest hover:bg-cyan-400 transition-all active:scale-95"
                  >

@@ -11,6 +11,38 @@ interface DrawingPropertiesProps {
   currentFileName: string;
 }
 
+const PropertySection = ({ title, icon: Icon, children, accent = "cyan" }: { title: string, icon: any, children?: React.ReactNode, accent?: string }) => (
+  <div className="mb-6 last:mb-0">
+    <div className="flex items-center gap-2 mb-3 px-1">
+      <Icon size={14} className={accent === "cyan" ? "text-cyan-500" : "text-amber-500"} />
+      <span className="text-[10px] font-black text-neutral-400 uppercase tracking-[0.15em]">{title}</span>
+    </div>
+    <div className="space-y-3 bg-neutral-900/30 rounded-xl p-4 border border-white/5 shadow-inner">
+      {children}
+    </div>
+  </div>
+);
+
+const InputField = ({ label, value, onChange, placeholder, icon: Icon, isTextArea }: { label: string, value: string, onChange: (v: string) => void, placeholder?: string, icon?: any, isTextArea?: boolean }) => {
+  const id = React.useId();
+  const InputComponent = isTextArea ? 'textarea' : 'input';
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor={id} className="text-[9px] font-bold text-neutral-600 uppercase pl-1 cursor-pointer hover:text-neutral-400 transition-colors uppercase tracking-widest">{label}</label>
+      <div className="relative group">
+        {Icon && <Icon size={12} className={`absolute left-3 ${isTextArea ? 'top-4' : 'top-1/2 -translate-y-1/2'} text-neutral-500 group-focus-within:text-cyan-500 transition-colors pointer-events-none`} />}
+        <InputComponent 
+          id={id}
+          value={value} 
+          onChange={(e) => onChange(e.target.value)} 
+          placeholder={placeholder}
+          className={`w-full bg-black/40 border border-neutral-800 rounded-xl py-2.5 ${Icon ? 'pl-9' : 'px-3'} pr-3 text-[11px] text-neutral-200 outline-none focus:border-cyan-600 focus:bg-black/60 hover:border-neutral-700 transition-all font-bold placeholder:text-neutral-800 select-text cursor-text ${isTextArea ? 'min-h-[80px] resize-none py-3' : ''}`}
+        />
+      </div>
+    </div>
+  );
+};
+
 const DrawingProperties: React.FC<DrawingPropertiesProps> = ({ settings, onConfirm, onClose, entityCount, currentFileName }) => {
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [isInteracting, setIsInteracting] = useState(false);
@@ -67,38 +99,6 @@ const DrawingProperties: React.FC<DrawingPropertiesProps> = ({ settings, onConfi
     onConfirm(
       { ...localMetadata, lastModified: new Date().toISOString() },
       finalName
-    );
-  };
-
-  const PropertySection = ({ title, icon: Icon, children, accent = "cyan" }: { title: string, icon: any, children?: React.ReactNode, accent?: string }) => (
-    <div className="mb-6 last:mb-0">
-      <div className="flex items-center gap-2 mb-3 px-1">
-        <Icon size={14} className={accent === "cyan" ? "text-cyan-500" : "text-amber-500"} />
-        <span className="text-[10px] font-black text-neutral-400 uppercase tracking-[0.15em]">{title}</span>
-      </div>
-      <div className="space-y-3 bg-neutral-900/30 rounded-xl p-4 border border-white/5 shadow-inner">
-        {children}
-      </div>
-    </div>
-  );
-
-  const InputField = ({ label, value, onChange, placeholder, icon: Icon, isTextArea }: { label: string, value: string, onChange: (v: string) => void, placeholder?: string, icon?: any, isTextArea?: boolean }) => {
-    const id = React.useId();
-    const InputComponent = isTextArea ? 'textarea' : 'input';
-    return (
-      <div className="space-y-1.5">
-        <label htmlFor={id} className="text-[9px] font-bold text-neutral-600 uppercase pl-1 cursor-pointer hover:text-neutral-400 transition-colors uppercase tracking-widest">{label}</label>
-        <div className="relative group">
-          {Icon && <Icon size={12} className={`absolute left-3 ${isTextArea ? 'top-4' : 'top-1/2 -translate-y-1/2'} text-neutral-500 group-focus-within:text-cyan-500 transition-colors pointer-events-none`} />}
-          <InputComponent 
-            id={id}
-            value={value} 
-            onChange={(e) => onChange(e.target.value)} 
-            placeholder={placeholder}
-            className={`w-full bg-black/40 border border-neutral-800 rounded-xl py-2.5 ${Icon ? 'pl-9' : 'px-3'} pr-3 text-[11px] text-neutral-200 outline-none focus:border-cyan-600 focus:bg-black/60 hover:border-neutral-700 transition-all font-bold placeholder:text-neutral-800 select-text cursor-text ${isTextArea ? 'min-h-[80px] resize-none py-3' : ''}`}
-          />
-        </div>
-      </div>
     );
   };
 

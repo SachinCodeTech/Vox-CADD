@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
     FilePlus, FolderOpen, Save, X, 
     Database, Share2, FileCode, CheckCircle2,
-    FileText, Download, Briefcase, Clock, File
+    FileText, Download, Briefcase, Clock, File, Globe
 } from 'lucide-react';
 
 import VoxIcon from './VoxIcon';
@@ -225,10 +225,10 @@ const FileManager: React.FC<FileManagerProps> = ({ currentName, recentFiles = []
                             onClick={() => onAction('saveImage')} 
                         />
                         <ExportActionBtn 
-                            icon={Share2} 
+                            icon={Globe} 
                             label="Cloud Publish" 
                             sublabel="Generate Shareable Link" 
-                            onClick={() => onAction('share')} 
+                            onClick={() => onAction('publish')} 
                         />
                     </div>
                 </div>

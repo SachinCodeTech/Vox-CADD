@@ -823,6 +823,16 @@ export const parseLength = (str: string, isImperial: boolean): number => {
     if (!str) return 0;
     const clean = str.trim();
     if (clean === "") return 0;
+    
+    // Support basic math expressions
+    if (clean.includes('+') || clean.includes('-') || clean.includes('*') || clean.includes('/')) {
+        try {
+            // Very simple secure evaluator for CAD dimensions
+            const val = eval(clean.replace(/[^-()\d/*+.]/g, ''));
+            if (!isNaN(val)) return val;
+        } catch(e) {}
+    }
+
     if (!isImperial) return parseFloat(clean);
     
     const feetRegex = /(-?\d+(\.\d+)?)'/;
@@ -938,6 +948,27 @@ export const formatDualArea = (val: number, settings: AppSettings): { primary: s
     }
 };
 
+
+export const getLineCircleIntersections = (p1: Point, p2: Point, center: Point, radius: number): Point[] => {
+    const dx = p2.x - p1.x, dy = p2.y - p1.y;
+    const a = dx * dx + dy * dy;
+    const b = 2 * (dx * (p1.x - center.x) + dy * (p1.y - center.y));
+    const c = (p1.x - center.x) * (p1.x - center.x) + (p1.y - center.y) * (p1.y - center.y) - radius * radius;
+    const det = b * b - 4 * a * c;
+    if (det < 0) return [];
+    if (det === 0) {
+        const t = -b / (2 * a);
+        if (t >= 0 && t <= 1) return [{ x: p1.x + t * dx, y: p1.y + t * dy }];
+        return [];
+    }
+    const t1 = (-b + Math.sqrt(det)) / (2 * a);
+    const t2 = (-b - Math.sqrt(det)) / (2 * a);
+    const pts: Point[] = [];
+    if (t1 >= 0 && t1 <= 1) pts.push({ x: p1.x + t1 * dx, y: p1.y + t1 * dy });
+    if (t2 >= 0 && t2 <= 1) pts.push({ x: p1.x + t2 * dx, y: p1.y + t2 * dy });
+    return pts;
+};
+
 export const getIntersection = (p1: Point, p2: Point, p3: Point, p4: Point, infinite: boolean = false): Point | null => {
   const d = (p2.x - p1.x) * (p4.y - p3.y) - (p2.y - p1.y) * (p4.x - p3.x);
   if (Math.abs(d) < 0.000001) return null; 
@@ -950,79 +981,105 @@ export const getIntersection = (p1: Point, p2: Point, p3: Point, p4: Point, infi
 export const getTrimmedShapes = (cutters: Shape[], targets: Shape[], pick: Point): Shape[] => {
     const results: Shape[] = [];
     targets.forEach(target => {
-        if (target.type === 'line') {
-            const intersections: Point[] = [];
-            cutters.forEach(cutter => {
-                const cutterSegments = getShapeSegments(cutter);
+        const intersections: Point[] = [];
+        cutters.forEach(cutter => {
+            const cutterSegments = getShapeSegments(cutter);
+            const targetSegments = getShapeSegments(target);
+            
+            targetSegments.forEach(ts => {
                 cutterSegments.forEach(cs => {
-                    const inter = getIntersection({x: target.x1, y: target.y1}, {x: target.x2, y: target.y2}, cs.p1, cs.p2);
+                    const inter = getIntersection(ts.p1, ts.p2, cs.p1, cs.p2);
                     if (inter) intersections.push(inter);
                 });
             });
+        });
 
-            if (intersections.length === 0) {
-                results.push(target);
-                return;
-            }
+        if (intersections.length === 0) {
+            results.push(target);
+            return;
+        }
 
-            const uniqueInter = intersections.filter((v, i, a) => a.findIndex(t => distance(t, v) < 0.0001) === i);
-            const p1 = {x: target.x1, y: target.y1};
-            uniqueInter.sort((a, b) => distance(p1, a) - distance(p1, b));
-
-            const segments: {p1: Point, p2: Point}[] = [];
-            segments.push({p1: p1, p2: uniqueInter[0]});
-            for(let i=0; i<uniqueInter.length-1; i++) {
-                segments.push({p1: uniqueInter[i], p2: uniqueInter[i+1]});
-            }
-            segments.push({p1: uniqueInter[uniqueInter.length-1], p2: {x: target.x2, y: target.y2}});
-
-            let closestIdx = -1;
-            let minDist = Infinity;
-            segments.forEach((seg, idx) => {
-                const d = distToSegment(pick.x, pick.y, seg.p1.x, seg.p1.y, seg.p2.x, seg.p2.y);
-                if (d < minDist) {
-                    minDist = d;
-                    closestIdx = idx;
-                }
-            });
-
-            segments.forEach((seg, idx) => {
-                if (idx !== closestIdx) {
-                    if (distance(seg.p1, seg.p2) > 0.001) {
-                        results.push({ ...target, id: generateId(), x1: seg.p1.x, y1: seg.p1.y, x2: seg.p2.x, y2: seg.p2.y } as Shape);
+        const uniqueInter = intersections.filter((v, i, a) => a.findIndex(t => distance(t, v) < 0.0001) === i);
+        
+        // Convert targeted non-line shapes to segments if trimmed.
+        const allSegments = getShapeSegments(target);
+        allSegments.forEach(seg => {
+            const segInter = uniqueInter.filter(p => distToSegment(p.x, p.y, seg.p1.x, seg.p1.y, seg.p2.x, seg.p2.y) < 0.001);
+            if (segInter.length === 0) {
+                results.push({ ...target, id: generateId(), type: 'line', x1: seg.p1.x, y1: seg.p1.y, x2: seg.p2.x, y2: seg.p2.y } as any);
+            } else {
+                segInter.sort((a, b) => distance(seg.p1, a) - distance(seg.p1, b));
+                const pts = [seg.p1, ...segInter, seg.p2];
+                for(let i=0; i<pts.length-1; i++) {
+                    const p1 = pts[i], p2 = pts[i+1];
+                    if (distance(p1, p2) < 0.001) continue;
+                    const mid = { x: (p1.x + p2.x)/2, y: (p1.y + p2.y)/2 };
+                    if (distance(mid, pick) > 0.01) { // If mid point is not very near the pick point, keep it
+                         results.push({ ...target, id: generateId(), type: 'line', x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y } as any);
                     }
                 }
-            });
-        } else {
-            results.push(target);
-        }
+            }
+        });
     });
     return results;
 };
 
 export const getShapeSegments = (s: Shape): { p1: Point, p2: Point }[] => {
+    if (s._segments) return s._segments;
     const segments: { p1: Point, p2: Point }[] = [];
     switch (s.type) {
         case 'line':
-            segments.push({ p1: { x: s.x1, y: s.y1 }, p2: { x: s.x2, y: s.y2 } });
+            segments.push({ p1: { x: (s as any).x1, y: (s as any).y1 }, p2: { x: (s as any).x2, y: (s as any).y2 } });
             break;
         case 'rect':
-            const p1 = { x: s.x, y: s.y };
-            const p2 = { x: s.x + s.width, y: s.y };
-            const p3 = { x: s.x + s.width, y: s.y + s.height };
-            const p4 = { x: s.x, y: s.y + s.height };
-            segments.push({ p1, p2 }, { p1: p2, p2: p3 }, { p1: p3, p2: p4 }, { p1: p4, p2: p1 });
+            const rp1 = { x: s.x, y: s.y };
+            const rp2 = { x: s.x + s.width, y: s.y };
+            const rp3 = { x: s.x + s.width, y: s.y + s.height };
+            const rp4 = { x: s.x, y: s.y + s.height };
+            segments.push({ p1: rp1, p2: rp2 }, { p1: rp2, p2: rp3 }, { p1: rp3, p2: rp4 }, { p1: rp4, p2: rp1 });
             break;
         case 'pline':
         case 'polygon':
-        case 'spline':
-            for (let i = 0; i < s.points.length - 1; i++) {
-                segments.push({ p1: s.points[i], p2: s.points[i + 1] });
-            }
-            if (s.closed || s.type === 'polygon') {
-                segments.push({ p1: s.points[s.points.length - 1], p2: s.points[0] });
+        case 'spline': {
+            const pts = s.points;
+            for (let i = 0; i < (s.closed || s.type === 'polygon' ? pts.length : pts.length - 1); i++) {
+                const p1 = pts[i];
+                const p2 = pts[(i + 1) % pts.length];
+                if (p1.bulge && Math.abs(p1.bulge) > 0.0001) {
+                    const b = p1.bulge;
+                    const d = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+                    const s_val = d / 2;
+                    const h = b * s_val;
+                    const r = (s_val * s_val + h * h) / (2 * h);
+                    const midX = (p1.x + p2.x) / 2;
+                    const midY = (p1.y + p2.y) / 2;
+                    const ux = (p2.x - p1.x) / d;
+                    const uy = (p2.y - p1.y) / d;
+                    const bulgeSign = b > 0 ? 1 : -1;
+                    const cX = midX - (r - h) * uy * bulgeSign;
+                    const cY = midY + (r - h) * ux * bulgeSign;
+                    const a1 = Math.atan2(p1.y - cY, p1.x - cX);
+                    let a2 = Math.atan2(p2.y - cY, p2.x - cX);
+                    
+                    let sweep = a2 - a1;
+                    if (b > 0 && sweep < 0) sweep += Math.PI * 2;
+                    if (b < 0 && sweep > 0) sweep -= Math.PI * 2;
+                    
+                    const steps = Math.min(64, Math.max(4, Math.ceil(Math.abs(sweep) / (Math.PI / 16))));
+                    for (let j = 0; j < steps; j++) {
+                        const ang1 = a1 + (j / steps) * sweep;
+                        const ang2 = a1 + ((j + 1) / steps) * sweep;
+                        segments.push({
+                            p1: { x: cX + Math.abs(r) * Math.cos(ang1), y: cY + Math.abs(r) * Math.sin(ang1) },
+                            p2: { x: cX + Math.abs(r) * Math.cos(ang2), y: cY + Math.abs(r) * Math.sin(ang2) }
+                        });
+                    }
+                } else {
+                    segments.push({ p1, p2 });
+                }
             }
             break;
+        }
         case 'ellipse': {
             const steps = 36;
             for (let i = 0; i < steps; i++) {
@@ -1037,7 +1094,7 @@ export const getShapeSegments = (s: Shape): { p1: Point, p2: Point }[] => {
             }
             break;
         }
-        case 'circle':
+        case 'circle': {
             const steps = 32;
             for (let i = 0; i < steps; i++) {
                 const a1 = (i / steps) * Math.PI * 2;
@@ -1048,7 +1105,8 @@ export const getShapeSegments = (s: Shape): { p1: Point, p2: Point }[] => {
                 });
             }
             break;
-        case 'arc':
+        }
+        case 'arc': {
             const arcSteps = 16;
             let sA = s.startAngle, eA = s.endAngle;
             if (s.counterClockwise && eA < sA) eA += Math.PI * 2;
@@ -1063,7 +1121,8 @@ export const getShapeSegments = (s: Shape): { p1: Point, p2: Point }[] => {
                 });
             }
             break;
-        case 'donut':
+        }
+        case 'donut': {
             const donutSteps = 32;
             for (let i = 0; i < donutSteps; i++) {
                 const a1 = (i / donutSteps) * Math.PI * 2;
@@ -1080,33 +1139,36 @@ export const getShapeSegments = (s: Shape): { p1: Point, p2: Point }[] => {
                 }
             }
             break;
+        }
         case 'ray':
         case 'xline': {
-            const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+            const dx = (s as any).x2 - (s as any).x1, dy = (s as any).y2 - (s as any).y1;
             const len = Math.sqrt(dx*dx + dy*dy);
             if (len > 0) {
                 const ux = dx/len, uy = dy/len;
                 const far = 1000000;
                 if (s.type === 'xline') {
                     segments.push({
-                        p1: { x: s.x1 - ux * far, y: s.y1 - uy * far },
-                        p2: { x: s.x1 + ux * far, y: s.y1 + uy * far }
+                        p1: { x: (s as any).x1 - ux * far, y: (s as any).y1 - uy * far },
+                        p2: { x: (s as any).x1 + ux * far, y: (s as any).y1 + uy * far }
                     });
                 } else {
                     segments.push({
-                        p1: { x: s.x1, y: s.y1 },
-                        p2: { x: s.x1 + ux * far, y: s.y1 + uy * far }
+                        p1: { x: (s as any).x1, y: (s as any).y1 },
+                        p2: { x: (s as any).x1 + ux * far, y: (s as any).y1 + uy * far }
                     });
                 }
             }
             break;
         }
-        case 'point':
+        case 'point': {
             const sz = 10;
             segments.push({ p1: { x: s.x - sz, y: s.y }, p2: { x: s.x + sz, y: s.y } });
             segments.push({ p1: { x: s.x, y: s.y - sz }, p2: { x: s.x, y: s.y + sz } });
             break;
+        }
     }
+    if (!s.isPreview) s._segments = segments;
     return segments;
 };
 
@@ -1397,7 +1459,7 @@ export const mirrorShape = (s: Shape, p1: Point, p2: Point): Shape => {
             break;
         }
         case 'pline': case 'polygon': case 'spline': case 'hatch':
-            ns.points = ns.points.map(p => mirrorPt(p)); break;
+            ns.points = ns.points.map(p => ({ ...mirrorPt(p), bulge: p.bulge ? -p.bulge : undefined })); break;
     }
     return ns as Shape;
 };
@@ -1526,7 +1588,7 @@ const SNAP_PRIORITY: Record<string, number> = {
 };
 
 export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts: number, trackingPoints: SnapPoint[]): SnapPoint | null => {
-    const threshold = 15 / ts;
+    const threshold = 20 / ts; // Increased threshold for easier snapping
     const candidates: SnapPoint[] = [];
 
     const addCandidate = (x: number, y: number, type: SnapPoint['type'], lp?: Point) => {
@@ -1716,51 +1778,111 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
 
     // 2. Intersection Snaps
     if (options.intersection || options.appint) {
-        const segments: { p1: Point, p2: Point }[] = [];
-        nearbyShapes.forEach(s => segments.push(...getShapeSegments(s)));
+        const segments: { p1: Point, p2: Point, id: string }[] = [];
+        const circles: { x: number, y: number, r: number, id: string }[] = [];
+        
+        nearbyShapes.forEach(s => {
+            if (s.type === 'circle') {
+                circles.push({ x: s.x, y: s.y, r: s.radius, id: s.id });
+                // Also add small segments for approximate if needed, but geometric is better
+            } else {
+                getShapeSegments(s).forEach(seg => segments.push({ ...seg, id: s.id }));
+            }
+        });
 
+        // Line-Line Intersections
         for (let i = 0; i < segments.length; i++) {
             for (let j = i + 1; j < segments.length; j++) {
-                // Regular intersection
-                if (options.intersection) {
-                    const inter = getIntersection(segments[i].p1, segments[i].p2, segments[j].p1, segments[j].p2);
-                    if (inter) addCandidate(inter.x, inter.y, 'int');
+                if (segments[i].id === segments[j].id) continue;
+                const inter = getIntersection(segments[i].p1, segments[i].p2, segments[j].p1, segments[j].p2);
+                if (inter) addCandidate(inter.x, inter.y, 'int');
+                else if (options.appint) {
+                    const appInter = getIntersection(segments[i].p1, segments[i].p2, segments[j].p1, segments[j].p2, true);
+                    if (appInter) addCandidate(appInter.x, appInter.y, 'appint');
                 }
-                // Apparent intersection
-                if (options.appint) {
-                    const inter = getIntersection(segments[i].p1, segments[i].p2, segments[j].p1, segments[j].p2, true);
-                    if (inter) {
-                        // Only add if it's NOT a regular intersection (to avoid duplicates)
-                        const regular = getIntersection(segments[i].p1, segments[i].p2, segments[j].p1, segments[j].p2);
-                        if (!regular) addCandidate(inter.x, inter.y, 'appint');
-                    }
+            }
+        }
+
+        // Line-Circle Intersections
+        for (const seg of segments) {
+            for (const circ of circles) {
+                if (seg.id === circ.id) continue;
+                const inters = getLineCircleIntersections(seg.p1, seg.p2, circ, circ.r);
+                inters.forEach(it => addCandidate(it.x, it.y, 'int'));
+            }
+        }
+
+        // Circle-Circle Intersections
+        for (let i = 0; i < circles.length; i++) {
+            for (let j = i + 1; j < circles.length; j++) {
+                const c1 = circles[i], c2 = circles[j];
+                const d = distance(c1, c2);
+                if (d > Math.abs(c1.r - c2.r) && d < c1.r + c2.r) {
+                    const a = (c1.r * c1.r - c2.r * c2.r + d * d) / (2 * d);
+                    const h = Math.sqrt(c1.r * c1.r - a * a);
+                    const x2 = c1.x + a * (c2.x - c1.x) / d;
+                    const y2 = c1.y + a * (c2.y - c1.y) / d;
+                    addCandidate(x2 + h * (c2.y - c1.y) / d, y2 - h * (c2.x - c1.x) / d, 'int');
+                    addCandidate(x2 - h * (c2.y - c1.y) / d, y2 + h * (c2.x - c1.x) / d, 'int');
                 }
             }
         }
     }
 
-    // 3. Polar Snapping
+    // 3. Polar & Alignment Tracking
     if (options.polar) {
         trackingPoints.forEach(tp => {
             const dx = p.x - tp.x;
             const dy = p.y - tp.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
+            
             if (dist > threshold) {
                 const angle = Math.atan2(dy, dx);
                 const degree = (angle * 180 / Math.PI + 360) % 360;
-                // Snaps to every 45 degrees
-                const step = 45;
-                const nearestDegree = Math.round(degree / step) * step;
-                const nearestAngle = nearestDegree * Math.PI / 180;
-
-                const angleDiff = Math.min(Math.abs(degree - nearestDegree), Math.abs(degree - (nearestDegree + 360)), Math.abs(degree - (nearestDegree - 360)));
                 
-                // If very close to a major angle, project the point along that ray
-                if (angleDiff < 5) {
+                // Snaps to: 0, 90, 180, 270 (Tracking) + 45 intervals (Polar)
+                const majorAngles = [0, 90, 180, 270];
+                const polarStep = 45;
+                
+                // Check major alignment first
+                let nearestDegree = Math.round(degree / 90) * 90;
+                let angleDiff = Math.min(Math.abs(degree - nearestDegree), Math.abs(degree - (nearestDegree + 360)), Math.abs(degree - (nearestDegree - 360)));
+                
+                if (angleDiff > 2) {
+                    // Try polar increments
+                    nearestDegree = Math.round(degree / polarStep) * polarStep;
+                    angleDiff = Math.min(Math.abs(degree - nearestDegree), Math.abs(degree - (nearestDegree + 360)), Math.abs(degree - (nearestDegree - 360)));
+                }
+
+                if (angleDiff < 3) {
+                    const nearestAngle = nearestDegree * Math.PI / 180;
                     addCandidate(tp.x + dist * Math.cos(nearestAngle), tp.y + dist * Math.sin(nearestAngle), 'polar', tp);
                 }
             }
         });
+
+        // 4. Intersection of Tracking Lines (Advanced)
+        if (trackingPoints.length >= 2) {
+            for (let i = 0; i < trackingPoints.length; i++) {
+                for (let j = i + 1; j < trackingPoints.length; j++) {
+                    const p1 = trackingPoints[i];
+                    const p2 = trackingPoints[j];
+                    
+                    // Simple ortho intersections for now
+                    const intersections = [
+                        { x: p1.x, y: p2.y },
+                        { x: p2.x, y: p1.y }
+                    ];
+                    
+                    intersections.forEach(ipt => {
+                        const d = Math.sqrt((p.x - ipt.x)**2 + (p.y - ipt.y)**2);
+                        if (d < threshold) {
+                            candidates.push({ x: ipt.x, y: ipt.y, type: 'int', lastPoint: p1 });
+                        }
+                    });
+                }
+            }
+        }
     }
 
     if (candidates.length === 0) return null;
@@ -1848,12 +1970,65 @@ export const getShapesInRect = (p1: Point, p2: Point, shapes: Shape[], crossing:
     });
 };
 
+export const chamferLines = (s1: LineShape, s2: LineShape, dist1: number, dist2: number): { l1: LineShape, l2: LineShape, chamfer: LineShape | null } | null => {
+    const p1 = {x: s1.x1, y: s1.y1}, p2 = {x: s1.x2, y: s1.y2};
+    const p3 = {x: s2.x1, y: s2.y1}, p4 = {x: s2.x2, y: s2.y2};
+
+    const intersect = getIntersection(p1, p2, p3, p4, true);
+    if (!intersect) return null;
+
+    if (dist1 <= 0 && dist2 <= 0) {
+        return {
+            l1: { ...s1, x1: p1.x, y1: p1.y, x2: intersect.x, y2: intersect.y },
+            l2: { ...s2, x1: p3.x, y1: p3.y, x2: intersect.x, y2: intersect.y },
+            chamfer: null
+        };
+    }
+
+    const getNewEnd = (start: Point, intersection: Point, dist: number) => {
+        const len = distance(start, intersection);
+        if (len < dist) return intersection;
+        const ratio = (len - dist) / len;
+        return { x: start.x + (intersection.x - start.x) * ratio, y: start.y + (intersection.y - start.y) * ratio };
+    };
+
+    const newEnd1 = getNewEnd(p1, intersect, dist1);
+    const newEnd2 = getNewEnd(p3, intersect, dist2);
+
+    const chamfer: LineShape = {
+        id: generateId(),
+        type: 'line',
+        layer: s1.layer,
+        color: s1.color,
+        x1: newEnd1.x,
+        y1: newEnd1.y,
+        x2: newEnd2.x,
+        y2: newEnd2.y,
+        thickness: s1.thickness,
+        lineType: s1.lineType
+    };
+
+    return {
+        l1: { ...s1, x2: newEnd1.x, y2: newEnd1.y },
+        l2: { ...s2, x2: newEnd2.x, y2: newEnd2.y },
+        chamfer
+    };
+};
+
 export const filletLines = (s1: LineShape, s2: LineShape, radius: number): { l1: LineShape, l2: LineShape, arc: ArcShape | null } | null => {
     const p1 = {x: s1.x1, y: s1.y1}, p2 = {x: s1.x2, y: s1.y2};
     const p3 = {x: s2.x1, y: s2.y1}, p4 = {x: s2.x2, y: s2.y2};
 
     const intersect = getIntersection(p1, p2, p3, p4, true);
     if (!intersect) return null;
+
+    if (radius <= 0) {
+        return {
+            l1: { ...s1, x1: p1.x, y1: p1.y, x2: intersect.x, y2: intersect.y },
+            l2: { ...s2, x1: p3.x, y1: p3.y, x2: intersect.x, y2: intersect.y },
+            arc: null
+        };
+    }
 
     if (radius <= 0.001) {
         return {

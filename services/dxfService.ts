@@ -81,7 +81,7 @@ export const shapesToDXF = (
         const writer = new DXFWriter();
         const baseLayers = { ...(layerConfigs || {}) };
     if (!baseLayers['0']) {
-        baseLayers['0'] = { id: '0', name: '0', visible: true, locked: false, frozen: false, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' };
+        baseLayers['0'] = { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' };
     }
     const layers = baseLayers;
     const blockRecords: Record<string, string> = {};
@@ -417,8 +417,8 @@ const parseLayers = (dxf: any, lineTypes: Record<string, LineTypeDefinition>): R
     const layers: Record<string, LayerConfig> = {};
     
     // Ensure default layers exist
-    layers['0'] = { id: '0', name: '0', visible: true, locked: false, frozen: false, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' };
-    layers['defpoints'] = { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, color: '#666666', thickness: 0.1, lineType: 'continuous' };
+    layers['0'] = { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' };
+    layers['defpoints'] = { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, plottable: false, color: '#666666', thickness: 0.1, lineType: 'continuous' };
 
     if (dxf.tables && dxf.tables.layer && dxf.tables.layer.layers) {
         Object.values(dxf.tables.layer.layers).forEach((l: any) => {
@@ -430,6 +430,7 @@ const parseLayers = (dxf: any, lineTypes: Record<string, LineTypeDefinition>): R
                 visible: l.color !== undefined ? l.color >= 0 : true,
                 locked: !!l.locked,
                 frozen: !!l.frozen,
+                plottable: layerName.toLowerCase() !== 'defpoints',
                 color: aciToHex(l.color !== undefined ? Math.abs(l.color) : 7) || '#FFFFFF',
                 thickness: l.lineWeight && l.lineWeight > 0 ? l.lineWeight / 100 : 0.25,
                 lineType: ltName as any
@@ -498,8 +499,8 @@ export const dxfToProject = (dxfString: string, defaultSettings: AppSettings): V
         'continuous': { name: 'continuous', description: 'Solid line', pattern: [] }
     };
     let layers: Record<string, LayerConfig> = { 
-        '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' },
-        'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, color: '#666666', thickness: 0.1, lineType: 'continuous' }
+        '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' },
+        'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, plottable: false, color: '#666666', thickness: 0.1, lineType: 'continuous' }
     };
     let dimStyles: Record<string, DimensionStyle> = {};
     let layouts: Record<string, LayoutDefinition> = {};
@@ -577,7 +578,44 @@ export const dxfToProject = (dxfString: string, defaultSettings: AppSettings): V
                     if (entity.controlPoints && entity.controlPoints.length > 1) {
                         return { id, layer, color, thickness, lineType, type: 'pline', points: entity.controlPoints.map((v: any) => ({ x: v.x, y: v.y })), closed: entity.closed } as any;
                     }
+                    else if (entity.vertices && entity.vertices.length > 1) {
+                         return { id, layer, color, thickness, lineType, type: 'pline', points: entity.vertices.map((v: any) => ({ x: v.x, y: v.y })), closed: entity.closed } as any;
+                    }
                     break;
+                case 'ATTDEF':
+                case 'ATTRIB':
+                    return { 
+                        id, layer, color, thickness, lineType, type: 'text', 
+                        x: entity.position?.x || 0, 
+                        y: entity.position?.y || 0, 
+                        size: entity.textHeight || 2.5, 
+                        content: entity.text || entity.tag || '', 
+                        rotation: (entity.rotation || 0) * Math.PI / 180,
+                    } as any;
+                case 'XLINE':
+                case 'RAY':
+                    const basePoint = entity.basePoint || entity.position || { x: 0, y: 0 };
+                    const direction = entity.directionVector || entity.unitVector || { x: 1, y: 0 };
+                    return {
+                        id, layer, color, thickness, lineType, type: (entity.type.toLowerCase() as any),
+                        x1: basePoint.x, y1: basePoint.y,
+                        x2: basePoint.x + direction.x,
+                        y2: basePoint.y + direction.y
+                    } as any;
+                case '3DFACE':
+                    if (entity.vertices && entity.vertices.length >= 3) {
+                        const pts = entity.vertices.slice(0, 4).map((v: any) => ({ x: v.x, y: v.y }));
+                        return { id, layer, color, thickness, lineType, type: 'polygon', points: pts, closed: true, filled: false } as any;
+                    }
+                    break;
+                case 'IMAGE':
+                case 'WIPEOUT':
+                    return { 
+                        id, layer, color, thickness, lineType, type: 'rect', 
+                        x: entity.position.x, y: entity.position.y, 
+                        width: entity.width || 10, height: entity.height || 10, 
+                        rotation: (entity.rotation || 0) * Math.PI / 180 
+                    } as any;
                 case 'DIMENSION':
                     return { 
                         id, layer, color, thickness, lineType, type: 'dimension', 

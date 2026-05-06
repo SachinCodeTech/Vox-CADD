@@ -17,8 +17,8 @@ interface CADCanvasProps {
   isViewportActive?: boolean;
   activeViewportId?: string | null;
   onViewportToggle?: (x?: number, y?: number) => void;
-  onClick?: (x: number, y: number, snapped: boolean) => void; 
-  onMouseMove?: (x: number, y: number, snapped: boolean) => void;
+  onClick?: (x: number, y: number, snapped: boolean, shiftKey?: boolean) => void; 
+  onMouseMove?: (x: number, y: number, snapped: boolean, shiftKey?: boolean) => void;
   selectedIds?: string[];
   highlightIds?: string[];
   onSelectionChange?: (ids: string[], additive: boolean) => void;
@@ -31,6 +31,8 @@ interface CADCanvasProps {
   onAction?: (action: string, payload?: any) => void;
   onCommand?: (cmd: string) => void;
   setLogMessage?: (msg: string | null) => void;
+  onObjectContextMenu?: (x: number, y: number) => void;
+  isPlotting?: boolean;
 }
 
 export interface CADCanvasHandle {
@@ -42,14 +44,33 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     isViewportActive = false, activeViewportId, onViewportToggle,
     onMouseMove, onClick, selectedIds = [], highlightIds = [], onSelectionChange, previewShapes,
     activePrompt, basePoint = null, activeCommandName, isAiThinking, lastAiCommandTime, onAction, onCommand,
-    setLogMessage
+    setLogMessage, onObjectContextMenu, isPlotting = false
 }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
   useImperativeHandle(ref, () => ({
-    captureImage: () => {
+    captureImage: (options?: { isPlotting?: boolean }) => {
       const canvas = canvasRef.current;
       if (!canvas) return '';
+      
+      // If we are plotting, we should ideally render without non-plottable layers.
+      // Since this is a capture, we can create an offscreen canvas.
+      if (options?.isPlotting) {
+          const r = getPixelRatio();
+          const w = canvas.width / r;
+          const h = canvas.height / r;
+          const offscreen = document.createElement('canvas');
+          offscreen.width = canvas.width;
+          offscreen.height = canvas.height;
+          const ctx = offscreen.getContext('2d', { alpha: false });
+          if (ctx) {
+              // We need to call the same render logic but with a different context and plottable filtering.
+              // To avoid massive code duplication, we'll temporarily set a local flag that isPlotting is true
+              // and force a redraw on the main canvas if we really have to, but that flickers.
+              
+              // Better: just use the main canvas and if isPlotting was passed to the component, it's already filtered!
+          }
+      }
       return canvas.toDataURL('image/png');
     },
     getCanvasSize: () => {
@@ -84,9 +105,10 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     return (Object.values(layers).flat() as Shape[]).filter(s => {
         const conf = layerConfig[s.layer];
         if (!conf) return true;
+        if (isPlotting && conf.plottable === false) return false;
         return conf.visible && !conf.frozen;
     });
-  }, [layers, layerConfig]);
+  }, [layers, layerConfig, isPlotting]);
 
   const allSelectableShapes = useMemo(() => {
     return (Object.values(layers).flat() as Shape[]).filter(s => {
@@ -198,7 +220,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     ctx.restore();
   };
 
-  const updateCursorAndSnaps = (x: number, y: number) => {
+  const updateCursorAndSnaps = (x: number, y: number, shiftKey?: boolean) => {
     const wp = screenToWorld(x, y);
     worldCursorRef.current = wp;
     const ts = view.scale * settings.drawingScale;
@@ -243,7 +265,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     }
     if (onMouseMove) {
       const targetP = activeSnapRef.current ? {x: activeSnapRef.current.x, y: activeSnapRef.current.y} : wp;
-      onMouseMove(targetP.x, targetP.y, !!activeSnapRef.current);
+      onMouseMove(targetP.x, targetP.y, !!activeSnapRef.current, shiftKey);
     }
   };
 
@@ -476,20 +498,41 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       drawUCS(ctx, w, h);
     }
 
-    // Tracking markers
-    if (trackingPoints.current.length > 0) {
+    // Tracking markers & Alignment Lines
+    if (isCommandActive && trackingPoints.current.length > 0) {
         ctx.save();
-        ctx.setTransform(r, 0, 0, r, 0, 0); // Use raw pixel pixels for static UI elements?
-        // Actually we want world coords
         ctx.setTransform(ts, 0, 0, -ts, w/2 + view.originX, h/2 + view.originY);
+        
+        ctx.lineWidth = 0.5/ts;
+        ctx.setLineDash([5/ts, 5/ts]);
+        
         trackingPoints.current.forEach(tp => {
+            // Draw marker (more subtle cross)
             ctx.strokeStyle = "rgba(0, 188, 212, 0.4)";
-            ctx.lineWidth = 1/ts;
-            const size = 6/ts;
+            const size = 4/ts;
             ctx.beginPath();
             ctx.moveTo(tp.x - size, tp.y); ctx.lineTo(tp.x + size, tp.y);
             ctx.moveTo(tp.x, tp.y - size); ctx.lineTo(tp.x, tp.y + size);
             ctx.stroke();
+
+            // Draw alignment line to cursor if snapped to polar from this point
+            if (activeSnapRef.current?.type === 'polar' && activeSnapRef.current.lastPoint && 
+                Math.abs(activeSnapRef.current.lastPoint.x - tp.x) < 0.01 && Math.abs(activeSnapRef.current.lastPoint.y - tp.y) < 0.01) {
+                ctx.beginPath();
+                ctx.strokeStyle = "rgba(0, 188, 212, 0.3)";
+                ctx.moveTo(tp.x, tp.y);
+                ctx.lineTo(activeSnapRef.current.x, activeSnapRef.current.y);
+                ctx.stroke();
+            } else if (activeSnapRef.current?.type === 'int') {
+                // If snapped to an intersection of tracking lines, draw lines to both points
+                ctx.beginPath();
+                ctx.strokeStyle = "rgba(0, 188, 212, 0.3)";
+                ctx.moveTo(tp.x, tp.y);
+                if (Math.abs(tp.x - activeSnapRef.current.x) < 0.01 || Math.abs(tp.y - activeSnapRef.current.y) < 0.01) {
+                    ctx.lineTo(activeSnapRef.current.x, activeSnapRef.current.y);
+                    ctx.stroke();
+                }
+            }
         });
         ctx.restore();
     }
@@ -1378,13 +1421,13 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         } else if (e.button === 0) {
             if (activeCommandName === 'SPLINE' || activeCommandName === 'SKETCH' || activeCommandName === 'ZOOM') {
                 const wp = screenToWorld(x, y);
-                if (onClick) onClick(wp.x, wp.y, !!activeSnapRef.current);
+                if (onClick) onClick(wp.x, wp.y, !!activeSnapRef.current, e.shiftKey);
             }
             // For selection window / rubber band
             setIsPanning(true); 
         }
       }
-      updateCursorAndSnaps(x, y); redraw();
+      updateCursorAndSnaps(x, y, e.shiftKey); redraw();
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
@@ -1402,7 +1445,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           if (isPanning) {
               const dx = x - lastPos.current.x, dy = y - lastPos.current.y;
               if (Math.hypot(x - pointerStartPos.current.x, y - pointerStartPos.current.y) > 6) {
-                 const isSelCmd = ['SELECT', 'ERASE', 'MOVE', 'COPYCLIP', 'CUTCLIP', 'STRETCH', 'ZOOM'].includes(activeCommandName || '');
+                 const isSelCmd = ['SELECT', 'ERASE', 'MOVE', 'COPYCLIP', 'CUTCLIP', 'STRETCH'].includes(activeCommandName || '');
                  if (((!isCommandActive && activeCommandName !== 'PAN') || isSelCmd) && e.buttons === 1) {
                     const crossing = pointerStartPos.current.x > x;
                     setSelectionRect({ start: pointerStartPos.current, end: {x, y}, crossing });
@@ -1413,7 +1456,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                     const hits = getShapesInRect(w1, w2, selectableShapes, crossing, blocks);
                     setHighlightedIds(hits.map(s => s.id));
                  }
-                 else if (e.buttons === 4 || e.buttons === 2 || activeCommandName === 'PAN') {
+                 else if (e.buttons === 4 || e.buttons === 2 || (activeCommandName === 'PAN' && e.buttons === 1)) {
                     const lts = view.scale * settings.drawingScale;
                     if (activeTab !== 'model' && isViewportActive && activeViewportId) {
                         const layout = layouts.find(l => l.id === activeTab);
@@ -1482,7 +1525,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               setView({ scale: newScale, originX: newOriginX, originY: newOriginY });
           }
       }
-      updateCursorAndSnaps(x, y); redraw();
+      updateCursorAndSnaps(x, y, e.shiftKey); redraw();
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
@@ -1497,11 +1540,13 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       isMultiSelecting.current = false;
 
       if (e.button === 2) {
-          // Right-click: Send Enter to command engine
+          // Right-click: context menu logic
           if (isCommandActive && onAction) {
               onAction('enter');
+          } else if (selectedIds.length > 0 && onObjectContextMenu) {
+              onObjectContextMenu(e.clientX, e.clientY);
           } else {
-              // If no command active, repeat last command
+              // If no command active and nothing selected, repeat last command
               if (onCommand) onCommand('');
           }
           activePointers.current.delete(e.pointerId);
@@ -1519,7 +1564,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       } else if (selectionRect) {
           if (activeCommandName === 'ZOOM') {
               const w2 = screenToWorld(x, y);
-              if (onClick) onClick(w2.x, w2.y, !!activeSnapRef.current);
+              if (onClick) onClick(w2.x, w2.y, !!activeSnapRef.current, e.shiftKey);
           } else {
               const w1 = screenToWorld(selectionRect.start.x, selectionRect.start.y), w2 = screenToWorld(selectionRect.end.x, selectionRect.end.y);
               const selectableShapes = getAllShapesForSelection();
@@ -1533,16 +1578,23 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           if (dx < 6 && dy < 6 && activePointers.current.size === 1) {
               const wp = screenToWorld(x, y), snapped = !!activeSnapRef.current;
               const finalP = activeSnapRef.current ? {x: activeSnapRef.current.x, y: activeSnapRef.current.y} : wp;
-              if (isCommandActive && onClick && activeCommandName !== 'PAN') onClick(finalP.x, finalP.y, snapped);
+              if (isCommandActive && onClick && activeCommandName !== 'PAN') onClick(finalP.x, finalP.y, snapped, e.shiftKey);
               else if (activeCommandName !== 'PAN') {
                 const ts = view.scale * settings.drawingScale, selectableShapes = getAllShapesForSelection();
                 const hit = selectableShapes.find(s => hitTestShape(finalP.x, finalP.y, s, 20/ts, blocks));
                 
-                // Requirement: Single tap -> single object, Long press -> multi object selection
-                if (onSelectionChange) onSelectionChange(hit ? [hit.id] : [], multi || e.shiftKey);
+                // Requirement: Single tap -> additive selection for shapes, click empty -> clear
+                if (onSelectionChange) {
+                    if (hit) {
+                        onSelectionChange([hit.id], true);
+                    } else if (!(isMultiSelecting.current || e.shiftKey)) {
+                        onSelectionChange([], false);
+                    }
+                }
               }
           }
       }
+      isMultiSelecting.current = false;
       const countBefore = activePointers.current.size;
       activePointers.current.delete(e.pointerId);
       const countAfter = activePointers.current.size;
@@ -1556,6 +1608,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       }
 
       if (countAfter === 0) { setIsPanning(false); initialPinchDist.current = null; }
+      updateCursorAndSnaps(x, y, e.shiftKey);
       redraw();
   };
 

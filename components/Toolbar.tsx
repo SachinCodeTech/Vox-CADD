@@ -11,7 +11,7 @@ import {
   Infinity, ArrowUpRight, Rows, Dot, CircleOff, Type, AlignLeft, MousePointer, 
   Zap, Pencil, Activity, Grid3X3, Layers2, Settings2, Info, Lock, Eye, EyeOff,
   Package, Grid2X2, Download, Search, Filter, MonitorPlay,
-  ArrowRightLeft, Radius, Diameter, Settings
+  ArrowRightLeft, Radius, Diameter, Settings, History
 } from 'lucide-react';
 import { AppSettings } from '../types';
 import { ToolbarCategory } from './App';
@@ -81,17 +81,17 @@ const ToolCircleBtn: React.FC<{
             onTouchStart={(e) => { handleStart(); }}
             onTouchEnd={(e) => { handleEnd(); }}
             disabled={disabled}
-            className={`flex-shrink-0 flex flex-col items-center justify-center active:scale-90 no-tap py-1 px-1 transition-all duration-200 ${disabled ? 'opacity-20 grayscale cursor-not-allowed' : 'cursor-pointer'}`}
+            className={`flex-shrink-0 flex flex-col items-center justify-center active:scale-95 no-tap py-1 px-1.5 min-w-[56px] transition-all duration-200 ${disabled ? 'opacity-20 grayscale cursor-not-allowed' : 'cursor-pointer'}`}
         >
-            <div className={`w-[44px] h-[44px] rounded-full border flex items-center justify-center transition-all duration-300 relative
-                ${active ? 'bg-[#00bcd4] text-black border-[#00bcd4] scale-110 z-10' : 
+            <div className={`w-[48px] h-[48px] rounded-full border flex items-center justify-center transition-all duration-300 relative
+                ${active ? 'bg-[#00bcd4]/10 text-[#00bcd4] border-[#00bcd4] ring-4 ring-[#00bcd4]/20 z-10' : 
                   danger ? 'bg-red-950/20 border-red-900/40 text-red-500 hover:border-red-500 hover:bg-red-500/10' :
                   'bg-[#121214] border-white/10 text-neutral-400'}
                 ${isHovered && !active && !disabled ? 'border-[#00bcd4] text-[#00bcd4] scale-105' : ''}`}
             >
-                {React.cloneElement(icon as React.ReactElement, { size: 19, strokeWidth: active ? 2.5 : 2 })}
+                {React.cloneElement(icon as React.ReactElement, { size: 20, strokeWidth: active ? 2.5 : 2 })}
             </div>
-            <span className={`text-[8px] font-black uppercase mt-1.5 tracking-[0.1em] leading-none transition-colors duration-300 ${active ? 'text-[#00bcd4]' : isHovered ? 'text-neutral-300' : 'text-neutral-600'}`}>{label}</span>
+            <span className={`text-[7.5px] font-black uppercase mt-2 tracking-[0.15em] leading-none transition-colors duration-300 ${active ? 'text-[#00bcd4]' : isHovered ? 'text-neutral-300' : 'text-neutral-600'}`}>{label}</span>
         </button>
     );
 };
@@ -124,7 +124,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
             <ToolCircleBtn onClick={() => onCommand('a')} icon={<RotateCw />} label="ARC" active={activeCommandName === 'ARC'} />
             <ToolCircleBtn onClick={() => onCommand('el')} icon={<CircleDashed />} label="ELLIPSE" active={activeCommandName === 'ELLIPSE'} />
             <ToolCircleBtn onClick={() => onCommand('xl')} icon={<Infinity />} label="XLINE" active={activeCommandName === 'XLINE'} />
-            <ToolCircleBtn onClick={() => onCommand('ray')} icon={<ArrowUpRight />} label="XRAY" active={activeCommandName === 'RAY'} />
+            <ToolCircleBtn onClick={() => onCommand('ray')} icon={<ArrowUpRight />} label="RAY" active={activeCommandName === 'RAY'} />
             <ToolCircleBtn onClick={() => onCommand('dl')} icon={<Rows />} label="DLINE" active={activeCommandName === 'DLINE'} />
             <ToolCircleBtn onClick={() => onCommand('po')} icon={<Dot />} label="POINT" active={activeCommandName === 'POINT'} />
             <ToolCircleBtn onClick={() => onCommand('donut')} icon={<CircleOff />} label="DONUT" active={activeCommandName === 'DONUT'} />
@@ -156,6 +156,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
           <>
             <ToolCircleBtn onClick={() => onCommand('select')} icon={<MousePointer2 />} label="SELECT" active={activeCommandName === 'SELECT'} />
             <ToolCircleBtn onClick={() => onAction('undo')} icon={<RotateCcw />} label="UNDO" disabled={!canUndo} />
+            <ToolCircleBtn onClick={() => onAction('redo')} icon={<RotateCw />} label="REDO" disabled={!canRedo} />
             <ToolCircleBtn onClick={() => onCommand('all')} icon={<MousePointer />} label="ALL" />
             <ToolCircleBtn onClick={() => onCommand('cut')} icon={<Scissors />} label="CUT" />
             <ToolCircleBtn onClick={() => onCommand('copyclip')} icon={<Copy />} label="COPY" />
@@ -236,6 +237,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
             <ToolCircleBtn onClick={() => onCommand('zoom w')} icon={<BoxSelect />} label="Z-W" active={activeCommandName === 'ZOOM'} />
             <ToolCircleBtn onClick={() => onAction('zoomIn')} icon={<ZoomIn />} label="Z- in" />
             <ToolCircleBtn onClick={() => onAction('zoomOut')} icon={<ZoomOut />} label="Z- out" />
+            <ToolCircleBtn onClick={() => onAction('zoomPrevious')} icon={<History />} label="Z-P" />
             <ToolCircleBtn onClick={() => onCommand('p')} icon={<Hand />} label="Z- pan" active={activeCommandName === 'PAN'} />
           </>
         );
@@ -296,7 +298,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
            <button onClick={() => onAction('cancel')} className="shrink-0 px-3 py-1 rounded-md bg-red-500/10 border border-red-500/30 text-red-500 text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all">Cancel</button>
         </div>
       )}
-      <div className="w-full flex items-center gap-4 px-4 h-[64px] overflow-x-auto scrollbar-none touch-pan-x overscroll-x-contain">
+      <div className="w-full flex items-center gap-4 px-4 h-[84px] overflow-x-auto scrollbar-none touch-pan-x overscroll-x-contain">
         {renderContent()}
       </div>
     </div>

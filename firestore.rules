@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    // Validation for UserMetadata
+    function isValidUserMetadata(data) {
+      return data.uid is string && data.uid == request.auth.uid &&
+             (!data.keys().hasAny(['theme']) || data.theme in ['light', 'dark']) &&
+             data.lastModified is timestamp &&
+             data.keys().hasAll(['uid', 'lastModified']) &&
+             data.keys().size() <= 6; // uid, theme, lastModified, deviceInfo, etc.
+    }
+
+    // Validation for FileMetadata
+    function isValidFileMetadata(data) {
+      return data.fileName is string && data.fileName.size() <= 255 &&
+             data.lastModified is timestamp &&
+             (!data.keys().hasAny(['fileSize']) || data.fileSize is number) &&
+             (!data.keys().hasAny(['tags']) || (data.tags is list && data.tags.size() <= 20)) &&
+             data.keys().hasAll(['fileName', 'lastModified']);
+    }
+
+    // Match patterns
+    match /users/{userId}/metadata {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUserMetadata(incoming()) && incoming().lastModified == request.time;
+      allow update: if isOwner(userId) && isValidUserMetadata(incoming()) && incoming().lastModified == request.time;
+    }
+
+    match /users/{userId}/files/{fileId} {
+      allow get: if isOwner(userId);
+      allow list: if isOwner(userId); // Query enforcer via path variable logic
+      allow create: if isOwner(userId) && isValidId(fileId) && isValidFileMetadata(incoming()) && incoming().lastModified == request.time;
+      allow update: if isOwner(userId) && isValidId(fileId) && isValidFileMetadata(incoming()) && 
+                    incoming().lastModified == request.time &&
+                    incoming().fileName == existing().fileName; // Immutable filename for existing docs in this logic
+      allow delete: if isOwner(userId);
+    }
+  }
+}

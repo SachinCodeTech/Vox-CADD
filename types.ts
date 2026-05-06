@@ -35,6 +35,8 @@ export interface BaseShape {
   _bounds?: { xMin: number, yMin: number, xMax: number, yMax: number };
   /** @internal Cached length/perimeter for line type scaling */
   _length?: number;
+  /** @internal Cached segments for performance */
+  _segments?: { p1: Point, p2: Point }[];
 }
 
 export interface LineShape extends BaseShape {
@@ -258,6 +260,7 @@ export interface LayerConfig {
   visible: boolean;
   locked: boolean;
   frozen: boolean;
+  plottable: boolean;
   color: string;
   thickness: number;
   lineType: LineType;

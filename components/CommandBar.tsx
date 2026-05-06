@@ -23,7 +23,7 @@ const COMMAND_LIST = [
     { cmd: 'MOVE', alias: 'M' }, { cmd: 'COPY', alias: 'CO' }, { cmd: 'ROTATE', alias: 'RO' },
     { cmd: 'SCALE', alias: 'SC' }, { cmd: 'MIRROR', alias: 'MI' }, { cmd: 'STRETCH', alias: 'S' },
     { cmd: 'EXTEND', alias: 'EX' }, { cmd: 'TRIM', alias: 'TR' }, { cmd: 'FILLET', alias: 'F' },
-    { cmd: 'OFFSET', alias: 'O' }, { cmd: 'EXPLODE', alias: 'X' }, { cmd: 'ERASE', alias: 'E' },
+    { cmd: 'CHAMFER', alias: 'CHA' }, { cmd: 'OFFSET', alias: 'O' }, { cmd: 'EXPLODE', alias: 'X' }, { cmd: 'ERASE', alias: 'E' },
     { cmd: 'ZOOM', alias: 'Z' }, { cmd: 'PAN', alias: 'P' },
     { cmd: 'DIST', alias: 'DI' }, { cmd: 'AREA', alias: 'AA' },
     { cmd: 'MTEXT', alias: 'MT' }, { cmd: 'TEXT', alias: 'T' }, 
@@ -128,8 +128,12 @@ const CommandBar: React.FC<CommandBarProps> = ({
         } else {
             onChange('');
         }
+    } else if (e.key === ' ' && value.trim()) {
+        // CAD specific: Spacebar acts as Enter to complete commands
+        e.preventDefault();
+        handleSubmit();
     } else if (e.key === ' ' && !value.trim()) {
-        // CAD specific: Spacebar acts as Enter when input is empty
+        // CAD specific: Spacebar acts as Enter when input is empty (repeats last or finishes)
         e.preventDefault();
         handleSubmit();
     }
@@ -243,10 +247,12 @@ const CommandBar: React.FC<CommandBarProps> = ({
                         ))}
                     </div>
                 )}
-                <div className="text-[8px] font-black text-[#00bcd4] uppercase tracking-widest shrink-0 font-mono pr-2 border-r border-white/5 pt-3">
-                    {prompt}
-                </div>
-                <div className="flex-1 min-w-0 h-full">
+                <div className="flex flex-col flex-1 min-w-0 h-full py-2">
+                    {prompt && prompt !== "COMMAND:" && (
+                        <div className="text-[9px] font-bold text-[#00bcd4] uppercase tracking-wider mb-1 opacity-80 break-words leading-relaxed">
+                            {prompt}
+                        </div>
+                    )}
                     <textarea 
                         autoFocus
                         name={`vox-cmd-${Date.now()}`}
@@ -256,18 +262,18 @@ const CommandBar: React.FC<CommandBarProps> = ({
                             setShowSuggestions(true);
                             setSuggestionIdx(-1);
                             e.target.style.height = 'auto';
-                            e.target.style.height = `${Math.max(40, Math.min(e.target.scrollHeight, 150))}px`;
+                            e.target.style.height = `${Math.max(32, Math.min(e.target.scrollHeight, 120))}px`;
                         }}
                         onKeyDown={e => {
                           if (e.key === 'Enter' && !e.shiftKey) {
                             e.preventDefault();
                             handleSubmit(e as any);
-                            (e.target as HTMLTextAreaElement).style.height = '40px';
+                            (e.target as HTMLTextAreaElement).style.height = '32px';
                           } else {
                             handleKeyDown(e as any);
                           }
                         }}
-                        className="w-full bg-transparent text-white font-mono outline-none text-[11px] uppercase tracking-widest placeholder:text-neutral-900 select-text resize-none py-2.5 h-[40px] max-h-[150px] scrollbar-thin scrollbar-thumb-white/10 block focus:ring-0"
+                        className="w-full bg-transparent text-white font-mono outline-none text-[12px] uppercase tracking-widest placeholder:text-neutral-800 select-text resize-none py-1 h-[32px] max-h-[120px] scrollbar-thin scrollbar-thumb-white/10 block focus:ring-0"
                         placeholder="ENTER COMMAND..."
                         autoComplete="off-vox"
                         autoCorrect="off"
@@ -277,7 +283,15 @@ const CommandBar: React.FC<CommandBarProps> = ({
                         role="presentation"
                     />
                 </div>
-                <div className="flex items-center self-stretch py-1.5 pl-2 shrink-0">
+                <div className="flex items-end gap-1.5 py-1.5 shrink-0">
+                    <button 
+                        type="button" 
+                        onClick={onLiveToggle} 
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${isLiveActive ? 'text-white bg-red-600 animate-pulse' : 'text-neutral-600 hover:bg-white/5'}`}
+                        title="Voice Input"
+                    >
+                        {isLiveActive ? <MicOff size={14} /> : <Mic size={14} />}
+                    </button>
                     <button 
                         type="submit" 
                         className={`w-8 h-8 rounded-lg transition-all flex items-center justify-center active:scale-90 shadow-lg ${!value && isCommandActive ? 'bg-emerald-500 text-black shadow-emerald-900/20' : 'bg-cyan-500 text-black shadow-cyan-900/20'}`}
@@ -287,8 +301,8 @@ const CommandBar: React.FC<CommandBarProps> = ({
                 </div>
             </form>
           ) : (
-            <form onSubmit={handleSubmit} className={`flex items-start gap-2 bg-[#0a0a0c] border rounded-xl px-3 min-h-10 transition-all ${isAiThinking ? 'border-indigo-500' : 'border-white/10 focus-within:border-indigo-500/50'}`}>
-                <div className="flex items-center gap-2 shrink-0 pt-3">
+            <form onSubmit={handleSubmit} className={`flex items-end gap-2 bg-[#0a0a0c] border rounded-xl px-3 py-1.5 min-h-10 transition-all ${isAiThinking ? 'border-indigo-500' : 'border-white/10 focus-within:border-indigo-500/50'}`}>
+                <div className="flex items-center gap-2 shrink-0 pb-2">
                   <div className="relative">
                     <Bot size={14} className={isAiThinking ? 'text-indigo-400 animate-pulse' : 'text-indigo-500'} />
                     {isAiThinking && <div className="absolute inset-0 bg-indigo-500/20 blur-sm animate-ping rounded-full" />}
@@ -303,17 +317,17 @@ const CommandBar: React.FC<CommandBarProps> = ({
                         onChange={e => {
                             onChange(e.target.value);
                             e.target.style.height = 'auto';
-                            e.target.style.height = `${Math.min(e.target.scrollHeight, 150)}px`;
+                            e.target.style.height = `${Math.max(32, Math.min(e.target.scrollHeight, 120))}px`;
                         }}
                         onKeyDown={e => {
                           if (e.key === 'Enter' && !e.shiftKey && !isAiThinking) {
                             e.preventDefault();
                             handleSubmit(e as any);
-                            (e.target as HTMLTextAreaElement).style.height = 'auto';
+                            (e.target as HTMLTextAreaElement).style.height = '32px';
                           }
                         }}
-                        className="w-full bg-transparent text-white outline-none text-[10px] sm:text-[11px] placeholder:text-neutral-800 tracking-tight disabled:opacity-50 select-text font-medium resize-none py-2.5 h-[40px] max-h-[150px] scrollbar-none block focus:ring-0 ring-offset-0 ring-0"
-                        placeholder={isAiThinking ? "PRINCIPAL ARCHITECT IS THINKING..." : "CONSULT ARCHITECT (E.G. 'DESIGN A 2BHK APARTMENT', 'CALCULATE LIVING AREA')..."}
+                        className="w-full bg-transparent text-white outline-none text-[11px] placeholder:text-neutral-800 tracking-tight disabled:opacity-50 select-text font-medium resize-none py-1.5 h-[32px] max-h-[120px] scrollbar-none block focus:ring-0 ring-offset-0 ring-0"
+                        placeholder={isAiThinking ? "PRINCIPAL ARCHITECT IS THINKING..." : "CONSULT ARCHITECT (E.G. 'DESIGN A 2BHK APARTMENT')..."}
                         autoComplete="new-ai-query"
                         autoCorrect="off"
                         autoCapitalize="off"
@@ -322,7 +336,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
                         role="presentation"
                     />
                 </div>
-                <div className="flex items-center gap-1.5 self-stretch py-2 shrink-0 pl-1">
+                <div className="flex items-center gap-1.5 py-1 shrink-0 pl-1">
                     <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => {
                         const f = e.target.files?.[0];
                         if (f) {
@@ -335,7 +349,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
                     <button type="button" disabled={isAiThinking} onClick={onLiveToggle} className={`p-1.5 rounded-lg flex items-center justify-center transition-all ${isLiveActive ? 'text-white bg-red-600 animate-pulse' : 'text-neutral-600 hover:bg-white/5'}`}>
                         {isLiveActive ? <MicOff size={14} /> : <Mic size={14} />}
                     </button>
-                    <button type="submit" disabled={isAiThinking || (!value.trim() && !attachment)} className={`w-8 h-8 rounded-xl text-white flex items-center justify-center shadow-lg active:scale-95 transition-all shrink-0 ${isAiThinking ? 'bg-neutral-800' : 'bg-indigo-600 shadow-indigo-900/20'}`}>
+                    <button type="submit" disabled={isAiThinking || (!value.trim() && !attachment)} className={`w-8 h-8 rounded-lg text-white flex items-center justify-center shadow-lg active:scale-95 transition-all shrink-0 ${isAiThinking ? 'bg-neutral-800' : 'bg-indigo-600 shadow-indigo-900/20'}`}>
                         {isAiThinking ? <div className="w-3 h-3 border-2 border-white/20 border-t-white rounded-full animate-spin" /> : <Send size={14} strokeWidth={3} />}
                     </button>
                 </div>

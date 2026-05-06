@@ -1,0 +1,38 @@
+{
+  "entities": {
+    "UserMetadata": {
+      "title": "User Metadata",
+      "description": "Lightweight sync data for user preferences and state.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "theme": { "type": "string", "enum": ["light", "dark"], "description": "UI Theme preference" },
+        "lastModified": { "type": "string", "format": "date-time", "description": "Last time metadata was changed" },
+        "deviceInfo": { "type": "string", "description": "Brief description of the current device" }
+      },
+      "required": ["uid", "lastModified"]
+    },
+    "FileMetadata": {
+      "title": "File Metadata",
+      "description": "Metadata about local CAD files (no file content).",
+      "type": "object",
+      "properties": {
+        "fileName": { "type": "string", "description": "Name of the file" },
+        "fileSize": { "type": "number", "description": "Size in bytes (approx)" },
+        "lastModified": { "type": "string", "format": "date-time", "description": "Last modified date" },
+        "tags": { "type": "array", "items": { "type": "string" }, "description": "Optional user tags" }
+      },
+      "required": ["fileName", "lastModified"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/metadata": {
+      "schema": "UserMetadata",
+      "description": "Stores user-specific app settings and metadata."
+    },
+    "/users/{userId}/files/{fileId}": {
+      "schema": "FileMetadata",
+      "description": "Optional metadata reference for local files."
+    }
+  }
+}
