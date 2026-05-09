@@ -14,14 +14,17 @@ import DrawingProperties from './DrawingProperties';
 import InfoPanel from './InfoPanel';
 import NewFileDialog from './NewFileDialog';
 import HatchPatternSelector from './HatchPatternSelector';
+import LineTypeManager from './LineTypeManager';
 import MTextEditor from './MTextEditor';
-import DimStyleManager from './DimStyleManager';
+import DimensionStyleManager from './DimStyleManager'; // Assuming it's already imported
+import ColorSelector from './ColorSelector';
+import CtbManager from './CtbManager';
 import LoadingScreen from './LoadingScreen';
 import OfflineIndicator from './OfflineIndicator';
 import { Share as CapacitorShare } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Capacitor } from '@capacitor/core';
-import { generateId, hitTestGrip, getAllShapesBounds } from '../services/cadService';
+import { generateId, hitTestGrip, getAllShapesBounds, getShapeBounds, scaleShape } from '../services/cadService';
 import { getCommandFromAI, connectLiveAgent } from '../services/geminiService';
 import { shapesToDXF, dxfToProject } from '../services/dxfService';
 import { shapesToVox, voxToProject, createEmptyVoxProject } from '../services/voxService';
@@ -29,7 +32,7 @@ import { dwgToProject } from '../services/DwgService';
 import { 
   CADCommand, CommandEngine, LineCommand, DoubleLineCommand, CircleCommand, RectCommand, PolyCommand, 
   ArcCommand, MoveCommand, EraseCommand, DistanceCommand, AreaCommand, 
-  DimensionCommand, TextCommand, MTextCommand, ZoomCommand, 
+  DimensionCommand, TextCommand, MTextCommand, ZoomCommand, ZoomRealTimeCommand, 
   RotateCommand, ScaleCommand, MirrorCommand, CopyCommand,
   ExtendCommand, ExplodeCommand,
   RayCommand, XLineCommand,
@@ -39,17 +42,22 @@ import {
   ArrayCommand, BlockCommand, InsertCommand, FilterCommand, FindCommand, ViewportCommand, LayoutCommand, GripEditCommand, ImportCommand
 } from '../services/commandEngine';
 import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType, BlockDefinition, LayoutDefinition, LayoutViewport, LineTypeDefinition } from '../types';
-import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive, AlertTriangle, Cpu, Move, Copy, Maximize2, FlipHorizontal, Trash2, History } from 'lucide-react';
+import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive, AlertTriangle, Cpu, Move, Copy, Maximize2, FlipHorizontal, Trash2, History, Palette } from 'lucide-react';
 
 import VoxIcon from './VoxIcon';
 import ImportSummaryDialog from './ImportSummaryDialog';
 import { storageService } from '../services/storageService';
 import { trackFileMetadata, syncUserMetadata, onAuthChange, logAppEvent } from '../services/firebaseService';
 
+import { createAcadCtb, createDefaultCtb } from '../services/ctbService';
+
+const acadCtb = createAcadCtb();
+const monoCtb = createDefaultCtb();
+
 const INITIAL_SETTINGS: AppSettings = {
   ortho: true, snap: true, grid: true,
-  currentLayer: '0', drawingScale: 1, penThickness: 1,
-  activeLineType: 'continuous',
+  currentLayer: '0', drawingScale: 1, penThickness: 'BYLAYER',
+  activeLineType: 'bylayer',
   cursorX: 0, cursorY: 0, 
   units: 'metric', unitSubtype: 'mm', 
   linearFormat: 'decimal', angularFormat: 'decimalDegrees', anglePrecision: '0', 
@@ -79,6 +87,7 @@ const INITIAL_SETTINGS: AppSettings = {
       extendLine: 100, offsetLine: 80, precision: 1 
     }
   },
+  ltScale: 1.0,
   limitsMin: { x: 0, y: 0 },
   limitsMax: { x: 42000, y: 29700 }, // Default A3 in mm (scaled up for visibility)
   metadata: {
@@ -88,17 +97,22 @@ const INITIAL_SETTINGS: AppSettings = {
     revision: 'REV-01',
     projectRevision: 'V-1.0',
     description: ''
+  },
+  activeCtbId: 'acad',
+  ctbFiles: {
+    'acad': acadCtb,
+    'monochrome': monoCtb
   }
 };
 
 const INITIAL_VIEW: ViewState = { scale: 0.05, originX: 0, originY: 0 };
 const INITIAL_LAYERS_CONFIG: Record<string, LayerConfig> = { 
-  '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FF0000', thickness: 0.25, lineType: 'continuous' },
+  '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' },
   'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, plottable: false, color: '#666666', thickness: 0.1, lineType: 'continuous' }
 };
 
 export type ToolbarCategory = 'Draw' | 'Modify' | 'Anno' | 'View' | 'Tools' | 'History' | 'Edit';
-type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 'file' | 'mainmenu' | 'drawing_props' | 'help' | 'about' | 'privacy' | 'new_file' | 'dimstyle';
+type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 'file' | 'mainmenu' | 'drawing_props' | 'help' | 'about' | 'privacy' | 'new_file' | 'dimstyle' | 'linetypes';
 
 const STORAGE_PREFIX = 'voxcadd_file_v1_';
 const REGISTRY_KEY = 'voxcadd_recent_files';
@@ -368,6 +382,11 @@ const App: React.FC = () => {
   const [hatchSelector, setHatchSelector] = useState<{ 
     callback: (pattern: string) => void 
   } | null>(null);
+  const [colorSelector, setColorSelector] = useState<{
+    currentColor: string,
+    onSelect: (color: string) => void,
+    title?: string
+  } | null>(null);
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [lastAiCommandTime, setLastAiCommandTime] = useState(0);
   const [isAppLoading, setIsAppLoading] = useState(true);
@@ -551,6 +570,23 @@ const App: React.FC = () => {
 
   const view = tabViews[activeTab] || { scale: 1, originX: 0, originY: 0 };
 
+  const clampViewState = (next: ViewState, prev: ViewState): ViewState => {
+    let s = next.scale;
+    if (isNaN(s) || !isFinite(s)) s = prev.scale;
+    s = Math.max(0.0000001, Math.min(10000000, s));
+    
+    let ox = next.originX;
+    let oy = next.originY;
+    if (isNaN(ox) || !isFinite(ox)) ox = prev.originX;
+    if (isNaN(oy) || !isFinite(oy)) oy = prev.originY;
+    
+    const limit = 1e12;
+    ox = Math.max(-limit, Math.min(limit, ox));
+    oy = Math.max(-limit, Math.min(limit, oy));
+    
+    return { scale: s, originX: ox, originY: oy };
+  };
+
   const setView = useCallback((updater: ViewState | ((v: ViewState) => ViewState)) => {
     if (activeTab !== 'model' && isViewportActive && activeViewportId) {
       setLayouts(prevLayouts => {
@@ -563,7 +599,9 @@ const App: React.FC = () => {
         
         if (vpIndex !== -1) {
           const vp = { ...layout.viewports[vpIndex] };
-          vp.viewState = typeof updater === 'function' ? (updater as any)(vp.viewState) : updater;
+          const current = vp.viewState;
+          const next = typeof updater === 'function' ? (updater as any)(current) : updater;
+          vp.viewState = clampViewState(next, current);
           
           const newVps = [...layout.viewports];
           newVps[vpIndex] = vp;
@@ -579,7 +617,8 @@ const App: React.FC = () => {
     setTabViews(prev => {
       const current = prev[activeTab] || { scale: 1, originX: 0, originY: 0 };
       const next = typeof updater === 'function' ? (updater as (v: ViewState) => ViewState)(current) : updater;
-      return { ...prev, [activeTab]: next };
+      const clamped = clampViewState(next, current);
+      return { ...prev, [activeTab]: clamped };
     });
   }, [activeTab, isViewportActive, activeViewportId]);
 
@@ -602,11 +641,19 @@ const App: React.FC = () => {
 
   const [viewHistory, setViewHistory] = useState<ViewState[]>([]);
   const saveToViewHistory = useCallback(() => {
-    const current = tabViewsRef.current[activeTabRef.current];
-    if (current) {
-      setViewHistory(prev => [...prev.slice(-10), { ...current }]);
+    let current: ViewState | undefined;
+    if (activeTabRef.current !== 'model' && isViewportActive && activeViewportIdRef.current) {
+        const layout = layoutsRef.current.find(l => l.id === activeTabRef.current);
+        const vp = layout?.viewports.find(v => v.id === activeViewportIdRef.current);
+        current = vp?.viewState;
+    } else {
+        current = tabViewsRef.current[activeTabRef.current];
     }
-  }, []);
+    
+    if (current) {
+      setViewHistory(prev => [...prev.slice(-15), { ...current }]);
+    }
+  }, [isViewportActive]);
 
   const tabViewsRef = useRef(tabViews);
   const activeTabRef = useRef(activeTab);
@@ -678,8 +725,18 @@ const App: React.FC = () => {
           }
       }
 
-      localStorage.setItem(REGISTRY_KEY, JSON.stringify(validRecentFiles));
-      setRecentFiles(validRecentFiles);
+      // Ensure unique by name to prevent key collisions
+      const uniqueValid: {name: string, date: number}[] = [];
+      const seenNames = new Set<string>();
+      for (const f of validRecentFiles) {
+        if (!seenNames.has(f.name)) {
+          uniqueValid.push(f);
+          seenNames.add(f.name);
+        }
+      }
+
+      localStorage.setItem(REGISTRY_KEY, JSON.stringify(uniqueValid));
+      setRecentFiles(uniqueValid);
 
       if (saved) {
         try {
@@ -742,23 +799,37 @@ const App: React.FC = () => {
     const isDwg = fileName.toLowerCase().endsWith('.dwg');
     const isVox = fileName.toLowerCase().endsWith('.vox');
     
+    // Close menu immediately
+    setActivePanel('none');
+    setFileNameMenuOpen(false);
+    setFileMenuOpen(false);
     setLoadingFile(true);
     setLoadingStatus(`Importing ${fileName}...`);
     
+    // Yield to let the loading screen render
+    await new Promise(resolve => setTimeout(resolve, 50));
+
     try {
         let project: any = null;
 
         if (isDwg) {
             if (!(content instanceof ArrayBuffer)) {
                 setLogMessage("LOAD_ERR: BINARY_DATA_REQUIRED");
+                setLoadingFile(false);
                 return;
             }
             project = await dwgToProject(content, settingsRef.current);
         } else if (isDxf) {
-            if (typeof content !== 'string') return;
-            project = dxfToProject(content, settingsRef.current);
+            if (typeof content !== 'string') {
+                setLoadingFile(false);
+                return;
+            }
+            project = await dxfToProject(content, settingsRef.current);
         } else if (isVox) {
-            if (typeof content !== 'string') return;
+            if (typeof content !== 'string') {
+                setLoadingFile(false);
+                return;
+            }
             project = voxToProject(content);
         }
 
@@ -767,70 +838,101 @@ const App: React.FC = () => {
             const layerMap: Record<string, Shape[]> = {};
             const finalLayerConfig = { ...project.layers };
 
-            // Initialize all defined layers
-            Object.keys(finalLayerConfig).forEach(id => {
-                layerMap[id] = [];
-            });
+            // Initialize all defined layers- Optimized
+            const layerKeys = Object.keys(finalLayerConfig);
+            for (let i = 0; i < layerKeys.length; i++) {
+                layerMap[layerKeys[i]] = [];
+            }
 
             // Ensure standard default layers exist
             if (!finalLayerConfig['0']) {
                 finalLayerConfig['0'] = { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' };
-                layerMap['0'] = [];
+                layerMap['0'] = layerMap['0'] || [];
             }
             if (!finalLayerConfig['defpoints']) {
                 finalLayerConfig['defpoints'] = { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, plottable: false, color: '#666666', thickness: 0.1, lineType: 'continuous' };
-                layerMap['defpoints'] = [];
+                layerMap['defpoints'] = layerMap['defpoints'] || [];
             }
 
-            // Map entities and discover any missing layers
-            project.entities.forEach((s: Shape) => {
-                const l = s.layer || '0';
-                if (!layerMap[l]) {
-                    layerMap[l] = [];
-                    if (!finalLayerConfig[l]) {
-                        finalLayerConfig[l] = { 
-                            id: l, name: l, visible: true, locked: false, frozen: false, 
-                            plottable: l.toLowerCase() !== 'defpoints', 
-                            color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' 
-                        };
+            // Map entities and discover any missing layers - Optimized with chunking for large files
+            const entitiesList = project.entities;
+            const numEntities = entitiesList.length;
+            const chunkSize = 2000;
+            
+            const processChunk = (startIndex: number) => {
+                const endIndex = Math.min(startIndex + chunkSize, numEntities);
+                setLoadingStatus(`Processing entities ${startIndex} to ${endIndex} of ${numEntities}...`);
+                
+                for (let i = startIndex; i < endIndex; i++) {
+                    const s = entitiesList[i];
+                    // Pre-calculate bounds for rendering performance
+                    getShapeBounds(s, project.blocks || {});
+                    
+                    const l = s.layer || '0';
+                    if (!layerMap[l]) {
+                        layerMap[l] = [];
+                        if (!finalLayerConfig[l]) {
+                            finalLayerConfig[l] = { 
+                                id: l, name: l, visible: true, locked: false, frozen: false, 
+                                plottable: l.toLowerCase() !== 'defpoints', 
+                                color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' 
+                            };
+                        }
                     }
+                    layerMap[l].push(s);
                 }
-                layerMap[l].push(s);
-            });
-
-            // Update state
-            setLayers(layerMap);
-            setLayerConfig(finalLayerConfig);
-            setLineTypes(project.lineTypes || { 'continuous': { name: 'continuous', description: 'Solid line', pattern: [] } });
-            setSettings(project.settings);
-            setBlocks(project.blocks || {});
-            setLayouts(project.layouts ? Object.values(project.layouts) : []);
-            setCurrentFileName(fileName);
-            setFileSource(source);
-            updateRecentFiles(fileName);
-            
-            // Save to internal storage for persistence in Recent Files
-            const stateToSave = {
-                layers: layerMap,
-                layerConfig: project.layers,
-                settings: project.settings,
-                lineTypes: project.lineTypes,
-                blocks: project.blocks,
-                layouts: project.layouts,
-                fileName: fileName
+                
+                if (endIndex < numEntities) {
+                    setTimeout(() => processChunk(endIndex), 0);
+                } else {
+                    finishImport();
+                }
             };
-            await storageService.saveLarge(`${STORAGE_PREFIX}${fileName}`, stateToSave);
-            
-            // Zoom extents if bounds exist
-            if (project.bounds) {
-                setTimeout(() => handleAction('zoomExtents'), 100);
-            }
 
-            if (project.stats) {
-                setImportSummary({ fileName, stats: project.stats });
-            }
+            const finishImport = () => {
+                // Update state
+                setLayers(layerMap);
+                setLayerConfig(finalLayerConfig);
+                setLineTypes(project.lineTypes || { 'continuous': { name: 'continuous', description: 'Solid line', pattern: [] } });
+                setSettings(project.settings);
+                setBlocks(project.blocks || {});
+                setLayouts(project.layouts ? Object.values(project.layouts) : []);
+                setCurrentFileName(fileName);
+                setFileSource(source);
+                updateRecentFiles(fileName);
+                setLoadingFile(false);
+                
+                // Save to internal storage (Deferred)
+                setTimeout(async () => {
+                    const stateToSave = {
+                        layers: layerMap,
+                        layerConfig: finalLayerConfig,
+                        settings: project.settings,
+                        lineTypes: project.lineTypes,
+                        blocks: project.blocks,
+                        layouts: project.layouts,
+                        fileName: fileName
+                    };
+                    await storageService.saveLarge(`${STORAGE_PREFIX}${fileName}`, stateToSave);
+                    // Also save as active workspace
+                    await storageService.saveActiveWorkspace(stateToSave);
+                    commitToHistory();
+                }, 500);
 
-            setLogMessage(`${fileName.toUpperCase()}_LOADED_SUCCESS`);
+                // Zoom extents if bounds exist
+                if (project.bounds) {
+                    setTimeout(() => handleAction('zoomExtents'), 100);
+                }
+
+                if (project.stats) {
+                    setImportSummary({ fileName, stats: project.stats });
+                }
+
+                setLogMessage(`${fileName.toUpperCase()}_LOADED_SUCCESS`);
+            };
+
+            processChunk(0);
+            return;
         } else {
             setLogMessage("LOAD_ERR: INVALID_PROJECT_CONTENT");
         }
@@ -846,7 +948,16 @@ const App: React.FC = () => {
   };
 
   const commitToHistory = useCallback(() => {
-    const currentState = JSON.parse(JSON.stringify(layersRef.current));
+    // Avoid slow deep cloning via JSON methods
+    const current = layersRef.current;
+    const currentState: Record<string, Shape[]> = {};
+    const keys = Object.keys(current);
+    for (let k = 0; k < keys.length; k++) {
+        const key = keys[k];
+        // We only clone the layer array, treating shapes as immutable
+        currentState[key] = [...current[key]];
+    }
+    
     setHistory(prev => [...prev.slice(-49), currentState]);
     setRedoStack([]);
     
@@ -866,6 +977,53 @@ const App: React.FC = () => {
     }
   }, [currentFileName]);
 
+  const handleSettingsChange = useCallback((upd: Partial<AppSettings>) => {
+    const prev = settingsRef.current;
+    
+    // Check if units or subunits changed for potential conversion
+    const unitsChanged = upd.units !== undefined && upd.units !== prev.units;
+    const subtypeChanged = upd.unitSubtype !== undefined && upd.unitSubtype !== prev.unitSubtype;
+    
+    if (unitsChanged || subtypeChanged) {
+        const nextUnits = upd.units || prev.units;
+        const nextSubtype = upd.unitSubtype || prev.unitSubtype;
+        
+        setPromptDialog({
+            title: 'Convert Units',
+            message: `You are switching to ${nextSubtype}. Would you like to rescale existing geometry to maintain physical size?`,
+            initialValue: '',
+            type: 'confirm',
+            onConfirm: () => {
+                // Conversion Factors to MM
+                const factors: Record<string, number> = {
+                    'mm': 1, 'cm': 10, 'm': 1000, 'km': 1000000,
+                    'inches': 25.4, 'feet': 304.8, 'yards': 914.4, 'miles': 1609344
+                };
+                
+                const fromFactor = factors[prev.unitSubtype] || 1;
+                const toFactor = factors[nextSubtype] || 1;
+                const factor = fromFactor / toFactor;
+                
+                if (Math.abs(factor - 1) > 0.000001) {
+                    setLayers(prevLayers => {
+                        const next = { ...prevLayers };
+                        Object.keys(next).forEach(l => {
+                            next[l] = next[l].map(s => scaleShape(s, { x: 0, y: 0 }, factor));
+                        });
+                        return next;
+                    });
+                    commitToHistory();
+                    setLogMessage(`DRAWING_RESCALED_BY_FACTOR: ${factor.toFixed(4)}`);
+                }
+                setSettings(s => ({ ...s, ...upd }));
+            }
+        });
+        return;
+    }
+    
+    setSettings(s => ({ ...s, ...upd }));
+  }, [commitToHistory]);
+
   const undo = useCallback(() => {
     if (history.length === 0) return;
     if (navigator.vibrate) navigator.vibrate(10);
@@ -876,6 +1034,17 @@ const App: React.FC = () => {
   }, [history, layers]);
 
   const handleAction = async (act: string, payload?: any) => {
+    // Determine if we should close the active panel
+    const closeOnAction = [
+        'undo', 'redo', 'erase', 'zoomExtents', 'zoomAll', 'zoomIn', 'zoomOut', 'zoomPrevious',
+        'setUnits', 'new', 'close', 'save', 'saveAs', 'saveImage', 'share', 'publish', 'openRecent'
+    ];
+    if (closeOnAction.includes(act)) {
+        setActivePanel('none');
+        setFileNameMenuOpen(false);
+        setFileMenuOpen(false);
+    }
+
     switch(act) {
       case 'undo': undo(); break;
       case 'redo': {
@@ -902,7 +1071,9 @@ const App: React.FC = () => {
         setShowEllipseOptions(false);
         break;
       case 'toggleLayers': setActivePanel(activePanel === 'layers' ? 'none' : 'layers'); break;
+      case 'toggleLineTypes': setActivePanel(activePanel === 'linetypes' ? 'none' : 'linetypes'); break;
       case 'toggleProperties': setActivePanel(activePanel === 'properties' ? 'none' : 'properties'); break;
+      case 'toggleCtbManager': setActivePanel(activePanel === 'ctb' ? 'none' : 'ctb'); break;
       case 'toggleCalculator': setActivePanel(activePanel === 'calculator' ? 'none' : 'calculator'); break;
       case 'toggleDimStyle': setActivePanel(activePanel === 'dimstyle' ? 'none' : 'dimstyle'); break;
       case 'toggleDraftingSettings': setActivePanel(activePanel === 'drafting' ? 'none' : 'drafting'); break;
@@ -930,23 +1101,45 @@ const App: React.FC = () => {
         saveToViewHistory();
         const limits = act === 'zoomAll' ? { min: settingsRef.current.limitsMin, max: settingsRef.current.limitsMax } : undefined;
         const bounds = getAllShapesBounds(layersRef.current, blocksRef.current, limits);
-        if (bounds && canvasHandleRef.current) {
-            const w = Math.max(1, bounds.xMax - bounds.xMin);
-            const h = Math.max(1, bounds.yMax - bounds.yMin);
+        
+        let targetW, targetH, ts_scale;
+        
+        const isLayoutVP = activeTab !== 'model' && isViewportActive && activeViewportId;
+        if (isLayoutVP) {
+            const layout = layouts.find(l => l.id === activeTab);
+            const vp = layout?.viewports.find(v => v.id === activeViewportId);
+            if (vp) {
+                targetW = vp.width;
+                targetH = vp.height;
+                ts_scale = 1; // Viewport internal drawing scale is handled differently in CADCanvas
+            }
+        }
+        
+        if (!targetW && canvasHandleRef.current) {
+            const size = canvasHandleRef.current.getCanvasSize();
+            targetW = size.width;
+            targetH = size.height;
+            ts_scale = settingsRef.current.drawingScale;
+        }
+
+        if (bounds && targetW && targetH && ts_scale !== undefined) {
+            const w = Math.max(0.1, bounds.xMax - bounds.xMin);
+            const h = Math.max(0.1, bounds.yMax - bounds.yMin);
             const centerX = (bounds.xMax + bounds.xMin) / 2;
             const centerY = (bounds.yMax + bounds.yMin) / 2;
             
-            const canvas = canvasHandleRef.current.getCanvasSize();
-            const ts_scale = settingsRef.current.drawingScale;
-            const padding = 1.25; // Slightly more padding
+            const padding = 1.1; 
+            const scale = Math.min(targetW / (w * padding * ts_scale), targetH / (h * padding * ts_scale));
             
-            const scale = Math.min(canvas.width / (w * padding * ts_scale), canvas.height / (h * padding * ts_scale));
-            
-            setView({ scale, originX: -centerX * scale * ts_scale, originY: centerY * scale * ts_scale });
-            setLogMessage(`VOX_Z-${act === 'zoomAll' ? 'A' : 'E'}: [${w.toFixed(2)} x ${h.toFixed(2)}]`);
+            setView({ 
+                scale, 
+                originX: -centerX * scale * ts_scale, 
+                originY: centerY * scale * ts_scale 
+            });
+            setLogMessage(`VOX_Z-${act === 'zoomAll' ? 'A' : 'E'}: [${w.toFixed(1)} x ${h.toFixed(1)}]`);
         } else {
-            setView({ scale: 1, originX: 0, originY: 0 });
-            setLogMessage(`VOX_Z-${act === 'zoomAll' ? 'A' : 'E'}: (Empty drawing)`);
+            setView({ scale: 0.1, originX: 0, originY: 0 });
+            setLogMessage(`VOX_Z-${act === 'zoomAll' ? 'A' : 'E'}: (No Extents)`);
         }
         break;
       }
@@ -954,23 +1147,18 @@ const App: React.FC = () => {
       case 'zoomOut': {
         saveToViewHistory();
         const factor = act === 'zoomIn' ? 1.5 : 1 / 1.5;
-        setView(v => {
-            const canvasSize = canvasHandleRef.current?.getCanvasSize() || { width: 800, height: 600 };
-            const ts = v.scale * settingsRef.current.drawingScale;
-            // Center of the canvas in world space
-            const cx = -v.originX / ts;
-            const cy = v.originY / ts;
-            
-            const newScale = v.scale * factor;
-            const newTs = newScale * settingsRef.current.drawingScale;
-            
-            return {
-                ...v,
-                scale: newScale,
-                originX: -cx * newTs,
-                originY: cy * newTs
-            };
-        });
+        setView(v => ({ 
+            ...v, 
+            scale: v.scale * factor,
+            originX: v.originX * factor,
+            originY: v.originY * factor 
+        }));
+        break;
+      }
+      case 'zoomRealTime': {
+        if (engineRef.current) {
+            engineRef.current.start(new ZoomRealTimeCommand(engineRef.current.ctx));
+        }
         break;
       }
       case 'zoomPrevious': {
@@ -984,7 +1172,10 @@ const App: React.FC = () => {
         }
         break;
       }
-      case 'setUnits': setSettings(s => ({ ...s, units: payload })); break;
+      case 'setUnits': 
+        setActivePanel('none');
+        setSettings(s => ({ ...s, units: payload })); 
+        break;
       case 'new': 
         setActivePanel('new_file'); 
         break;
@@ -1156,6 +1347,7 @@ const App: React.FC = () => {
       }
 
       case 'save': {
+        setActivePanel('none');
         if (loadingFile) return;
         setLoadingFile(true);
         setLoadingStatus("SAVING TO STORAGE...");
@@ -1325,6 +1517,7 @@ const App: React.FC = () => {
         }, 50);
         break;
       case 'saveImage': {
+        setActivePanel('none');
         if (canvasHandleRef.current) {
             setIsPlotting(true);
             setPendingCapture({ type: 'image' });
@@ -1332,12 +1525,14 @@ const App: React.FC = () => {
         break;
       }
       case 'share': {
+        setActivePanel('none');
         if (loadingFile) return;
         setIsPlotting(true);
         setPendingCapture({ type: 'share', payload });
         break;
       }
       case 'publish': {
+        setActivePanel('none');
         if (loadingFile) return;
         setLoadingFile(true);
         setLoadingStatus("PUBLISHING TO GLOBAL STORAGE...");
@@ -1484,6 +1679,13 @@ const App: React.FC = () => {
 
     if (trimmed && navigator.vibrate) navigator.vibrate(10);
     
+    // Handle special internal commands
+    if (trimmed.toUpperCase() === 'CLEARLOGS' || trimmed.toUpperCase() === 'CLS') {
+        setCommandHistory([]);
+        setLogMessage("INFO: COMMAND_LOGS_CLEARED");
+        return;
+    }
+
     // Repeat last command on Enter/Space if no active command
     if (trimmed === "" && lastCommandName && !engineRef.current?.active) {
       setLogMessage(`REPEATING: ${lastCommandName.toUpperCase()}`);
@@ -1555,6 +1757,8 @@ const App: React.FC = () => {
       'angular': DimensionCommand, 'dimarc': DimensionCommand,
       't': TextCommand, 'text': TextCommand, 
       'z': ZoomCommand, 'zoom': ZoomCommand, 'tr': TrimCommand, 'trim': TrimCommand,
+      'za': ZoomCommand, 'ze': ZoomCommand, 'zw': ZoomCommand, 'zi': ZoomCommand, 'zo': ZoomCommand,
+      'zr': ZoomRealTimeCommand,
       'h': HatchCommand, 'hatch': HatchCommand, 'lea': LeaderCommand, 'leader': LeaderCommand,
       'ma': MatchPropertiesCommand, 'match': MatchPropertiesCommand, 'matchprop': MatchPropertiesCommand,
       'p': PanCommand, 'pan': PanCommand, 'o': OffsetCommand, 'offset': OffsetCommand,
@@ -1613,6 +1817,8 @@ const App: React.FC = () => {
             'mt': 'MTEXT', 'mtext': 'MTEXT',
             't': 'TEXT', 'text': 'TEXT',
             'dim': 'DIM', 'dist': 'DIST', 'area': 'AREA',
+            'za': 'ZOOM', 'ze': 'ZOOM', 'zw': 'ZOOM', 'zi': 'ZOOM', 'zo': 'ZOOM',
+            'zr': 'ZOOM_RT',
             'h': 'HATCH', 'lea': 'LEADER', 'p': 'PAN',
             'sk': 'SKETCH', 'sketch': 'SKETCH',
             'sel': 'SELECT', 'select': 'SELECT',
@@ -1668,6 +1874,12 @@ const App: React.FC = () => {
       else if (cmdKey === 'dimord') cmd = new DimensionCommand(engineRef.current!.ctx, 'ordinate');
       else if (cmdKey === 'angular') cmd = new DimensionCommand(engineRef.current!.ctx, 'angular');
       else if (cmdKey === 'dimarc') cmd = new DimensionCommand(engineRef.current!.ctx, 'arc');
+      else if (cmdKey === 'za') cmd = new ZoomCommand(engineRef.current!.ctx, 'all');
+      else if (cmdKey === 'ze') cmd = new ZoomCommand(engineRef.current!.ctx, 'extents');
+      else if (cmdKey === 'zw') cmd = new ZoomCommand(engineRef.current!.ctx, 'window');
+      else if (cmdKey === 'zr') cmd = new ZoomRealTimeCommand(engineRef.current!.ctx);
+      else if (cmdKey === 'zi') cmd = new ZoomCommand(engineRef.current!.ctx, 'in');
+      else if (cmdKey === 'zo') cmd = new ZoomCommand(engineRef.current!.ctx, 'out');
       else cmd = new CommandClass(engineRef.current!.ctx);
       
       setActiveCommandName(cmd.name);
@@ -1975,10 +2187,10 @@ const App: React.FC = () => {
                     <div className="text-[7.5px] font-black uppercase text-cyan-500 tracking-widest">Recent Documents</div>
                   </div>
                   <div className="max-h-[240px] overflow-y-auto overflow-x-hidden scrollbar-none flex flex-col gap-1">
-                    {recentFiles.length > 0 ? recentFiles.map(file => {
+                    {recentFiles.length > 0 ? recentFiles.map((file, i) => {
                       const fileName = typeof file === 'string' ? file : file.name;
                       return (
-                        <div key={fileName} className="flex items-center gap-1">
+                        <div key={`${fileName}-${i}`} className="flex items-center gap-1">
                             <button 
                               onClick={() => {
                                 handleAction('openRecent', fileName);
@@ -2030,6 +2242,12 @@ const App: React.FC = () => {
                     className="w-full text-left px-3 py-3 rounded-xl text-[10px] text-neutral-400 hover:bg-white/10 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
                   >
                     <Share2 size={16} className="text-cyan-500" /> Save As...
+                  </button>
+                  <button 
+                    onClick={() => { handleAction('toggleCtbManager'); setFileMenuOpen(false); }}
+                    className="w-full text-left px-3 py-3 rounded-xl text-[10px] text-neutral-400 hover:bg-white/10 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                  >
+                    <Palette size={16} className="text-yellow-500" /> Plot Styles (CTB)
                   </button>
                 </div>
               </>
@@ -2179,19 +2397,40 @@ const App: React.FC = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+              className="fixed inset-0 z-[1000] flex items-center justify-center sm:p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
             >
               <motion.div 
                 initial={{ scale: 0.9, opacity: 0, y: 20 }}
                 animate={{ scale: 1, opacity: 1, y: 0 }}
                 exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                className="pointer-events-auto"
+                className="pointer-events-auto w-full h-full sm:h-auto sm:w-auto flex items-center justify-center p-2 sm:p-0"
               >
                 <LayerManager 
                   layers={layerConfig} 
+                  lineTypeDefinitions={lineTypes}
                   activeLayer={settings.currentLayer} 
                   onClose={() => setActivePanel('none')} 
-                  onUpdateLayer={(id, upd) => setLayerConfig(prev => ({...prev, [id]: {...prev[id], ...upd} }))} 
+                  onOpenColorSelector={(currentColor, onSelect, title) => setColorSelector({ currentColor, onSelect, title })}
+                  onUpdateLayer={(id, upd) => {
+                    setLayerConfig(prev => ({...prev, [id]: {...prev[id], ...upd} }));
+                    // If thickness or lineType changed, ensure all objects on that layer are updated if the user wants them to follow
+                    // Actually, the prompt says "changed all objects of respective layer".
+                    // We'll set them to BYLAYER to ensure they follow the layer property.
+                    if (upd.thickness !== undefined || upd.lineType !== undefined) {
+                      setLayers(prev => {
+                        const next = { ...prev };
+                        if (next[id]) {
+                          next[id] = next[id].map(s => {
+                            const newShape = { ...s };
+                            if (upd.thickness !== undefined) newShape.thickness = 'BYLAYER';
+                            if (upd.lineType !== undefined) newShape.lineType = 'bylayer';
+                            return newShape;
+                          });
+                        }
+                        return next;
+                      });
+                    }
+                  }} 
                   onAddLayer={(name) => { 
                       const id = generateId(); 
                       setLayerConfig(prev => ({...prev, [id]: { id, name, visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' }})); 
@@ -2222,6 +2461,7 @@ const App: React.FC = () => {
                           [id]: { ...prev[id], visible: true, frozen: false }
                       }));
                   }} 
+                  onOpenLineTypes={() => setActivePanel('linetypes')}
                 />
               </motion.div>
             </motion.div>
@@ -2232,22 +2472,24 @@ const App: React.FC = () => {
                initial={{ opacity: 0 }}
                animate={{ opacity: 1 }}
                exit={{ opacity: 0 }}
-               className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+               className="fixed inset-0 z-[1000] flex items-center justify-center sm:p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
              >
                 <motion.div 
                   initial={{ scale: 0.9, opacity: 0, y: 20 }}
                   animate={{ scale: 1, opacity: 1, y: 0 }}
                   exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                  className="pointer-events-auto"
+                  className="pointer-events-auto w-full h-full sm:h-auto sm:w-auto flex items-center justify-center p-2 sm:p-0"
                 >
                   <PropertiesPanel 
                     selectedShapes={(Object.values(layers).flat() as Shape[]).filter(s => selectedIds.includes(s.id))} 
                     onUpdateShape={(id, upd) => setLayers(prev => { const n = {...prev}; Object.keys(n).forEach(l => n[l] = n[l].map(s => s.id === id ? {...s, ...upd} : s)); return n; })} 
+                    lineTypeDefinitions={lineTypes}
                     layers={layerConfig} 
                     settings={settings} 
                     onUpdateSettings={(upd) => setSettings(s => ({...s, ...upd}))} 
                     onCommand={executeCommand} 
                     onClose={() => setActivePanel('none')} 
+                    onOpenColorSelector={(currentColor, onSelect, title) => setColorSelector({ currentColor, onSelect, title })}
                   />
                 </motion.div>
              </motion.div>
@@ -2258,17 +2500,51 @@ const App: React.FC = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+              className="fixed inset-0 z-[1000] flex items-center justify-center sm:p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
             >
               <motion.div 
                 initial={{ scale: 0.9, opacity: 0, y: 20 }}
                 animate={{ scale: 1, opacity: 1, y: 0 }}
                 exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                className="pointer-events-auto"
+                className="pointer-events-auto w-full h-full sm:h-auto sm:w-auto flex items-center justify-center p-2 sm:p-0"
               >
                 <CalculatorPanel onClose={() => setActivePanel('none')} />
               </motion.div>
             </motion.div>
+          )}
+
+          {activePanel === 'ctb' && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[1000] flex items-center justify-center sm:p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="pointer-events-auto w-full h-full sm:h-auto sm:w-auto flex items-center justify-center p-2 sm:p-0"
+              >
+                <CtbManager 
+                  isOpen={true} 
+                  settings={settings} 
+                  onUpdateSettings={(s) => setSettings(s)} 
+                  onClose={() => setActivePanel('none')} 
+                  onOpenColorSelector={(currentColor, onSelect, title) => setColorSelector({ currentColor, onSelect, title })}
+                />
+              </motion.div>
+            </motion.div>
+          )}
+
+          {colorSelector && (
+            <ColorSelector 
+              isOpen={true}
+              title={colorSelector.title}
+              currentColor={colorSelector.currentColor}
+              onSelect={colorSelector.onSelect}
+              onClose={() => setColorSelector(null)}
+            />
           )}
 
           {activePanel === 'drafting' && (
@@ -2276,15 +2552,15 @@ const App: React.FC = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+              className="fixed inset-0 z-[1000] flex items-center justify-center sm:p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
             >
               <motion.div 
                 initial={{ scale: 0.9, opacity: 0, y: 20 }}
                 animate={{ scale: 1, opacity: 1, y: 0 }}
                 exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                className="pointer-events-auto"
+                className="pointer-events-auto w-full h-full sm:h-auto sm:w-auto flex items-center justify-center p-2 sm:p-0"
               >
-                <DraftingSettings options={settings.snapOptions} settings={settings} onSettingsChange={(upd) => setSettings(s => ({...s, ...upd}))} onChange={(upd) => setSettings(s => ({...s, snapOptions: { ...s.snapOptions, ...upd }}))} onClose={() => setActivePanel('none')} />
+                <DraftingSettings options={settings.snapOptions} settings={settings} onSettingsChange={handleSettingsChange} onChange={(upd) => setSettings(s => ({...s, snapOptions: { ...s.snapOptions, ...upd }}))} onClose={() => setActivePanel('none')} />
               </motion.div>
             </motion.div>
           )}
@@ -2294,13 +2570,13 @@ const App: React.FC = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+              className="fixed inset-0 z-[1000] flex items-center justify-center sm:p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
             >
               <motion.div 
                 initial={{ scale: 0.9, opacity: 0, y: 20 }}
                 animate={{ scale: 1, opacity: 1, y: 0 }}
                 exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                className="pointer-events-auto"
+                className="pointer-events-auto w-full h-full sm:h-auto sm:w-auto flex items-center justify-center p-2 sm:p-0"
               >
                 <FileManager currentName={currentFileName} recentFiles={recentFiles} onAction={handleAction} onClose={() => setActivePanel('none')} />
               </motion.div>
@@ -2312,13 +2588,13 @@ const App: React.FC = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+              className="fixed inset-0 z-[1000] flex items-center justify-center sm:p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
             >
               <motion.div 
                 initial={{ scale: 0.9, opacity: 0, y: 20 }}
                 animate={{ scale: 1, opacity: 1, y: 0 }}
                 exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                className="pointer-events-auto"
+                className="pointer-events-auto w-full h-full sm:h-auto sm:w-auto flex items-center justify-center p-2 sm:p-0"
               >
                 <DrawingProperties 
                   settings={settings} 
@@ -2428,6 +2704,35 @@ const App: React.FC = () => {
             </motion.div>
           )}
 
+          {activePanel === 'linetypes' && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="pointer-events-auto"
+              >
+                <LineTypeManager 
+                  lineTypes={lineTypes} 
+                  onUpdate={(name, def) => setLineTypes(prev => ({ ...prev, [name]: def }))}
+                  onRemove={(name) => {
+                    setLineTypes(prev => {
+                      const next = { ...prev };
+                      delete next[name];
+                      return next;
+                    });
+                  }}
+                  onClose={() => setActivePanel('none')} 
+                />
+              </motion.div>
+            </motion.div>
+          )}
+
           {activePanel === 'dimstyle' && (
             <motion.div 
               initial={{ opacity: 0 }}
@@ -2441,7 +2746,7 @@ const App: React.FC = () => {
                 exit={{ scale: 0.9, opacity: 0, y: 20 }}
                 className="pointer-events-auto"
               >
-                <DimStyleManager settings={settings} onUpdateSettings={setSettings} onClose={() => setActivePanel('none')} />
+                <DimensionStyleManager settings={settings} onUpdateSettings={setSettings} onClose={() => setActivePanel('none')} />
               </motion.div>
             </motion.div>
           )}
@@ -2523,7 +2828,7 @@ const App: React.FC = () => {
           </button>
           <button 
             onClick={() => {
-              const id = 'layout' + Date.now();
+              const id = 'layout' + Date.now() + Math.random().toString(36).substr(2, 5);
               const newLayout = { id, name: 'Layout ' + (layouts.length + 1), paperSize: { width: 297, height: 210 }, viewports: [] };
               setLayouts([...layouts, newLayout]);
               setTabViews(prev => ({ ...prev, [id]: { scale: 3, originX: 0, originY: 0 } }));
@@ -2538,9 +2843,9 @@ const App: React.FC = () => {
 
         {/* Scrollable Layout List */}
         <div className="flex-1 flex items-center h-full overflow-x-auto scrollbar-none gap-px touch-pan-x overscroll-x-contain">
-          {layouts.map(l => (
+          {layouts.map((l, index) => (
             <button 
-              key={l.id}
+              key={`${l.id}-${index}`}
               draggable
               onDragStart={() => handleDragStart(l.id)}
               onDragOver={(e) => { 

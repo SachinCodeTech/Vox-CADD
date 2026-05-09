@@ -2,6 +2,34 @@
 import React, { useState } from 'react';
 import { X, Check, Ruler, Plus, Trash2, Settings2 } from 'lucide-react';
 import { AppSettings, DimensionStyle } from '../types';
+import { formatDimensionValue } from '../services/cadService';
+
+const ArrowPreview: React.FC<{ type?: string, size: number, flip?: boolean }> = ({ type = 'closed', size, flip }) => {
+    const s = Math.max(4, Math.min(20, size));
+    const renderArrow = () => {
+        switch (type) {
+            case 'open':
+                return <div className={`w-0 h-0 border-t-[${s/3}px] border-b-[${s/3}px] border-l-[${s}px] border-t-transparent border-b-transparent border-l-cyan-500`} style={{ borderWidth: `${s/3}px 0 ${s/3}px ${s}px`, borderColor: `transparent transparent transparent #06b6d4`, transform: flip ? 'rotate(180deg)' : 'none' }} />;
+            case 'tick':
+                return <div className="w-px h-6 bg-cyan-500/80 rotate-45" style={{ height: `${s*2}px` }} />;
+            case 'dot':
+                return <div className="rounded-full bg-cyan-500" style={{ width: `${s/1.5}px`, height: `${s/1.5}px` }} />;
+            case 'closed':
+            default:
+                return (
+                    <div 
+                        className="w-0 h-0 border-t-transparent border-b-transparent border-l-cyan-500" 
+                        style={{ 
+                            borderWidth: `${s/3}px 0 ${s/3}px ${s}px`, 
+                            borderColor: `transparent transparent transparent #06b6d4`,
+                            transform: flip ? 'rotate(180deg)' : 'none'
+                        }} 
+                    />
+                );
+        }
+    };
+    return <div className="flex items-center justify-center">{renderArrow()}</div>;
+};
 
 interface DimStyleManagerProps {
   settings: AppSettings;
@@ -69,36 +97,39 @@ const DimStyleManager: React.FC<DimStyleManagerProps> = ({ settings, onUpdateSet
           </button>
         </div>
 
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 flex-col md:flex-row overflow-hidden">
           {/* Sidebar */}
-          <div className="w-56 border-r border-white/5 bg-[#0a0a0c] flex flex-col p-2 gap-1 overflow-y-auto">
+          <div className="w-full md:w-56 border-b md:border-b-0 md:border-r border-white/5 bg-[#0a0a0c] flex flex-col p-2 gap-1 overflow-y-auto max-h-[30vh] md:max-h-full">
             <div className="px-2 py-1 mb-2">
                 <span className="text-[8px] font-black uppercase text-neutral-600 tracking-widest">Available Styles</span>
             </div>
             {Object.values(styles).map((style: DimensionStyle) => (
-              <button 
+              <div 
                 key={style.id}
+                className={`flex items-center justify-between px-3 py-2.5 rounded-xl transition-all group cursor-pointer shrink-0 ${activeStyleId === style.id ? 'bg-cyan-500 text-black shadow-[0_0_15px_rgba(0,188,212,0.2)]' : 'text-neutral-400 hover:bg-white/5'}`}
                 onClick={() => {
                   setActiveStyleId(style.id);
                   onUpdateSettings({ ...settings, activeDimStyle: style.id });
                 }}
-                className={`flex items-center justify-between px-3 py-2.5 rounded-xl transition-all group ${activeStyleId === style.id ? 'bg-cyan-500 text-black shadow-[0_0_15px_rgba(0,188,212,0.2)]' : 'text-neutral-400 hover:bg-white/5'}`}
               >
-                <span className="text-[10px] font-bold uppercase truncate pr-2">{style.name}</span>
-                {activeStyleId !== style.id && Object.keys(styles).length > 1 && (
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); removeStyle(style.id); }}
-                    className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-500 transition-all"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                )}
-                {activeStyleId === style.id && <Check size={14} strokeWidth={3} />}
-              </button>
+                <span className="text-[10px] font-bold uppercase truncate pr-2 flex-1">{style.name}</span>
+                <div className="flex items-center gap-1">
+                  {activeStyleId !== style.id && Object.keys(styles).length > 1 && (
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); removeStyle(style.id); }}
+                      className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-500 transition-all"
+                      title="Delete Style"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
+                  {activeStyleId === style.id && <Check size={14} strokeWidth={3} />}
+                </div>
+              </div>
             ))}
             <button 
               onClick={addStyle}
-              className="mt-2 flex items-center justify-center gap-2 py-3 rounded-xl border border-dashed border-white/10 text-neutral-600 hover:text-cyan-500 hover:border-cyan-500/50 transition-all"
+              className="mt-2 flex items-center justify-center gap-2 py-3 rounded-xl border border-dashed border-white/10 text-neutral-600 hover:text-cyan-500 hover:border-cyan-500/50 transition-all shrink-0"
             >
               <Plus size={14} />
               <span className="text-[9px] font-black uppercase tracking-widest">New Style</span>
@@ -106,17 +137,22 @@ const DimStyleManager: React.FC<DimStyleManagerProps> = ({ settings, onUpdateSet
           </div>
 
           {/* Properties Area */}
-          <div className="flex-1 overflow-y-auto p-8 bg-[#0e0e11]">
+          <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-[#0e0e11]">
             <div className="mb-6 flex items-center gap-2 text-cyan-500">
                 <Settings2 size={16} />
                 <span className="text-[10px] font-black uppercase tracking-widest">Properties: {activeStyle.name}</span>
             </div>
 
-            <div className="grid grid-cols-2 gap-x-8 gap-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-6">
                 <PropInput 
                     label="Arrow Size" 
                     value={activeStyle.arrowSize} 
                     onChange={val => updateStyle(activeStyle.id, { arrowSize: val })} 
+                />
+                <PropInput 
+                    label="Arrow Scale" 
+                    value={activeStyle.arrowScale || 1.0} 
+                    onChange={val => updateStyle(activeStyle.id, { arrowScale: val })} 
                 />
                 <PropInput 
                     label="Text Height" 
@@ -139,32 +175,115 @@ const DimStyleManager: React.FC<DimStyleManagerProps> = ({ settings, onUpdateSet
                     onChange={val => updateStyle(activeStyle.id, { offsetLine: val })} 
                 />
                 <div className="space-y-1.5 flex flex-col">
-                    <label className="text-[8px] font-black uppercase text-neutral-600 tracking-widest">Precision (Decimals)</label>
+                    <label className="text-[8px] font-black uppercase text-neutral-600 tracking-widest">Text Placement</label>
                     <select 
-                        value={activeStyle.precision}
-                        onChange={e => updateStyle(activeStyle.id, { precision: parseInt(e.target.value) })}
-                        className="bg-white/5 border border-white/5 rounded-lg px-3 py-2 text-[10px] font-mono text-white outline-none focus:border-cyan-500/50 transition-all"
+                        value={activeStyle.textPlacement || 'center'}
+                        onChange={e => updateStyle(activeStyle.id, { textPlacement: e.target.value as 'above' | 'center' | 'below' })}
+                        className="bg-white/5 border border-white/5 rounded-lg px-3 py-2 text-[10px] uppercase font-bold text-white outline-none focus:border-cyan-500/50 transition-all"
                     >
-                        <option value={0}>0</option>
-                        <option value={1}>0.0</option>
-                        <option value={2}>0.00</option>
-                        <option value={3}>0.000</option>
-                        <option value={4}>0.0000</option>
+                        <option value="above">Above Line</option>
+                        <option value="center">Centered</option>
+                        <option value="below">Below Line</option>
                     </select>
+                </div>
+                <div className="space-y-1.5 flex flex-col">
+                    <label className="text-[8px] font-black uppercase text-neutral-600 tracking-widest">Arrow Type</label>
+                    <select 
+                        value={activeStyle.arrowType || 'closed'}
+                        onChange={e => updateStyle(activeStyle.id, { arrowType: e.target.value as 'closed' | 'open' | 'tick' | 'dot' })}
+                        className="bg-white/5 border border-white/5 rounded-lg px-3 py-2 text-[10px] uppercase font-bold text-white outline-none focus:border-cyan-500/50 transition-all"
+                    >
+                        <option value="closed">Closed Filled</option>
+                        <option value="open">Open</option>
+                        <option value="tick">Architectural Tick</option>
+                        <option value="dot">Dot</option>
+                    </select>
+                </div>
+                <div className="space-y-1.5 flex flex-col">
+                    <label className="text-[8px] font-black uppercase text-neutral-600 tracking-widest">Unit Format</label>
+                    <select 
+                        value={activeStyle.unitFormat || 'decimal'}
+                        onChange={e => updateStyle(activeStyle.id, { unitFormat: e.target.value as any })}
+                        className="bg-white/5 border border-white/5 rounded-lg px-3 py-2 text-[10px] uppercase font-bold text-white outline-none focus:border-cyan-500/50 transition-all"
+                    >
+                        <option value="decimal">Decimal</option>
+                        <option value="architectural">Architectural</option>
+                        <option value="engineering">Engineering</option>
+                        <option value="fractional">Fractional</option>
+                    </select>
+                </div>
+                <div className="space-y-1.5 flex flex-col">
+                    <label className="text-[8px] font-black uppercase text-neutral-600 tracking-widest">Precision / Fractional</label>
+                    {activeStyle.unitFormat === 'architectural' || activeStyle.unitFormat === 'fractional' ? (
+                        <select 
+                            value={activeStyle.fractionalPrecision || 16}
+                            onChange={e => updateStyle(activeStyle.id, { fractionalPrecision: parseInt(e.target.value) })}
+                            className="bg-white/5 border border-white/5 rounded-lg px-3 py-2 text-[10px] font-mono text-white outline-none focus:border-cyan-500/50 transition-all"
+                        >
+                            <option value={1}>1</option>
+                            <option value={2}>1/2</option>
+                            <option value={4}>1/4</option>
+                            <option value={8}>1/8</option>
+                            <option value={16}>1/16</option>
+                            <option value={32}>1/32</option>
+                            <option value={64}>1/64</option>
+                        </select>
+                    ) : (
+                        <select 
+                            value={activeStyle.precision}
+                            onChange={e => updateStyle(activeStyle.id, { precision: parseInt(e.target.value) })}
+                            className="bg-white/5 border border-white/5 rounded-lg px-3 py-2 text-[10px] font-mono text-white outline-none focus:border-cyan-500/50 transition-all"
+                        >
+                            <option value={0}>0</option>
+                            <option value={1}>0.0</option>
+                            <option value={2}>0.00</option>
+                            <option value={3}>0.000</option>
+                            <option value={4}>0.0000</option>
+                        </select>
+                    )}
                 </div>
             </div>
 
-            {/* Preview Section - Simulated */}
+            {/* Preview Section - Expanded */}
             <div className="mt-10 p-6 rounded-2xl bg-black/40 border border-white/5 flex flex-col items-center">
                 <div className="text-[8px] font-black uppercase text-neutral-700 tracking-[0.2em] mb-6">Live Style Preview</div>
-                <div className="relative w-full max-w-[300px] h-32 flex items-center justify-center">
+                <div className="relative w-full max-w-[400px] h-32 flex items-center justify-center">
                     {/* Fake Dim line */}
-                    <div className="absolute left-0 right-0 h-px bg-cyan-500/50" />
+                    <div className="absolute left-10 right-10 h-px bg-cyan-500/50" />
+                    
+                    {/* Extension lines */}
+                    <div className="absolute left-10 w-px bg-cyan-500/30" style={{ height: '40px', bottom: '50%', transform: `translateY(${activeStyle.offsetLine/10}px)` }} />
+                    <div className="absolute right-10 w-px bg-cyan-500/30" style={{ height: '40px', bottom: '50%', transform: `translateY(${activeStyle.offsetLine/10}px)` }} />
+                    
                     {/* Fake Text */}
-                    <div className="bg-[#121214] px-3 py-1 border border-white/10 rounded text-cyan-400 font-mono text-[10px] z-10 mb-8" style={{ fontSize: `${Math.max(8, activeStyle.textSize / 20)}px` }}>1250.00</div>
+                    <div 
+                        className={`bg-[#121214] px-2 py-0.5 rounded text-cyan-400 font-mono text-[11px] z-10 transition-all cursor-default select-none ${activeStyle.textPlacement === 'above' ? 'mb-10 border border-white/5' : (activeStyle.textPlacement === 'below' ? 'mt-10 border border-white/5' : 'bg-[#121214] border-none')}`}
+                    >
+                        {formatDimensionValue(1250, activeStyle, settings)}
+                    </div>
+
                     {/* Arrows */}
-                    <div className="absolute left-0 w-2 h-2 border-l border-t border-cyan-500 -rotate-45" />
-                    <div className="absolute right-0 w-2 h-2 border-r border-t border-cyan-500 rotate-45" />
+                    <div className="absolute left-10 flex items-center justify-center">
+                        <ArrowPreview type={activeStyle.arrowType} size={activeStyle.arrowSize * (activeStyle.arrowScale || 1) / 15} flip />
+                    </div>
+                    <div className="absolute right-10 flex items-center justify-center">
+                        <ArrowPreview type={activeStyle.arrowType} size={activeStyle.arrowSize * (activeStyle.arrowScale || 1) / 15} />
+                    </div>
+                </div>
+                
+                <div className="w-full grid grid-cols-3 gap-4 mt-4">
+                    <div className="p-3 bg-white/5 rounded-xl border border-white/5 items-center flex flex-col">
+                        <span className="text-[7px] font-bold text-neutral-600 uppercase">Unit Format</span>
+                        <span className="text-[9px] font-black text-white uppercase mt-1">{activeStyle.unitFormat || 'Decimal'}</span>
+                    </div>
+                    <div className="p-3 bg-white/5 rounded-xl border border-white/5 items-center flex flex-col">
+                        <span className="text-[7px] font-bold text-neutral-600 uppercase">Placement</span>
+                        <span className="text-[9px] font-black text-white uppercase mt-1">{activeStyle.textPlacement || 'Centered'}</span>
+                    </div>
+                    <div className="p-3 bg-white/5 rounded-xl border border-white/5 items-center flex flex-col">
+                        <span className="text-[7px] font-bold text-neutral-600 uppercase">Arrow</span>
+                        <span className="text-[9px] font-black text-white uppercase mt-1">{activeStyle.arrowType || 'Closed'}</span>
+                    </div>
                 </div>
             </div>
           </div>

@@ -79,10 +79,10 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
 
   return (
     <div 
-        className="relative w-[340px] max-w-[calc(100vw-40px)] bg-[#0a0a0c] border border-white/10 rounded-2xl shadow-[0_30px_100px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden select-none font-sans"
+        className="relative w-full md:w-[340px] max-w-[95vw] sm:max-w-[calc(100vw-40px)] h-full sm:h-auto bg-[#0a0a0c] border border-white/10 rounded-[1.5rem] sm:rounded-2xl shadow-[0_30px_100px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden select-none font-sans"
       >
         <div 
-          className="p-5 border-b border-white/5 bg-white/5 flex justify-between items-center"
+          className="p-4 sm:p-5 border-b border-white/5 bg-white/5 flex justify-between items-center"
         >
           <div className="flex items-center gap-2 pointer-events-none">
             <Target size={18} className="text-cyan-500" />
@@ -156,16 +156,62 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
                             className="w-full bg-black border border-white/10 rounded-xl py-3 px-4 text-xs text-cyan-400 font-mono focus:border-cyan-500 outline-none" 
                         />
                     </div>
+                    <div className="space-y-3 border-t border-white/5 pt-6">
+                        <label className="text-[9px] font-black text-neutral-600 uppercase tracking-widest px-1">Global Linetype Scale (LTSCALE)</label>
+                        <div className="flex gap-2">
+                            <input 
+                                type="number" 
+                                step="0.1"
+                                min="0.001"
+                                value={settings.ltScale} 
+                                onChange={e => onSettingsChange({ ltScale: parseFloat(e.target.value) || 1.0 })}
+                                className="flex-1 bg-black border border-white/10 rounded-xl py-3 px-4 text-xs text-cyan-400 font-mono focus:border-cyan-500 outline-none" 
+                            />
+                            <div className="flex bg-neutral-900 border border-white/5 rounded-xl p-1 gap-1">
+                                <button onClick={() => onSettingsChange({ ltScale: 0.5 })} className="px-3 py-1 text-[8px] font-black text-neutral-500 hover:text-white transition-all uppercase">0.5</button>
+                                <button onClick={() => onSettingsChange({ ltScale: 1.0 })} className="px-3 py-1 text-[8px] font-black text-neutral-500 hover:text-white transition-all uppercase">1.0</button>
+                                <button onClick={() => onSettingsChange({ ltScale: 2.0 })} className="px-3 py-1 text-[8px] font-black text-neutral-500 hover:text-white transition-all uppercase">2.0</button>
+                            </div>
+                        </div>
+                        <p className="text-[7px] text-neutral-500 font-bold uppercase tracking-widest px-1">Adjusts the density of dashed and dotted lines globally.</p>
+                    </div>
                 </div>
             )}
 
             {activeTab === 'units' && (
                 <div className="space-y-6">
-                    <div className="space-y-3">
-                        <label className="text-[9px] font-black text-neutral-600 uppercase tracking-widest px-1">Linear System</label>
-                        <div className="flex bg-neutral-900 p-1 rounded-xl border border-white/5">
-                            <button onClick={() => onSettingsChange({ units: 'metric' })} className={`flex-1 py-3 rounded-lg text-[9px] font-black uppercase transition-all ${settings.units === 'metric' ? 'bg-cyan-600 text-black' : 'text-neutral-500 hover:text-neutral-300'}`}>Metric</button>
-                            <button onClick={() => onSettingsChange({ units: 'imperial' })} className={`flex-1 py-3 rounded-lg text-[9px] font-black uppercase transition-all ${settings.units === 'imperial' ? 'bg-cyan-600 text-black' : 'text-neutral-500 hover:text-neutral-300'}`}>Imperial</button>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-3">
+                            <label className="text-[9px] font-black text-neutral-600 uppercase tracking-widest px-1">Linear System</label>
+                            <div className="flex bg-neutral-900 p-1 rounded-xl border border-white/5">
+                                <button onClick={() => onSettingsChange({ units: 'metric' })} className={`flex-1 py-3 rounded-lg text-[9px] font-black uppercase transition-all ${settings.units === 'metric' ? 'bg-cyan-600 text-black' : 'text-neutral-500 hover:text-neutral-300'}`}>Metric</button>
+                                <button onClick={() => onSettingsChange({ units: 'imperial' })} className={`flex-1 py-3 rounded-lg text-[9px] font-black uppercase transition-all ${settings.units === 'imperial' ? 'bg-cyan-600 text-black' : 'text-neutral-500 hover:text-neutral-300'}`}>Imperial</button>
+                            </div>
+                        </div>
+
+                        <div className="space-y-3">
+                            <label className="text-[9px] font-black text-neutral-600 uppercase tracking-widest px-1">Active Subunit</label>
+                            <select 
+                                value={settings.unitSubtype}
+                                onChange={e => onSettingsChange({ unitSubtype: e.target.value as any })}
+                                className="w-full bg-black border border-white/10 rounded-xl py-3 px-4 text-[10px] text-white font-bold tracking-tight focus:border-cyan-500 outline-none appearance-none"
+                            >
+                                {settings.units === 'metric' ? (
+                                    <>
+                                        <option value="mm">MILLIMETERS</option>
+                                        <option value="cm">CENTIMETERS</option>
+                                        <option value="m">METERS</option>
+                                        <option value="km">KILOMETERS</option>
+                                    </>
+                                ) : (
+                                    <>
+                                        <option value="inches">INCHES</option>
+                                        <option value="feet">FEET</option>
+                                        <option value="yards">YARDS</option>
+                                        <option value="miles">MILES</option>
+                                    </>
+                                )}
+                            </select>
                         </div>
                     </div>
 

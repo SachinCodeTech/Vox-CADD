@@ -24,7 +24,7 @@ const COMMAND_LIST = [
     { cmd: 'SCALE', alias: 'SC' }, { cmd: 'MIRROR', alias: 'MI' }, { cmd: 'STRETCH', alias: 'S' },
     { cmd: 'EXTEND', alias: 'EX' }, { cmd: 'TRIM', alias: 'TR' }, { cmd: 'FILLET', alias: 'F' },
     { cmd: 'CHAMFER', alias: 'CHA' }, { cmd: 'OFFSET', alias: 'O' }, { cmd: 'EXPLODE', alias: 'X' }, { cmd: 'ERASE', alias: 'E' },
-    { cmd: 'ZOOM', alias: 'Z' }, { cmd: 'PAN', alias: 'P' },
+    { cmd: 'ZOOM', alias: 'Z' }, { cmd: 'PAN', alias: 'P' }, { cmd: 'ZOOM_RT', alias: 'ZR' },
     { cmd: 'DIST', alias: 'DI' }, { cmd: 'AREA', alias: 'AA' },
     { cmd: 'MTEXT', alias: 'MT' }, { cmd: 'TEXT', alias: 'T' }, 
     { cmd: 'HATCH', alias: 'H' }, { cmd: 'BLOCK', alias: 'B' }, { cmd: 'INSERT', alias: 'I' },
@@ -205,15 +205,30 @@ const CommandBar: React.FC<CommandBarProps> = ({
       <div 
           ref={scrollRef} 
           style={{ height: `${historyHeight}px` }}
-          className="overflow-y-auto px-4 text-[9px] bg-black border-b border-white/5 scrollbar-none font-mono flex flex-col transition-[height] duration-75"
+          className="overflow-y-auto px-4 text-[9px] bg-black border-b border-white/5 scrollbar-none font-mono flex flex-col transition-[height] duration-75 relative group/history"
       >
           <div className="py-2 min-h-full flex flex-col justify-end gap-1">
-            <div className="text-neutral-800 uppercase tracking-tighter mb-4 opacity-40">VOXCADD_CORE_V3 // KERNEL_ACTIVE</div>
-            {history.map((msg, i) => (
-               <div key={i} className="text-[#00bcd4] font-black uppercase p-2 bg-cyan-500/5 border-l-2 border-cyan-500 whitespace-pre-wrap break-words">
-                 {msg}
-               </div>
-            ))}
+            <div className="flex justify-between items-center mb-4">
+                <div className="text-neutral-800 uppercase tracking-tighter opacity-40">VOXCADD_CORE_V3 // KERNEL_ACTIVE</div>
+                <button 
+                  onClick={(e) => { e.stopPropagation(); onCommand('CLEARLOGS'); }}
+                  className="opacity-0 group-hover/history:opacity-100 transition-opacity text-[8px] text-red-500/50 hover:text-red-500 font-bold uppercase tracking-widest px-2 py-1 rounded hover:bg-red-500/10"
+                >
+                  Clear Logs
+                </button>
+            </div>
+            {history.map((msg, i) => {
+               const isCommand = msg.startsWith("> ");
+               return (
+                 <div 
+                    key={`history-${i}-${msg.substring(0, 20)}`} 
+                    onClick={() => isCommand && onCommand(msg.substring(2))}
+                    className={`font-black uppercase p-2 border-l-2 whitespace-pre-wrap break-words transition-all ${isCommand ? 'bg-cyan-500/5 border-cyan-500 text-[#00bcd4] cursor-pointer hover:bg-cyan-500/10 active:scale-[0.99]' : 'bg-neutral-900/40 border-neutral-700 text-neutral-500'}`}
+                 >
+                   {msg}
+                 </div>
+               );
+            })}
             <div className="mt-4 opacity-20 text-[7px] text-center uppercase tracking-widest border-t border-white/5 pt-2">SWIPE DOWN TO COLLAPSE</div>
           </div>
       </div>
@@ -236,7 +251,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
                     <div className="absolute bottom-full left-0 mb-2 w-full bg-[#111] border border-white/10 rounded-xl shadow-2xl z-[200] overflow-hidden backdrop-blur-xl">
                         {suggestions.map((s, i) => (
                             <button 
-                              key={i} 
+                              key={`suggestion-${s.cmd}-${i}`} 
                               type="button" 
                               onClick={() => { onChange(s.cmd); onCommand(s.cmd); onChange(''); setShowSuggestions(false); setSuggestionIdx(-1); }} 
                               className={`w-full px-4 py-3 text-left text-[10px] font-bold border-b border-white/5 uppercase flex justify-between items-center transition-colors ${suggestionIdx === i ? 'bg-white text-black' : 'text-neutral-400 hover:bg-white/5'}`}

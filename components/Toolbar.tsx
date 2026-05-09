@@ -163,6 +163,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
             <ToolCircleBtn onClick={() => onCommand('paste')} icon={<Clipboard />} label="PASTE" />
             <ToolCircleBtn onClick={() => onAction('toggleProperties')} icon={<Settings2 />} label="PROPS" />
             <ToolCircleBtn onClick={() => onCommand('sketch')} icon={<Pencil />} label="SKETCH" active={activeCommandName === 'SKETCH'} />
+            <ToolCircleBtn onClick={() => onCommand('e')} icon={<Trash2 />} label="DELETE" danger active={activeCommandName === 'ERASE'} />
           </>
         );
       case 'Anno':
@@ -234,11 +235,11 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
           <>
             <ToolCircleBtn onClick={() => onAction('zoomAll')} icon={<Maximize />} label="Z-A" />
             <ToolCircleBtn onClick={() => onAction('zoomExtents')} icon={<Maximize2 />} label="Z-E" />
-            <ToolCircleBtn onClick={() => onCommand('zoom w')} icon={<BoxSelect />} label="Z-W" active={activeCommandName === 'ZOOM'} />
-            <ToolCircleBtn onClick={() => onAction('zoomIn')} icon={<ZoomIn />} label="Z- in" />
-            <ToolCircleBtn onClick={() => onAction('zoomOut')} icon={<ZoomOut />} label="Z- out" />
-            <ToolCircleBtn onClick={() => onAction('zoomPrevious')} icon={<History />} label="Z-P" />
-            <ToolCircleBtn onClick={() => onCommand('p')} icon={<Hand />} label="Z- pan" active={activeCommandName === 'PAN'} />
+            <ToolCircleBtn onClick={() => onCommand('zw')} icon={<BoxSelect />} label="Z-W" active={activeCommandName === 'ZOOM'} />
+            <ToolCircleBtn onClick={() => onAction('zoomIn')} icon={<ZoomIn />} label="Z- IN" />
+            <ToolCircleBtn onClick={() => onAction('zoomOut')} icon={<ZoomOut />} label="Z- OU" />
+            <ToolCircleBtn onClick={() => onAction('zoomRealTime')} icon={<Activity />} label="Z-R" />
+            <ToolCircleBtn onClick={() => onCommand('p')} icon={<Hand />} label="Z- PAN" active={activeCommandName === 'PAN'} />
           </>
         );
       case 'Tools': // TOOLS

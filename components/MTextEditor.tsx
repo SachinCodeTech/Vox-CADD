@@ -50,11 +50,11 @@ const MTextEditor: React.FC<MTextEditorProps> = ({ initialValue, initialSettings
     <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
       <div className="w-full max-w-lg bg-[#0d0d0f] rounded-[1.5rem] overflow-hidden shadow-[0_40px_100px_rgba(0,0,0,0.8)] border border-white/10 animate-in zoom-in-95 duration-200 flex flex-col h-[70vh] max-h-[90vh]">
         
-        {/* Header - 1st line: t annotation property */}
+        {/* Header - 1st line: annotation property */}
         <div className="px-4 py-2 border-b border-white/5 flex justify-between items-center bg-[#121214]">
           <div className="flex items-center gap-2">
             <Type size={14} className="text-cyan-400" />
-            <h2 className="text-[10px] font-black text-white uppercase tracking-[0.2em]">T ANNOTATION PROPERTY</h2>
+            <h2 className="text-[10px] font-black text-white uppercase tracking-[0.2em]">ANNOTATION PROPERTY</h2>
           </div>
           <button onClick={onCancel} className="p-1 hover:bg-white/5 rounded-full text-neutral-600 transition-colors">
             <X size={16} />
@@ -84,9 +84,9 @@ const MTextEditor: React.FC<MTextEditorProps> = ({ initialValue, initialSettings
                   { active: bold, setter: setBold, icon: <Bold size={16} />, title: "Bold" },
                   { active: italic, setter: setItalic, icon: <Italic size={16} />, title: "Italic" },
                   { active: underline, setter: setUnderline, icon: <Underline size={16} />, title: "Underline" },
-                ].map((btn, idx) => (
+                ].map((btn) => (
                   <button 
-                    key={idx}
+                    key={`mtext-attr-${btn.title}`}
                     onClick={() => btn.setter(!btn.active)}
                     className={`p-1.5 rounded-md transition-all ${btn.active ? 'bg-cyan-500 text-black' : 'text-neutral-500 hover:text-neutral-300'}`}
                     title={btn.title}

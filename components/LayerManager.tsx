@@ -1,29 +1,32 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Eye, EyeOff, Trash2, Plus, X, Check, Layers, Lock, Unlock, Snowflake, Sun, Printer } from 'lucide-react';
+import { Eye, EyeOff, Trash2, Plus, X, Check, Layers, Lock, Unlock, Snowflake, Sun, Printer, Settings2 } from 'lucide-react';
 import { LayerConfig, LineType } from '../types';
 
 interface LayerManagerProps {
   layers: Record<string, LayerConfig>;
+  lineTypeDefinitions?: Record<string, any>;
   activeLayer: string;
   onClose: () => void;
   onUpdateLayer: (id: string, updates: Partial<LayerConfig>) => void;
   onAddLayer: (name: string) => void;
   onRemoveLayer: (id: string) => void;
   onSetActive: (id: string) => void;
+  onOpenLineTypes?: () => void;
+  onOpenColorSelector?: (currentColor: string, onSelect: (color: string) => void, title?: string) => void;
 }
 
 const LINE_WEIGHTS = [
-    "0.00", "0.05", "0.09", "0.13", "0.15", "0.18", "0.20", "0.25",
-    "0.30", "0.35", "0.40", "0.50", "0.60", "0.70", "0.80", "1.00", "1.40", "2.11"
+    "DEFAULT", "0.00", "0.05", "0.09", "0.13", "0.15", "0.18", "0.20", "0.25",
+    "0.30", "0.35", "0.40", "0.50", "0.60", "0.70", "0.80", "1.00", "1.40", "2.00", "2.11"
 ];
 
-const LineTypePreview = ({ type, color = "#00bcd4" }: { type: LineType, color?: string }) => {
+const LineTypePreview = ({ type, color = "#00bcd4", weight = 0.25 }: { type: LineType, color?: string, weight?: number }) => {
     const L = 12;
     const getDash = () => {
         switch (type) {
             case 'dashed': return [L * 2, L * 1.5];
-            case 'dotted': return [0.5, L * 1.2];
+            case 'dotted': return [1, L * 1.2];
             case 'center': return [L * 4, L, L * 0.8, L];
             case 'dashdot': return [L * 3, L * 0.8, L * 0.4, L * 0.8];
             case 'border': return [L * 6, L * 1.2, L * 2, L * 1.2];
@@ -36,7 +39,7 @@ const LineTypePreview = ({ type, color = "#00bcd4" }: { type: LineType, color?: 
             case 'batt': return [L * 2.5, L * 0.5];
             case 'zigzag': return [L * 3, L, L, L];
             case 'zigzag2': return [L * 1.2, L * 0.6];
-            case 'dots2': return [0.3, L * 0.6];
+            case 'dots2': return [0.5, L * 0.6];
             case 'dash2': return [L * 0.8, L * 0.6];
             case 'hotwater': return [L * 5, L * 2];
             default: return [];
@@ -44,18 +47,42 @@ const LineTypePreview = ({ type, color = "#00bcd4" }: { type: LineType, color?: 
     };
     return (
         <svg width="40" height="8" className="overflow-visible opacity-90">
-            <line x1="0" y1="4" x2="40" y2="4" stroke={color} strokeWidth="1.2" strokeDasharray={getDash().join(',')} strokeLinecap={type === 'dotted' || type === 'dots2' ? 'round' : 'square'} />
-            {(type === 'gasLine') && <text x="20" y="6.5" fontSize="5" fill={color} textAnchor="middle" fontWeight="black" style={{ paintOrder: 'stroke', stroke: 'black', strokeWidth: '1px' }}>GAS</text>}
-            {(type === 'hotwater') && <text x="20" y="6.5" fontSize="5" fill={color} textAnchor="middle" fontWeight="black" style={{ paintOrder: 'stroke', stroke: 'black', strokeWidth: '1px' }}>HW</text>}
-            {(type === 'fenceLine') && <text x="20" y="6.5" fontSize="5" fill={color} textAnchor="middle" fontWeight="black" style={{ paintOrder: 'stroke', stroke: 'black', strokeWidth: '1px' }}>FENCE</text>}
+            <line x1="0" y1="4" x2="40" y2="4" stroke={color} strokeWidth={Math.max(1, weight * 0.8)} strokeDasharray={getDash().join(',')} strokeLinecap={type === 'dotted' || type === 'dots2' ? 'round' : 'square'} />
+            {(type === 'gasLine') && <text x="20" y="6.5" fontSize="4.5" fill={color} textAnchor="middle" fontWeight="black" style={{ paintOrder: 'stroke', stroke: 'black', strokeWidth: '1.5px' }}>GAS</text>}
+            {(type === 'hotwater') && <text x="20" y="6.5" fontSize="4.5" fill={color} textAnchor="middle" fontWeight="black" style={{ paintOrder: 'stroke', stroke: 'black', strokeWidth: '1.5px' }}>HW</text>}
+            {(type === 'fenceLine') && <text x="20" y="6.5" fontSize="4.5" fill={color} textAnchor="middle" fontWeight="black" style={{ paintOrder: 'stroke', stroke: 'black', strokeWidth: '1.5px' }}>FEN</text>}
         </svg>
     );
 };
 
 const LayerManager: React.FC<LayerManagerProps> = ({ 
-    layers, activeLayer, onClose, onUpdateLayer, onAddLayer, onRemoveLayer, onSetActive 
+    layers, lineTypeDefinitions, activeLayer, onClose, onUpdateLayer, onAddLayer, onRemoveLayer, onSetActive, onOpenLineTypes, onOpenColorSelector
 }) => {
   const [newLayerName, setNewLayerName] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editingId && editInputRef.current) {
+        editInputRef.current.focus();
+        editInputRef.current.select();
+    }
+  }, [editingId]);
+
+  const handleStartRename = (e: React.MouseEvent, id: string, name: string) => {
+    e.stopPropagation();
+    if (id === '0' || id === 'defpoints') return;
+    setEditingId(id);
+    setEditingName(name);
+  };
+
+  const handleFinishRename = () => {
+    if (editingId && editingName.trim()) {
+        onUpdateLayer(editingId, { name: editingName.trim().toUpperCase() });
+    }
+    setEditingId(null);
+  };
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
@@ -93,7 +120,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({
     }
   };
 
-  const lineTypes: { value: LineType; label: string }[] = [
+  const baseLineTypes: { value: LineType; label: string }[] = [
     { value: 'continuous', label: 'Continuous' }, 
     { value: 'dashed', label: 'Dashed' }, 
     { value: 'dotted', label: 'Dotted' }, 
@@ -114,27 +141,36 @@ const LayerManager: React.FC<LayerManagerProps> = ({
     { value: 'dash2', label: 'Dashed (short)' },
   ];
 
+  const allLineTypes = [...baseLineTypes];
+  if (lineTypeDefinitions) {
+    Object.keys(lineTypeDefinitions).forEach(key => {
+      if (!allLineTypes.find(lt => lt.value === key)) {
+          allLineTypes.push({ value: key as LineType, label: lineTypeDefinitions[key].description || key });
+      }
+    });
+  }
+
   return (
     <div 
-        className="relative w-[500px] max-w-[95vw] h-[80vh] max-h-[600px] glass-panel rounded-[1.5rem] shadow-[0_40px_100px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-300 border border-white/5"
-        style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, zIndex: 150 }}
+        className="relative w-full sm:w-[600px] sm:max-w-[95vw] h-full sm:h-[80vh] sm:max-h-[700px] glass-panel sm:rounded-[1.5rem] shadow-[0_40px_100px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-300 border border-white/5"
+        style={{ transform: window.innerWidth > 640 ? `translate(${pos.x}px, ${pos.y}px)` : undefined, zIndex: 150 }}
     >
       <div 
-        className="flex justify-between items-center px-4 py-2.5 border-b border-white/5 bg-[#121214] cursor-grab active:cursor-grabbing touch-none shrink-0"
-        onMouseDown={e => startDrag(e.clientX, e.clientY)}
-        onTouchStart={e => e.touches.length > 0 && startDrag(e.touches[0].clientX, e.touches[0].clientY)}
+        className="flex justify-between items-center px-4 py-3 sm:py-2.5 border-b border-white/5 bg-[#121214] sm:cursor-grab active:sm:cursor-grabbing touch-none shrink-0"
+        onMouseDown={e => window.innerWidth > 640 && startDrag(e.clientX, e.clientY)}
+        onTouchStart={e => window.innerWidth > 640 && e.touches.length > 0 && startDrag(e.touches[0].clientX, e.touches[0].clientY)}
       >
         <div className="flex items-center gap-2.5 pointer-events-none">
-            <div className="w-6 h-6 rounded bg-cyan-500/10 flex items-center justify-center text-cyan-400">
-                <Layers size={14} />
+            <div className="w-6 h-6 sm:w-7 sm:h-7 rounded bg-cyan-500/10 flex items-center justify-center text-cyan-400">
+                <Layers size={14} className="sm:size-16" />
             </div>
-            <span className="text-[10px] font-black uppercase tracking-[0.15em] text-neutral-300">Layer Properties</span>
+            <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.15em] text-neutral-300">Layer Properties</span>
         </div>
-        <button onClick={onClose} className="w-6 h-6 flex items-center justify-center hover:bg-white/5 rounded-full text-neutral-600 hover:text-white transition-all"><X size={16} /></button>
+        <button onClick={onClose} className="w-8 h-8 sm:w-6 sm:h-6 flex items-center justify-center hover:bg-white/5 rounded-full text-neutral-600 hover:text-white transition-all"><X size={18} /></button>
       </div>
 
       <div className="flex-1 overflow-auto bg-[#0a0a0c] scrollbar-thin">
-        <div className="min-w-[760px] flex flex-col h-full"> 
+        <div className="min-w-[800px] sm:min-w-[760px] flex flex-col h-full"> 
           {/* Header Row - Sticky inside the horizontal scroll container */}
           <div className="flex items-center text-[9px] text-neutral-500 font-bold uppercase border-b border-white/5 bg-[#121214] sticky top-0 z-20 select-none shrink-0 shadow-sm">
               <div className="w-12 text-center py-2.5 shrink-0 border-r border-white/5">Stat</div>
@@ -143,9 +179,19 @@ const LayerManager: React.FC<LayerManagerProps> = ({
               <div className="w-14 text-center py-2.5 shrink-0 border-r border-white/5">Frz</div>
               <div className="w-14 text-center py-2.5 shrink-0 border-r border-white/5">Lck</div>
               <div className="w-14 text-center py-2.5 shrink-0 border-r border-white/5">Plt</div>
-              <div className="w-16 text-center py-2.5 shrink-0 border-r border-white/5">Color</div>
-              <div className="w-48 text-center py-2.5 shrink-0 border-r border-white/5">Line Type</div>
+              <div className="w-28 text-center py-2.5 shrink-0 border-r border-white/5">Color</div>
+              <div className="w-48 text-center py-2.5 shrink-0 border-r border-white/5 flex items-center justify-center gap-1">
+                Line Type
+                <button 
+                  onClick={(e) => { e.stopPropagation(); onOpenLineTypes?.(); }}
+                  className="p-1 hover:bg-white/10 rounded transition-all text-neutral-600 hover:text-cyan-400"
+                  title="Manage Line Types"
+                >
+                  <Settings2 size={10} />
+                </button>
+              </div>
               <div className="w-32 text-center py-2.5 shrink-0 border-r border-white/5">Line Weight</div>
+              <div className="w-24 text-center py-2.5 shrink-0 border-r border-white/5">Plot Style</div>
               <div className="flex-1 py-2.5"></div>
           </div>
 
@@ -170,10 +216,32 @@ const LayerManager: React.FC<LayerManagerProps> = ({
                     </div>
 
                     {/* Name Column */}
-                    <div className="w-40 px-3 shrink-0 py-2 border-r border-white/5">
-                        <div className={`text-[11px] font-bold uppercase tracking-wide truncate ${isActive ? 'text-cyan-300' : 'text-neutral-300'}`}>
-                            {layer.name}
-                        </div>
+                    <div 
+                        className="w-40 px-3 shrink-0 py-2 border-r border-white/5"
+                        onDoubleClick={(e) => handleStartRename(e, layer.id, layer.name)}
+                    >
+                        {editingId === layer.id ? (
+                            <input
+                                ref={editInputRef}
+                                type="text"
+                                className="w-full bg-black border border-cyan-500/50 rounded px-1.5 py-0.5 text-[11px] text-white outline-none font-bold uppercase"
+                                value={editingName}
+                                onChange={(e) => setEditingName(e.target.value)}
+                                onBlur={handleFinishRename}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleFinishRename();
+                                    if (e.key === 'Escape') setEditingId(null);
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                            />
+                        ) : (
+                            <div 
+                                className={`text-[11px] font-bold uppercase tracking-wide truncate ${isActive ? 'text-cyan-300' : 'text-neutral-300'}`}
+                                title="Double-click to rename"
+                            >
+                                {layer.name}
+                            </div>
+                        )}
                     </div>
 
                     {/* Visibility */}
@@ -239,48 +307,70 @@ const LayerManager: React.FC<LayerManagerProps> = ({
                     </div>
 
                     {/* Color */}
-                    <div className="w-16 flex justify-center shrink-0 py-2 border-r border-white/5">
+                    <div className="w-28 flex items-center gap-2 shrink-0 py-2 border-r border-white/5 px-2">
                         <div 
                             title="Change Color"
-                            className="relative w-5 h-5 rounded-sm border border-white/20 overflow-hidden bg-black cursor-pointer transition-all hover:scale-110 active:scale-95"
-                        >
-                            <input 
-                                type="color" 
-                                value={layer.color} 
-                                onClick={e => e.stopPropagation()}
-                                onChange={(e) => onUpdateLayer(layer.id, { color: e.target.value })} 
-                                className="absolute inset-[-50%] w-[200%] h-[200%] cursor-pointer p-0 border-0" 
-                            />
-                        </div>
+                            className="relative w-6 h-6 rounded-lg border border-white/10 overflow-hidden bg-black cursor-pointer transition-all hover:scale-110 active:scale-95 shrink-0"
+                            style={{ backgroundColor: layer.color || '#FFFFFF' }}
+                            onClick={e => {
+                                e.stopPropagation();
+                                onOpenColorSelector?.(layer.color || '#FFFFFF', (color) => {
+                                    onUpdateLayer(layer.id, { color });
+                                }, `Layer: ${layer.name}`);
+                            }}
+                        />
+                        <input 
+                            type="text"
+                            className="w-full bg-[#0d0d0f] border border-white/5 rounded px-1.5 py-1 text-[9px] text-neutral-400 outline-none font-mono uppercase transition-all hover:border-white/20"
+                            value={layer.color || '#FFFFFF'}
+                            onClick={e => e.stopPropagation()}
+                            onChange={(e) => {
+                                const val = e.target.value;
+                                if (val.match(/^#?[0-9A-Fa-f]{0,6}$/)) {
+                                    onUpdateLayer(layer.id, { color: val.startsWith('#') ? val : '#' + val });
+                                }
+                            }}
+                        />
                     </div>
 
                     {/* Linetype */}
-                    <div className="w-48 px-2 shrink-0 py-2 flex items-center gap-2 border-r border-white/5">
+                    <div className="w-40 px-2 shrink-0 py-2 flex items-center gap-2 border-r border-white/5">
                         <div className="flex-1 relative group/select">
                             <select 
                                 value={layer.lineType} 
                                 onClick={e => e.stopPropagation()}
                                 onChange={e => onUpdateLayer(layer.id, { lineType: e.target.value as LineType })} 
-                                className="w-full bg-[#0d0d0f] border border-white/5 rounded px-2 py-1 text-[9px] text-neutral-400 outline-none uppercase font-bold cursor-pointer appearance-none text-center transition-all hover:border-white/20"
+                                className="w-full bg-[#0d0d0f]/60 border border-white/5 rounded-lg pl-2 pr-6 py-2 text-[9px] text-neutral-300 outline-none uppercase font-black tracking-tight cursor-pointer appearance-none transition-all hover:border-[#00bcd4]/30 hover:bg-black focus:ring-1 focus:ring-[#00bcd4]/20"
                             >
-                                {lineTypes.map(lt => <option key={lt.value} value={lt.value}>{lt.label}</option>)}
+                                {allLineTypes.map((lt, idx) => <option key={`${lt.value}-${idx}`} value={lt.value} className="bg-[#121214] text-white py-2">{lt.label}</option>)}
                             </select>
+                            <div className="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-neutral-600 transition-colors">
+                                <Settings2 size={10} />
+                            </div>
                         </div>
-                        <div className="w-12 h-6 flex items-center justify-center bg-black/40 rounded border border-white/5 shrink-0">
-                            <LineTypePreview type={layer.lineType} color={layer.color} />
+                        <div className="w-10 h-7 flex items-center justify-center bg-black/40 rounded-lg border border-white/5 shrink-0 shadow-inner">
+                            <LineTypePreview type={layer.lineType} color={layer.color} weight={typeof layer.thickness === 'number' ? layer.thickness : 0.25} />
                         </div>
                     </div>
 
                     {/* Weight */}
-                    <div className="w-32 px-2 shrink-0 py-2 border-r border-white/5">
+                    <div className="w-28 px-2 shrink-0 py-2 border-r border-white/5 flex items-center justify-center">
                         <select 
-                            value={layer.thickness.toFixed(2)} 
+                            value={typeof layer.thickness === 'number' ? layer.thickness.toFixed(2) : layer.thickness} 
                             onClick={e => e.stopPropagation()}
-                            onChange={e => onUpdateLayer(layer.id, { thickness: parseFloat(e.target.value) })} 
-                            className="w-full bg-[#0d0d0f] border border-white/5 rounded px-2 py-1 text-[9px] text-neutral-400 outline-none font-mono cursor-pointer appearance-none text-center transition-all hover:border-white/20"
+                            onChange={e => {
+                                const val = e.target.value;
+                                onUpdateLayer(layer.id, { thickness: val === 'DEFAULT' ? 'DEFAULT' : parseFloat(val) });
+                            }} 
+                            className="w-full bg-[#0d0d0f]/60 border border-white/5 rounded-lg px-2 py-2 text-[9px] text-neutral-300 outline-none font-mono cursor-pointer appearance-none text-center transition-all hover:border-[#00bcd4]/30 hover:bg-black focus:ring-1 focus:ring-[#00bcd4]/20 shadow-inner"
                         >
-                            {LINE_WEIGHTS.map(w => <option key={w} value={w}>{w}mm</option>)}
+                            {LINE_WEIGHTS.map(w => <option key={w} value={w} className="bg-[#121214] text-white py-2">{w}{w !== 'DEFAULT' ? 'mm' : ''}</option>)}
                         </select>
+                    </div>
+
+                    {/* Plot Style */}
+                    <div className="w-24 shrink-0 py-2 border-r border-white/5 flex items-center justify-center px-2">
+                        <div className="text-[9px] font-black text-neutral-600 uppercase tracking-widest pl-1">ByColor</div>
                     </div>
 
                     {/* Actions */}

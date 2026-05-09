@@ -1,8 +1,10 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=JetBrains+Mono:wght@400;700&family=Major+Mono+Display&family=Courier+Prime:wght@400;700&family=Rajdhani:wght@400;700&family=Chakra+Petch:wght@400;700&family=Saira+Condensed:wght@400;700&family=Pathway+Gothic+One&family=Space+Grotesk:wght@400;700&family=Outfit:wght@400;700&family=Playfair+Display:wght@400;700&family=Arvo:wght@400;700&family=Anton&family=Oswald:wght@400;700&family=Rubik:wght@400;700&family=Pacifico&display=swap');
 @import "tailwindcss";
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Fira Code", ui-monospace, SFMono-Regular, monospace;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-cad: "Rajdhani", sans-serif;
 }
 
 :root {

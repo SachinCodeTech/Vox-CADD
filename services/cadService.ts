@@ -1,5 +1,5 @@
 
-import { Shape, Point, AppSettings, SnapPoint, LineShape, DoubleLineShape, RectShape, ArcShape, CircleShape, EllipseShape, PolyShape, TextShape, MTextShape, SnapOptions, LeaderShape, ArcData, InfiniteLineShape, DonutShape, BlockDefinition } from '../types';
+import { Shape, Point, AppSettings, DimensionStyle, SnapPoint, LineShape, DoubleLineShape, RectShape, ArcShape, CircleShape, EllipseShape, PolyShape, TextShape, MTextShape, SnapOptions, LeaderShape, ArcData, InfiniteLineShape, DonutShape, BlockDefinition } from '../types';
 
 export const getArcFromBulge = (p1: Point, p2: Point, b: number) => {
     const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
@@ -725,28 +725,43 @@ export const getAllShapesBounds = (
     let xMin = Infinity, yMin = Infinity, xMax = -Infinity, yMax = -Infinity;
     let hasShapes = false;
 
-    const shapesList = Array.isArray(layers) ? [layers] : Object.values(layers);
+    const updateBounds = (b: { xMin: number, yMin: number, xMax: number, yMax: number }) => {
+        if (b.xMin <= -1e8 || b.xMax >= 1e8) return; // Skip infinite lines or invalid bounds
+        if (b.xMin < xMin) xMin = b.xMin;
+        if (b.yMin < yMin) yMin = b.yMin;
+        if (b.xMax > xMax) xMax = b.xMax;
+        if (b.yMax > yMax) yMax = b.yMax;
+        hasShapes = true;
+    };
 
-    shapesList.forEach(layerShapes => {
-        layerShapes.forEach(s => {
-            if (s.type === 'ray' || s.type === 'xline') return; 
-            const b = getShapeBounds(s, blocks);
-            if (b.xMin === -1e9 || b.yMin === -1e9) return;
-            xMin = Math.min(xMin, b.xMin); yMin = Math.min(yMin, b.yMin);
-            xMax = Math.max(xMax, b.xMax); yMax = Math.max(yMax, b.yMax);
-            hasShapes = true;
-        });
-    });
+    if (Array.isArray(layers)) {
+        for (const s of layers) {
+            if (s.type === 'ray' || s.type === 'xline') continue;
+            updateBounds(getShapeBounds(s, blocks));
+        }
+    } else {
+        for (const layerShapes of Object.values(layers)) {
+            for (const s of layerShapes) {
+                if (s.type === 'ray' || s.type === 'xline') continue;
+                updateBounds(getShapeBounds(s, blocks));
+            }
+        }
+    }
 
     if (limits) {
-        xMin = Math.min(xMin, limits.min.x, limits.max.x);
-        yMin = Math.min(yMin, limits.min.y, limits.max.y);
-        xMax = Math.max(xMax, limits.min.x, limits.max.x);
-        yMax = Math.max(yMax, limits.min.y, limits.max.y);
+        const lxMin = Math.min(limits.min.x, limits.max.x);
+        const lyMin = Math.min(limits.min.y, limits.max.y);
+        const lxMax = Math.max(limits.min.x, limits.max.x);
+        const lyMax = Math.max(limits.min.y, limits.max.y);
+
+        if (lxMin < xMin) xMin = lxMin;
+        if (lyMin < yMin) yMin = lyMin;
+        if (lxMax > xMax) xMax = lxMax;
+        if (lyMax > yMax) yMax = lyMax;
         hasShapes = true;
     }
 
-    if (!hasShapes) return null;
+    if (!hasShapes || xMin === Infinity) return null;
     return { xMin, yMin, xMax, yMax };
 };
 
@@ -819,11 +834,36 @@ export const getPolygonPoints = (center: Point, sides: number, radius: number, i
     return pts;
 };
 
-export const parseLength = (str: string, isImperial: boolean): number => {
+export const parseLength = (str: string, settings: AppSettings): number => {
     if (!str) return 0;
-    const clean = str.trim();
+    const clean = str.trim().toLowerCase();
     if (clean === "") return 0;
     
+    // Conversion factors to a base unit (e.g., mm)
+    const factors: Record<string, number> = {
+        'mm': 1, 'cm': 10, 'm': 1000, 'km': 1000000,
+        'in': 25.4, 'inch': 25.4, 'inches': 25.4, '"': 25.4,
+        'ft': 304.8, 'foot': 304.8, 'feet': 304.8, "'": 304.8,
+        'yd': 914.4, 'yard': 914.4, 'yards': 914.4,
+        'mi': 1609344, 'mile': 1609344, 'miles': 1609344
+    };
+
+    const isImperial = settings.units === 'imperial';
+    const activeSubtype = settings.unitSubtype || (isImperial ? 'inches' : 'mm');
+    const toBase = factors[activeSubtype] || 1;
+
+    // Check for explicit unit suffix
+    for (const [suffix, factor] of Object.entries(factors)) {
+        if (clean.endsWith(suffix)) {
+            const numericPart = clean.substring(0, clean.length - suffix.length).trim();
+            const val = parseFloat(numericPart);
+            if (!isNaN(val)) {
+                // Return in terms of the active subtype units
+                return (val * factor) / toBase;
+            }
+        }
+    }
+
     // Support basic math expressions
     if (clean.includes('+') || clean.includes('-') || clean.includes('*') || clean.includes('/')) {
         try {
@@ -845,12 +885,108 @@ export const parseLength = (str: string, isImperial: boolean): number => {
     }
     let inchesPart = feetMatch ? clean.substring(feetMatch.index! + feetMatch[0].length).trim() : clean;
     inchesPart = inchesPart.replace(/^[- "]+/, '').replace(/"$/, '');
+    
+    // Handle fractions like "1-1/2" or "1 1/2"
+    if (inchesPart.includes('/') && inchesPart.includes(' ')) {
+        const parts = inchesPart.split(' ');
+        const whole = parseFloat(parts[0]);
+        const fracParts = parts[1].split('/');
+        const num = parseFloat(fracParts[0]);
+        const den = parseFloat(fracParts[1]);
+        if (!isNaN(whole) && !isNaN(num) && !isNaN(den) && den !== 0) {
+            totalInches += whole + (num / den);
+            matched = true;
+            // Conversion to active units if needed
+            // If active unit is feet, we need to return feet.
+            return (totalInches * factors['in']) / toBase;
+        }
+    } else if (inchesPart.includes('/') && inchesPart.includes('-')) {
+        const parts = inchesPart.split('-');
+        const whole = parseFloat(parts[0]);
+        const fracParts = parts[1].split('/');
+        const num = parseFloat(fracParts[0]);
+        const den = parseFloat(fracParts[1]);
+        if (!isNaN(whole) && !isNaN(num) && !isNaN(den) && den !== 0) {
+            totalInches += whole + (num / den);
+            matched = true;
+            return (totalInches * factors['in']) / toBase;
+        }
+    } else if (inchesPart.includes('/')) {
+        const fracParts = inchesPart.split('/');
+        const num = parseFloat(fracParts[0]);
+        const den = parseFloat(fracParts[1]);
+        if (!isNaN(num) && !isNaN(den) && den !== 0) {
+            totalInches += (num / den);
+            matched = true;
+            return (totalInches * factors['in']) / toBase;
+        }
+    }
+
     const inchMatch = inchesPart.match(/(-?\d+(\.\d+)?)/);
-    if (inchMatch) {
+    if (inchMatch && !inchesPart.includes('/')) {
         totalInches += parseFloat(inchMatch[1]);
         matched = true;
     }
-    return matched ? totalInches : parseFloat(clean);
+
+    if (matched) {
+        // All imperial parsing returns inches. Convert to active unit.
+        return (totalInches * factors['in']) / toBase;
+    }
+
+    return parseFloat(clean);
+};
+
+export const formatDimensionValue = (val: number, ds: DimensionStyle, globalSettings: AppSettings): string => {
+    if (val === undefined || isNaN(val)) return "0.00";
+    const format = ds.unitFormat || (globalSettings.units === 'imperial' ? 'architectural' : 'decimal');
+    const absVal = Math.abs(val);
+    const sign = val < 0 ? "-" : "";
+
+    if (format === 'decimal') {
+        return sign + absVal.toFixed(ds.precision ?? 2);
+    }
+
+    if (format === 'architectural' || format === 'fractional') {
+        const denom = ds.fractionalPrecision || 16;
+        const gcd = (a: number, b: number): number => b ? gcd(b, a % b) : a;
+
+        if (format === 'architectural') {
+            const totalInches = absVal;
+            const feet = Math.floor(totalInches / 12);
+            const remainderInches = totalInches % 12;
+            const wholeInches = Math.floor(remainderInches);
+            const fracParts = Math.round((remainderInches - wholeInches) * denom);
+            
+            let result = "";
+            if (feet > 0) result += `${feet}'`;
+            if (feet > 0 && (wholeInches > 0 || fracParts > 0)) result += "-";
+            if (wholeInches > 0 || (feet === 0 && fracParts === 0)) result += `${wholeInches}`;
+            
+            if (fracParts > 0) {
+                const common = gcd(fracParts, denom);
+                if (wholeInches > 0) result += " ";
+                result += `${fracParts/common}/${denom/common}`;
+            }
+            return sign + result + "\"";
+        } else {
+            const whole = Math.floor(absVal);
+            const fracParts = Math.round((absVal - whole) * denom);
+            let result = `${whole}`;
+            if (fracParts > 0) {
+                const common = gcd(fracParts, denom);
+                result += ` ${fracParts/common}/${denom/common}`;
+            }
+            return sign + result;
+        }
+    }
+
+    if (format === 'engineering') {
+        const feet = Math.floor(absVal / 12);
+        const inches = absVal % 12;
+        return `${sign}${feet}'${inches.toFixed(ds.precision ?? 1)}"`;
+    }
+
+    return sign + absVal.toFixed(ds.precision ?? 2);
 };
 
 export const formatLength = (val: number, settings: AppSettings): string => {
@@ -858,8 +994,10 @@ export const formatLength = (val: number, settings: AppSettings): string => {
     const isImperial = settings.units === 'imperial';
     
     if (!isImperial) {
-        const prec = settings.precision ? settings.precision.split('.')[1]?.length : 3;
-        return val.toFixed(prec || 3);
+        const precisionPart = settings.precision.split('.')[1];
+        const prec = precisionPart ? precisionPart.length : 0;
+        const suffix = settings.unitSubtype || 'mm';
+        return val.toFixed(prec) + suffix;
     }
 
     const format = settings.linearFormat || 'architectural';
@@ -1172,12 +1310,15 @@ export const getShapeSegments = (s: Shape): { p1: Point, p2: Point }[] => {
     return segments;
 };
 
-export const resolvePointInput = (input: string, lastPoint: Point | null, isImperial: boolean, currentCursor?: Point, orthoEnabled?: boolean): Point | null => {
+export const resolvePointInput = (input: string, lastPoint: Point | null, settings: AppSettings, currentCursor?: Point): Point | null => {
     const text = input.trim().toLowerCase();
     if (text === "") return null;
 
+    const isImperial = settings.units === 'imperial';
+    const orthoEnabled = settings.ortho;
+
     if (!text.includes(',') && !text.includes('<') && !text.startsWith('@')) {
-        const distValue = parseLength(text, isImperial);
+        const distValue = parseLength(text, settings);
         if (!isNaN(distValue) && lastPoint && currentCursor) {
             let dx = currentCursor.x - lastPoint.x;
             let dy = currentCursor.y - lastPoint.y;
@@ -1202,7 +1343,7 @@ export const resolvePointInput = (input: string, lastPoint: Point | null, isImpe
     if (workingText.includes('<')) {
         const parts = workingText.split('<');
         if (parts.length !== 2) return null;
-        const distValue = parseLength(parts[0], isImperial);
+        const distValue = parseLength(parts[0], settings);
         const angleDeg = parseFloat(parts[1]);
         if (isNaN(distValue) || isNaN(angleDeg)) return null;
         const angleRad = angleDeg * Math.PI / 180;
@@ -1214,8 +1355,8 @@ export const resolvePointInput = (input: string, lastPoint: Point | null, isImpe
 
     const parts = workingText.replace(',', ' ').split(/\s+/).filter(p => p !== "");
     if (parts.length === 2) {
-        const dx = parseLength(parts[0], isImperial);
-        const dy = parseLength(parts[1], isImperial);
+        const dx = parseLength(parts[0], settings);
+        const dy = parseLength(parts[1], settings);
         if (isNaN(dx) || isNaN(dy)) return null;
 
         return {

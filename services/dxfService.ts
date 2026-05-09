@@ -7,7 +7,7 @@ import {
     DimensionStyle, LayoutDefinition
 } from '../types';
 import { generateId, getAllShapesBounds } from './cadService';
-import { aciToHex, hexToACI } from './colorUtils';
+import { aciToHex, hexToACI, mapLineweight } from './colorUtils';
 
 const mmToDXFLineWeight = (mm: number | string | undefined): number => {
     if (mm === undefined || mm === '' || mm === 'bylayer' || mm === 'BYLAYER') return -1;
@@ -417,25 +417,37 @@ const parseLayers = (dxf: any, lineTypes: Record<string, LineTypeDefinition>): R
     const layers: Record<string, LayerConfig> = {};
     
     // Ensure default layers exist
-    layers['0'] = { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' };
+    layers['0'] = { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FF0000', thickness: 0.25, lineType: 'continuous' };
     layers['defpoints'] = { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, plottable: false, color: '#666666', thickness: 0.1, lineType: 'continuous' };
 
     if (dxf.tables && dxf.tables.layer && dxf.tables.layer.layers) {
-        Object.values(dxf.tables.layer.layers).forEach((l: any) => {
-            const layerName = l.name || '0';
+        const dLayers = Object.values(dxf.tables.layer.layers);
+        const numLayers = dLayers.length;
+        for (let i = 0; i < numLayers; i++) {
+            const l: any = dLayers[i];
+            let layerName = l.name || '0';
+            
+            // Normalize special AutoCAD layers
+            const lowerLayerName = layerName.toLowerCase();
+            if (lowerLayerName === 'defpoints') layerName = 'defpoints';
+            if (layerName === '0' || lowerLayerName === '0') layerName = '0';
+
             const ltName = (l.lineTypeName || 'continuous').toLowerCase();
+            const aci = l.color !== undefined ? l.color : 7;
+            const flags = l.flags || 0;
+            
             layers[layerName] = {
                 id: layerName,
                 name: layerName,
-                visible: l.color !== undefined ? l.color >= 0 : true,
-                locked: !!l.locked,
-                frozen: !!l.frozen,
-                plottable: layerName.toLowerCase() !== 'defpoints',
-                color: aciToHex(l.color !== undefined ? Math.abs(l.color) : 7) || '#FFFFFF',
-                thickness: l.lineWeight && l.lineWeight > 0 ? l.lineWeight / 100 : 0.25,
+                visible: aci >= 0 && !(flags & 1),
+                locked: !!(flags & 4),
+                frozen: !!(flags & 1),
+                plottable: layerName.toLowerCase() !== 'defpoints' && (l.isPlottable !== false),
+                color: aciToHex(Math.abs(aci)) || '#FFFFFF',
+                thickness: mapLineweight(l.lineWeight) || 0.25,
                 lineType: ltName as any
             };
-        });
+        }
     }
     return layers;
 };
@@ -491,7 +503,7 @@ const parseDimStyles = (dxf: any): Record<string, DimensionStyle> => {
     return styles;
 };
 
-export const dxfToProject = (dxfString: string, defaultSettings: AppSettings): VoxProject => {
+export const dxfToProject = async (dxfString: string, defaultSettings: AppSettings): Promise<VoxProject> => {
     const entities: Shape[] = [];
     const blocks: Record<string, BlockDefinition> = {};
     const stats = { total: 0, unsupported: 0, counts: {} as Record<string, number> };
@@ -499,7 +511,7 @@ export const dxfToProject = (dxfString: string, defaultSettings: AppSettings): V
         'continuous': { name: 'continuous', description: 'Solid line', pattern: [] }
     };
     let layers: Record<string, LayerConfig> = { 
-        '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' },
+        '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FF0000', thickness: 0.25, lineType: 'continuous' },
         'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, plottable: false, color: '#666666', thickness: 0.1, lineType: 'continuous' }
     };
     let dimStyles: Record<string, DimensionStyle> = {};
@@ -519,89 +531,174 @@ export const dxfToProject = (dxfString: string, defaultSettings: AppSettings): V
         const paperEntities: Shape[] = [];
 
         const convertEntity = (entity: any): Shape | null => {
+            if (!entity) return null;
             const id = generateId();
-            const layer = entity.layer || '0';
-            const color = aciToHex(entity.color);
-            const thickness = entity.lineWeight && entity.lineWeight > 0 ? entity.lineWeight / 100 : undefined;
-            const lineType = (entity.lineTypeName || 'byLayer').toLowerCase();
+            
+            // Handle layer as string or object
+            let layer = '0';
+            if (typeof entity.layer === 'string') layer = entity.layer;
+            else if (entity.layer && typeof entity.layer.name === 'string') layer = entity.layer.name;
+            else if (typeof entity.layerName === 'string') layer = entity.layerName;
+            
+            // Normalize special AutoCAD layers
+            const lowerLayer = layer.toLowerCase();
+            if (lowerLayer === 'defpoints') layer = 'defpoints';
+            if (layer === '0' || lowerLayer === '0') layer = '0';
+            
+            const aci = entity.color !== undefined ? entity.color : 256; // 256 = Bylayer
+            const color = aciToHex(aci);
+            const thickness = mapLineweight(entity.lineWeight);
+            const lineType = (entity.lineTypeName || 'bylayer').toLowerCase();
             const isPaper = !!entity.inPaperSpace;
+
+            const isValid = (val: any) => typeof val === 'number' && isFinite(val) && Math.abs(val) < 1e12;
+
+            // Ensure layer metadata exists for this layer name
+            if (!layers[layer]) {
+                layers[layer] = { id: layer, name: layer, visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' };
+            }
 
             switch (entity.type) {
                 case 'LINE':
-                    return { id, layer, color, thickness, lineType, type: 'line', x1: entity.vertices[0].x, y1: entity.vertices[0].y, x2: entity.vertices[1].x, y2: entity.vertices[1].y } as any;
+                    if (entity.vertices && entity.vertices.length >= 2) {
+                        const v1 = entity.vertices[0];
+                        const v2 = entity.vertices[1];
+                        if (isValid(v1.x) && isValid(v1.y) && isValid(v2.x) && isValid(v2.y)) {
+                            // Filter radiating ghost lines to origin
+                            const is1_0 = Math.abs(v1.x) < 1e-6 && Math.abs(v1.y) < 1e-6;
+                            const is2_0 = Math.abs(v2.x) < 1e-6 && Math.abs(v2.y) < 1e-6;
+                            const d = Math.sqrt((v1.x - v2.x)**2 + (v1.y - v2.y)**2);
+                            if ((is1_0 || is2_0) && d > 1e5 && !(is1_0 && is2_0)) return null;
+
+                            return { id, layer, color, thickness, lineType, type: 'line', x1: v1.x, y1: v1.y, x2: v2.x, y2: v2.y } as any;
+                        }
+                    }
+                    break;
                 case 'CIRCLE':
-                    return { id, layer, color, thickness, lineType, type: 'circle', x: entity.center.x, y: entity.center.y, radius: entity.radius } as any;
+                    if (entity.center && isValid(entity.center.x) && isValid(entity.center.y)) {
+                        return { id, layer, color, thickness, lineType, type: 'circle', x: entity.center.x, y: entity.center.y, radius: entity.radius || 0 } as any;
+                    }
+                    break;
                 case 'ARC':
-                    return { id, layer, color, thickness, lineType, type: 'arc', x: entity.center.x, y: entity.center.y, radius: entity.radius, startAngle: entity.startAngle, endAngle: entity.endAngle, counterClockwise: false } as any;
+                    if (entity.center && isValid(entity.center.x) && isValid(entity.center.y)) {
+                        return { id, layer, color, thickness, lineType, type: 'arc', x: entity.center.x, y: entity.center.y, radius: entity.radius || 0, startAngle: entity.startAngle || 0, endAngle: entity.endAngle || 0, counterClockwise: false } as any;
+                    }
+                    break;
                 case 'LWPOLYLINE':
                 case 'POLYLINE':
-                    if (entity.vertices && entity.vertices.length > 1) {
+                    let vts = (entity.vertices || entity.points || []).filter((v: any) => v && isValid(v.x) && isValid(v.y));
+                    
+                    if (vts.length > 2) {
+                        const hasManyNonZero = vts.filter((v: any) => Math.abs(v.x) > 1e-6 || Math.abs(v.y) > 1e-6).length > vts.length / 2;
+                        if (hasManyNonZero) {
+                            vts = vts.filter((v: any) => Math.abs(v.x) > 1e-6 || Math.abs(v.y) > 1e-6);
+                        }
+                    }
+
+                    if (vts.length > 1) {
                         return { 
                             id, layer, color, thickness, lineType, type: 'pline', 
-                            points: entity.vertices.map((v: any) => ({ x: v.x, y: v.y, bulge: v.bulge })), 
-                            closed: entity.shape || entity.closed 
+                            points: vts.map((v: any) => ({ x: v.x, y: v.y, bulge: v.bulge || 0 })), 
+                            closed: !!(entity.shape || entity.closed || (entity.flags & 1))
                         } as any;
                     }
                     break;
                 case 'TEXT':
-                    return { 
-                        id, layer, color, thickness, lineType, type: 'text', 
-                        x: entity.position?.x || 0, 
-                        y: entity.position?.y || 0, 
-                        size: entity.textHeight || 2.5, 
-                        content: entity.text || '', 
-                        rotation: (entity.rotation || 0) * Math.PI / 180,
-                        justification: entity.halign === 1 ? 'center' : entity.halign === 2 ? 'right' : 'left'
-                    } as any;
-                case 'MTEXT':
-                    const rawText = entity.text || '';
-                    const hasUnderline = /\\L/i.test(rawText);
-                    return { 
-                        id, layer, color, thickness, lineType, type: 'mtext', 
-                        x: entity.position?.x || 0, 
-                        y: entity.position?.y || 0, 
-                        width: entity.width || 0,
-                        size: entity.textHeight || 2.5, 
-                        content: cleanMText(rawText), 
-                        rotation: (entity.rotation || 0) * Math.PI / 180,
-                        underline: hasUnderline,
-                        bold: rawText.includes('|b1')
-                    } as any;
-                case 'ELLIPSE':
-                    const rx = Math.sqrt(entity.majorAxisEndPoint.x ** 2 + entity.majorAxisEndPoint.y ** 2);
-                    return { id, layer, color, thickness, lineType, type: 'ellipse', x: entity.center.x, y: entity.center.y, rx, ry: rx * entity.axisRatio, rotation: Math.atan2(entity.majorAxisEndPoint.y, entity.majorAxisEndPoint.x) } as any;
-                case 'POINT':
-                    return { id, layer, color, thickness, lineType, type: 'point', x: entity.position.x, y: entity.position.y, size: 5 } as any;
-                case 'INSERT':
-                    return { id, layer, color, thickness, lineType, type: 'block', x: entity.position.x, y: entity.position.y, blockId: entity.name, scaleX: entity.xScale || 1, scaleY: entity.yScale || 1, rotation: (entity.rotation || 0) * Math.PI / 180 } as any;
-                case 'SPLINE':
-                    if (entity.controlPoints && entity.controlPoints.length > 1) {
-                        return { id, layer, color, thickness, lineType, type: 'pline', points: entity.controlPoints.map((v: any) => ({ x: v.x, y: v.y })), closed: entity.closed } as any;
-                    }
-                    else if (entity.vertices && entity.vertices.length > 1) {
-                         return { id, layer, color, thickness, lineType, type: 'pline', points: entity.vertices.map((v: any) => ({ x: v.x, y: v.y })), closed: entity.closed } as any;
+                    const tPos = entity.position || entity.insertionPoint || { x: 0, y: 0 };
+                    if (isValid(tPos.x) && isValid(tPos.y)) {
+                        const rawText = entity.text || '';
+                        let fontFamily = 'standard';
+                        const fMatch = rawText.match(/\\f([^;|]+)[;|]/);
+                        if (fMatch) fontFamily = fMatch[1];
+                        else if (entity.styleName) fontFamily = entity.styleName;
+
+                        return { 
+                            id, layer, color, thickness, lineType, type: 'text', 
+                            x: tPos.x, 
+                            y: tPos.y, 
+                            size: entity.textHeight || 2.5, 
+                            content: rawText, 
+                            rotation: (entity.rotation || 0) * Math.PI / 180,
+                            justification: entity.halign === 1 ? 'center' : entity.halign === 2 ? 'right' : 'left',
+                            attachmentPoint: entity.attachmentPoint || (entity.valign === 1 ? 7 : entity.valign === 2 ? 4 : entity.valign === 3 ? 1 : 1), // Map valign to attachment point
+                            fontFamily
+                        } as any;
                     }
                     break;
-                case 'ATTDEF':
+                case 'MTEXT':
+                    const mtPos = entity.position || entity.insertionPoint || { x: 0, y: 0 };
+                    if (isValid(mtPos.x) && isValid(mtPos.y)) {
+                        const rawText = entity.text || '';
+                        const hasUnderline = /\\L/i.test(rawText);
+                        
+                        let fontFamily = 'standard';
+                        const fMatch = rawText.match(/\\f([^;|]+)[;|]/);
+                        if (fMatch) fontFamily = fMatch[1];
+                        else if (entity.styleName) fontFamily = entity.styleName;
+
+                        return { 
+                            id, layer, color, thickness, lineType, type: 'mtext', 
+                            x: mtPos.x, 
+                            y: mtPos.y, 
+                            width: entity.width || 0,
+                            size: entity.textHeight || 2.5, 
+                            content: cleanMText(rawText), 
+                            rotation: (entity.rotation || 0) * Math.PI / 180,
+                            attachmentPoint: entity.attachmentPoint || 1,
+                            underline: hasUnderline,
+                            bold: rawText.includes('|b1'),
+                            fontFamily
+                        } as any;
+                    }
+                    break;
+                case 'ELLIPSE':
+                    if (entity.center && entity.majorAxisEndPoint && isValid(entity.center.x)) {
+                        const rx = Math.sqrt(entity.majorAxisEndPoint.x ** 2 + entity.majorAxisEndPoint.y ** 2);
+                        return { id, layer, color, thickness, lineType, type: 'ellipse', x: entity.center.x, y: entity.center.y, rx, ry: rx * (entity.axisRatio || 1), rotation: Math.atan2(entity.majorAxisEndPoint.y, entity.majorAxisEndPoint.x) } as any;
+                    }
+                    break;
+                case 'POINT':
+                    const pPos = entity.position || { x: 0, y: 0 };
+                    if (isValid(pPos.x) && isValid(pPos.y)) {
+                        return { id, layer, color, thickness, lineType, type: 'point', x: pPos.x, y: pPos.y, size: 5 } as any;
+                    }
+                    break;
+                case 'INSERT':
+                    const insPos = entity.position || { x: 0, y: 0 };
+                    if (isValid(insPos.x) && isValid(insPos.y)) {
+                        return { id, layer, color, thickness, lineType, type: 'block', x: insPos.x, y: insPos.y, blockId: entity.name || entity.block, scaleX: entity.xScale || 1, scaleY: entity.yScale || 1, rotation: (entity.rotation || 0) * Math.PI / 180 } as any;
+                    }
+                    break;
+                case 'SPLINE':
+                    const ctrlPts = (entity.controlPoints || entity.vertices || entity.points || []).filter((v: any) => v && isValid(v.x) && isValid(v.y));
+                    if (ctrlPts.length > 1) {
+                        return { id, layer, color, thickness, lineType, type: 'pline', points: ctrlPts.map((v: any) => ({ x: v.x || 0, y: v.y || 0 })), closed: !!entity.closed } as any;
+                    }
+                    break;
+                    case 'ATTDEF':
                 case 'ATTRIB':
+                    const attPos = entity.position || { x: 0, y: 0 };
                     return { 
                         id, layer, color, thickness, lineType, type: 'text', 
-                        x: entity.position?.x || 0, 
-                        y: entity.position?.y || 0, 
+                        x: attPos.x, 
+                        y: attPos.y, 
                         size: entity.textHeight || 2.5, 
                         content: entity.text || entity.tag || '', 
                         rotation: (entity.rotation || 0) * Math.PI / 180,
                     } as any;
                 case 'XLINE':
                 case 'RAY':
-                    const basePoint = entity.basePoint || entity.position || { x: 0, y: 0 };
-                    const direction = entity.directionVector || entity.unitVector || { x: 1, y: 0 };
-                    return {
-                        id, layer, color, thickness, lineType, type: (entity.type.toLowerCase() as any),
-                        x1: basePoint.x, y1: basePoint.y,
-                        x2: basePoint.x + direction.x,
-                        y2: basePoint.y + direction.y
-                    } as any;
+                    const basePt = entity.basePoint || entity.position || { x: 0, y: 0 };
+                    const dir = entity.directionVector || entity.unitVector || { x: 1, y: 0 };
+                    if (isValid(basePt.x) && isValid(basePt.y) && isValid(dir.x) && isValid(dir.y)) {
+                        return {
+                            id, layer, color, thickness, lineType, type: (entity.type.toLowerCase() as any),
+                            x1: basePt.x, y1: basePt.y,
+                            x2: basePt.x + dir.x,
+                            y2: basePt.y + dir.y
+                        } as any;
+                    }
+                    break;
                 case '3DFACE':
                     if (entity.vertices && entity.vertices.length >= 3) {
                         const pts = entity.vertices.slice(0, 4).map((v: any) => ({ x: v.x, y: v.y }));
@@ -610,65 +707,85 @@ export const dxfToProject = (dxfString: string, defaultSettings: AppSettings): V
                     break;
                 case 'IMAGE':
                 case 'WIPEOUT':
+                    const imgPos = entity.position || { x: 0, y: 0 };
                     return { 
                         id, layer, color, thickness, lineType, type: 'rect', 
-                        x: entity.position.x, y: entity.position.y, 
+                        x: imgPos.x, y: imgPos.y, 
                         width: entity.width || 10, height: entity.height || 10, 
                         rotation: (entity.rotation || 0) * Math.PI / 180 
                     } as any;
                 case 'DIMENSION':
-                    return { 
-                        id, layer, color, thickness, lineType, type: 'dimension', 
-                        dimType: 'aligned', 
-                        x1: entity.definitionPoint.x, y1: entity.definitionPoint.y,
-                        x2: entity.definitionPoint2?.x || entity.definitionPoint.x, 
-                        y2: entity.definitionPoint2?.y || entity.definitionPoint.y,
-                        dimX: entity.textMidPoint?.x || entity.definitionPoint.x,
-                        dimY: entity.textMidPoint?.y || entity.definitionPoint.y,
-                        text: entity.text || ''
-                    } as any;
+                    if (entity.definitionPoint && entity.definitionPoint2 && isValid(entity.definitionPoint.x) && isValid(entity.definitionPoint2.x)) {
+                        const dp1 = entity.definitionPoint;
+                        const dp2 = entity.definitionPoint2;
+                        const tmp = entity.textMidPoint;
+                        const useTmp = tmp && isValid(tmp.x) && (tmp.x !== 0 || tmp.y !== 0);
+                        return { 
+                            id, layer, color, thickness, lineType, type: 'dimension', 
+                            dimType: 'aligned', 
+                            x1: dp1.x, y1: dp1.y,
+                            x2: dp2.x, y2: dp2.y,
+                            dimX: useTmp ? tmp.x : (dp1.x + dp2.x) / 2,
+                            dimY: useTmp ? tmp.y : (dp1.y + dp2.y) / 2,
+                            text: entity.text || ''
+                        } as any;
+                    }
+                    break;
                 case 'LEADER':
                     if (entity.vertices && entity.vertices.length > 1) {
-                        return { id, layer, color, thickness, lineType, type: 'leader', x1: entity.vertices[0].x, y1: entity.vertices[0].y, x2: entity.vertices[1].x, y2: entity.vertices[1].y, text: '', size: 2.5 } as any;
+                        const v1 = entity.vertices[0];
+                        const v2 = entity.vertices[1];
+                        if (isValid(v1.x) && isValid(v1.y) && isValid(v2.x) && isValid(v2.y)) {
+                            const useV2 = (v2.x !== 0 || v2.y !== 0) || (v1.x === 0 && v1.y === 0);
+                            return { 
+                                id, layer, color, thickness, lineType, type: 'leader', 
+                                x1: v1.x, y1: v1.y, 
+                                x2: useV2 ? v2.x : v1.x + 0.001, 
+                                y2: useV2 ? v2.y : v1.y + 0.001, 
+                                text: '', size: 2.5 
+                            } as any;
+                        }
                     }
                     break;
                 case 'SOLID':
                 case 'TRACE': {
-                    const pts = [
-                        { x: entity.points[0].x, y: entity.points[0].y },
-                        { x: entity.points[1].x, y: entity.points[1].y },
-                        { x: entity.points[3].x, y: entity.points[3].y }, // AutoCAD solids use 1-2-4-3 sequence for quads
-                        { x: entity.points[2].x, y: entity.points[2].y }
-                    ];
-                    return { id, layer, color, thickness, lineType, type: 'polygon', points: pts, closed: true, filled: true } as any;
+                    if (entity.points && entity.points.length >= 3) {
+                        const pts = [
+                            { x: entity.points[0].x, y: entity.points[0].y },
+                            { x: entity.points[1].x, y: entity.points[1].y },
+                            { x: entity.points[3]?.x || entity.points[2].x, y: entity.points[3]?.y || entity.points[2].y }, 
+                            { x: entity.points[2].x, y: entity.points[2].y }
+                        ].filter(p => isValid(p.x));
+                        if (pts.length >= 3) {
+                            return { id, layer, color, thickness, lineType, type: 'polygon', points: pts, closed: true, filled: true } as any;
+                        }
+                    }
+                    break;
                 }
                 case 'HATCH':
                     if (entity.boundaryPaths && entity.boundaryPaths.length > 0) {
-                        let pts: Point[] = [];
+                        const loops: Point[][] = [];
                         entity.boundaryPaths.forEach((path: any) => {
+                            const pts: Point[] = [];
                             if (path.edges && path.edges.length > 0) {
                                 path.edges.forEach((e: any) => {
-                                    if (e.type === 'line') {
-                                        pts.push({ x: e.startPoint.x, y: e.startPoint.y });
-                                    } else if (e.type === 'arc' || e.type === 'ellipseArc') {
-                                        // Approximate arc by points for now, or use bulge if we can calculate it
-                                        // A better way is to use a high-resolution polyline
-                                        const start = Math.atan2(e.startPoint.y - e.center.y, e.startPoint.x - e.center.x);
-                                        const end = Math.atan2(e.endPoint.y - e.center.y, e.endPoint.x - e.center.x);
-                                        // Simple approximation: mid point as bulge point
-                                        pts.push({ x: e.startPoint.x, y: e.startPoint.y });
-                                    }
+                                    if (e.startPoint && isValid(e.startPoint.x)) pts.push({ x: e.startPoint.x, y: e.startPoint.y });
+                                    if (e.endPoint && isValid(e.endPoint.x)) pts.push({ x: e.endPoint.x, y: e.endPoint.y });
                                 });
                             } else if (path.vertices && path.vertices.length > 0) {
-                                path.vertices.forEach((v: any) => pts.push({ x: v.x, y: v.y, bulge: v.bulge }));
+                                path.vertices.forEach((v: any) => {
+                                    if (v && isValid(v.x) && isValid(v.y)) pts.push({ x: v.x, y: v.y, bulge: v.bulge });
+                                });
                             }
+                            if (pts.length >= 2) loops.push(pts);
                         });
                         
-                        if (pts.length > 2) {
+                        if (loops.length > 0) {
                             return { 
                                 id, layer, color, thickness, lineType, type: 'hatch', 
-                                pattern: (entity.patternName || 'ansi31').toLowerCase(), 
-                                points: pts, 
+                                pattern: (entity.patternName || 'solid').toLowerCase(), 
+                                points: loops[0],
+                                loops, 
                                 scale: entity.patternScale || 1, 
                                 rotation: (entity.patternAngle || 0) * Math.PI / 180 
                             } as any;
@@ -680,22 +797,34 @@ export const dxfToProject = (dxfString: string, defaultSettings: AppSettings): V
         };
 
         if (dxf.blocks) {
-            Object.keys(dxf.blocks).forEach(name => {
+            const blockNames = Object.keys(dxf.blocks);
+            const numBlocks = blockNames.length;
+            for (let i = 0; i < numBlocks; i++) {
+                // Yielding point
+                if (i % 10 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+                
+                const name = blockNames[i];
                 const b = dxf.blocks[name];
                 const blockShapes: Shape[] = [];
                 if (b.entities) {
-                    b.entities.forEach((ent: any) => {
-                        const s = convertEntity(ent);
+                    const numEnt = b.entities.length;
+                    for (let j = 0; j < numEnt; j++) {
+                        const s = convertEntity(b.entities[j]);
                         if (s) blockShapes.push(s);
-                    });
+                    }
                 }
                 const basePoint = b.position ? { x: b.position.x, y: b.position.y } : { x: 0, y: 0 };
                 blocks[name] = { id: name, name: name, basePoint, shapes: blockShapes };
-            });
+            }
         }
 
         if (dxf.entities) {
-            dxf.entities.forEach((entity: any) => {
+            const numEntities = dxf.entities.length;
+            for (let i = 0; i < numEntities; i++) {
+                // Yielding point for entities
+                if (i % 1000 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+
+                const entity = dxf.entities[i];
                 stats.total++;
                 stats.counts[entity.type] = (stats.counts[entity.type] || 0) + 1;
                 const s = convertEntity(entity);
@@ -707,7 +836,7 @@ export const dxfToProject = (dxfString: string, defaultSettings: AppSettings): V
                     }
                 }
                 else stats.unsupported++;
-            });
+            }
         }
 
         if (paperEntities.length > 0) {

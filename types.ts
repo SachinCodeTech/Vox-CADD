@@ -14,9 +14,9 @@ export interface Point {
   bulge?: number; // Added for Arcs in Polylines
 }
 
-export type ShapeType = 'line' | 'dline' | 'circle' | 'rect' | 'text' | 'mtext' | 'arc' | 'pline' | 'spline' | 'dimension' | 'dimang' | 'ellipse' | 'polygon' | 'point' | 'ray' | 'xline' | 'donut' | 'leader' | 'block' | 'hatch';
+export type ShapeType = 'line' | 'dline' | 'circle' | 'rect' | 'text' | 'mtext' | 'arc' | 'pline' | 'poly' | 'spline' | 'dimension' | 'dimang' | 'ellipse' | 'polygon' | 'point' | 'ray' | 'xline' | 'donut' | 'leader' | 'block' | 'hatch';
 
-export type LineType = 'continuous' | 'dashed' | 'dotted' | 'center' | 'dashdot' | 'border' | 'divide' | 'phantom' | 'zigzag' | 'hotwater' | 'hidden' | 'gasLine' | 'fenceLine' | 'tracks' | 'batt' | 'zigzag2' | 'dots2' | 'dash2';
+export type LineType = 'continuous' | 'dashed' | 'dotted' | 'center' | 'dashdot' | 'border' | 'divide' | 'phantom' | 'zigzag' | 'hotwater' | 'hidden' | 'gasLine' | 'fenceLine' | 'tracks' | 'batt' | 'zigzag2' | 'dots2' | 'dash2' | 'bylayer' | 'byblock';
 
 export type TextJustification = 'left' | 'center' | 'right';
 
@@ -28,6 +28,9 @@ export interface BaseShape {
   thickness?: number | string; 
   lineType?: LineType;
   filled?: boolean; 
+  fill?: boolean; 
+  text?: string;
+  height?: number;
   opacity?: number;
   isPreview?: boolean; 
   lineScale?: number;
@@ -98,7 +101,9 @@ export interface TextShape extends BaseShape {
   x: number;
   y: number;
   size: number;
+  height?: number; // Alias for size
   content: string;
+  text?: string; // Alias for content
   rotation?: number; 
   justification?: TextJustification;
   bold?: boolean;
@@ -106,6 +111,7 @@ export interface TextShape extends BaseShape {
   underline?: boolean;
   highlight?: boolean;
   fontFamily?: string;
+  attachmentPoint?: number;
 }
 
 export interface MTextShape extends BaseShape {
@@ -114,7 +120,9 @@ export interface MTextShape extends BaseShape {
   y: number;
   width: number;
   size: number;
+  height?: number; // Alias for size
   content: string;
+  text?: string; // Alias for content
   lineHeight?: number;
   rotation?: number;
   justification?: TextJustification;
@@ -123,6 +131,7 @@ export interface MTextShape extends BaseShape {
   underline?: boolean;
   highlight?: boolean;
   fontFamily?: string;
+  attachmentPoint?: number;
 }
 
 export interface ArcShape extends BaseShape {
@@ -136,8 +145,8 @@ export interface ArcShape extends BaseShape {
 }
 
 export interface PolyShape extends BaseShape {
-  type: 'pline' | 'spline' | 'polygon';
-  points: Point[];
+  type: 'pline' | 'poly' | 'spline' | 'polygon';
+  points: any[]; // Support both Point[] and number[]
   closed?: boolean;
 }
 
@@ -193,12 +202,13 @@ export interface LeaderShape extends BaseShape {
   size: number;
 }
 
-export type HatchPattern = 'solid' | 'ansi31' | 'ansi32' | 'ansi37' | 'dots' | 'cross' | 'net' | 'honey' | 'clay' | 'cork' | 'grass' | 'gravel' | 'stars';
+export type HatchPattern = 'solid' | 'ansi31' | 'ansi32' | 'ansi33' | 'ansi37' | 'ansi38' | 'dots' | 'cross' | 'net' | 'honey' | 'clay' | 'cork' | 'grass' | 'gravel' | 'stars' | 'brick' | 'hound' | 'grid' | 'triang' | 'zigzag';
 
 export interface HatchShape extends BaseShape {
   type: 'hatch';
   pattern: HatchPattern;
-  points: Point[]; 
+  points: Point[]; // Main/outer loop for legacy support
+  loops?: Point[][]; // Support for multiple loops (islands/holes)
   scale?: number;
   rotation?: number;
 }
@@ -206,10 +216,12 @@ export interface HatchShape extends BaseShape {
 export interface BlockShape extends BaseShape {
   type: 'block';
   blockId: string;
+  name?: string; // Phase 2 alias
   x: number;
   y: number;
   scaleX: number;
   scaleY: number;
+  scale?: number; // Phase 2 alias
   scaleZ?: number;
   rotation: number;
   attributes?: Record<string, string>;
@@ -301,6 +313,11 @@ export interface DimensionStyle {
   extendLine: number;
   offsetLine: number;
   precision: number;
+  textPlacement?: 'above' | 'center' | 'below';
+  unitFormat?: LinearUnitFormat;
+  arrowScale?: number;
+  arrowType?: 'closed' | 'open' | 'tick' | 'dot';
+  fractionalPrecision?: number;
 }
 
 export interface LineTypeElement {
@@ -326,13 +343,28 @@ export interface TextStyleDefinition {
   obliqueAngle: number;
 }
 
+export interface CtbPlotStyle {
+  color: number; // ACI index 1-255
+  plotColor: string | 'useObjectColor'; // Hex or 'useObjectColor'
+  lineweight: number | 'useObjectLineweight'; // in mm
+  lineStyle: LineType | 'useObjectLineStyle';
+  screening: number; // 0-100
+}
+
+export interface CtbFile {
+  id: string;
+  name: string;
+  description: string;
+  styles: Record<number, CtbPlotStyle>;
+}
+
 export interface AppSettings {
   ortho: boolean;
   snap: boolean;
   grid: boolean;
   currentLayer: string;
   drawingScale: number; 
-  penThickness: number;
+  penThickness: number | string;
   activeLineType: LineType;
   cursorX: number; 
   cursorY: number;
@@ -354,9 +386,12 @@ export interface AppSettings {
   textJustification: TextJustification;
   activeDimStyle: string;
   dimStyles: Record<string, DimensionStyle>;
+  ltScale: number;
   limitsMin: Point;
   limitsMax: Point;
   metadata?: ProjectMetadata;
+  activeCtbId?: string;
+  ctbFiles?: Record<string, CtbFile>;
 }
 
 export interface VoxProject {

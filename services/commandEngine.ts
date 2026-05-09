@@ -99,15 +99,27 @@ const applyOrthoConstraint = (p: Point, anchor: Point, enabled: boolean, snapped
     return dx > dy ? { x: p.x, y: anchor.y } : { x: anchor.x, y: p.y };
 };
 
-const getStyleSettings = (ctx: CommandContext) => {
+const getStyleSettings = (ctx: CommandContext, commandName?: string) => {
     const settings = ctx.getSettings();
     const layer = settings.currentLayer;
     const layerConfig = ctx.getLayerConfig()[layer];
+    
+    let activeLineType = settings.activeLineType;
+    
+    // Auto-logic: some tools default to "reference" (dashed) line types
+    const refTools = ['XLINE', 'RAY', 'RECT', 'SPLINE', 'CIRCLE'];
+    if (commandName && refTools.includes(commandName.toUpperCase())) {
+        // If the current linetype is continuous, we default these special tools to dashed/reference
+        if (activeLineType === 'continuous') {
+            activeLineType = 'dashed'; 
+        }
+    }
+
     return {
         layer,
         color: layerConfig?.color || '#FFFFFF',
-        thickness: settings.penThickness !== 1 ? settings.penThickness : (layerConfig?.thickness || 0.25),
-        lineType: settings.activeLineType !== 'continuous' ? settings.activeLineType : (layerConfig?.lineType || 'continuous'),
+        thickness: settings.penThickness,
+        lineType: activeLineType,
         textSize: settings.textSize || 250,
         textRotation: settings.textRotation || 0,
         textJustification: settings.textJustification || 'left'
@@ -213,12 +225,12 @@ export class LineCommand implements CADCommand {
         }
 
         const last = this.pts.length > 0 ? this.pts[this.pts.length - 1] : null;
-        const p = resolvePointInput(text, last, this.ctx.getSettings().units === 'imperial', this.ctx.lastMousePoint, this.ctx.getSettings().ortho);
+        const p = resolvePointInput(text, last, this.ctx.getSettings(), this.ctx.lastMousePoint);
         if (p) { this.onClick(p, false); return true; }
         return false;
     }
     private addSegment(p1: Point, p2: Point): string {
-        const style = getStyleSettings(this.ctx);
+        const style = getStyleSettings(this.ctx, this.name);
         const id = generateId();
         const s: LineShape = { id, type: 'line', layer: style.layer, color: style.color, x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, thickness: style.thickness, lineType: style.lineType };
         this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
@@ -228,7 +240,7 @@ export class LineCommand implements CADCommand {
         if (this.pts.length > 0) {
             const anchor = this.pts[this.pts.length - 1];
             const cp = applyOrthoConstraint(p, anchor, this.ctx.getSettings().ortho, snapped);
-            const style = getStyleSettings(this.ctx);
+            const style = getStyleSettings(this.ctx, this.name);
             this.ctx.setPreview([{id:'p', type:'line', isPreview:true, layer: style.layer, color: style.color, x1:anchor.x, y1:anchor.y, x2:cp.x, y2:cp.y} as any]);
         }
     }
@@ -257,7 +269,7 @@ export class DoubleLineCommand implements CADCommand {
         }
         if (t === 'c' || t === 'close') {
             if (this.pts.length > 2) {
-                const style = getStyleSettings(this.ctx);
+                const style = getStyleSettings(this.ctx, this.name);
                 const s: DoubleLineShape = { id: generateId(), type: 'dline', layer: style.layer, color: style.color, points: [...this.pts, this.pts[0]], thickness: this.thickness, justification: this.justification, closed: true };
                 this.ctx.setLayers(prev => ({...prev, [style.layer]: [...(prev[style.layer] || []), s]}));
                 this.ctx.onFinish();
@@ -283,7 +295,7 @@ export class DoubleLineCommand implements CADCommand {
         }
 
         const last = this.pts.length > 0 ? this.pts[this.pts.length - 1] : null;
-        const p = resolvePointInput(text, last, this.ctx.getSettings().units === 'imperial', this.ctx.lastMousePoint, this.ctx.getSettings().ortho);
+        const p = resolvePointInput(text, last, this.ctx.getSettings(), this.ctx.lastMousePoint);
         if (p) { this.onClick(p, false); return true; }
         return false;
     }
@@ -390,7 +402,7 @@ export class PolyCommand implements CADCommand {
             }
         }
         const last = this.pts.length > 0 ? this.pts[this.pts.length - 1] : null;
-        const p = resolvePointInput(text, last, this.ctx.getSettings().units === 'imperial', this.ctx.lastMousePoint, this.ctx.getSettings().ortho);
+        const p = resolvePointInput(text, last, this.ctx.getSettings(), this.ctx.lastMousePoint);
         if (p) { this.onClick(p, false); return true; }
         return false;
     }
@@ -594,7 +606,7 @@ export class CircleCommand implements CADCommand {
                 return true;
             }
 
-            const val = parseLength(text, this.ctx.getSettings().units === 'imperial');
+            const val = parseLength(text, this.ctx.getSettings());
             if (!isNaN(val)) {
                 this.radius = this.isDiameter ? val / 2 : val;
                 this.finish();
@@ -603,7 +615,7 @@ export class CircleCommand implements CADCommand {
         }
 
         if (this.mode === 'ttr' && this.selectedShapes.length === 2) {
-            const r = parseLength(text, this.ctx.getSettings().units === 'imperial');
+            const r = parseLength(text, this.ctx.getSettings());
             if (!isNaN(r) && r > 0) {
                 this.radius = r;
                 this.solveTTR();
@@ -612,7 +624,7 @@ export class CircleCommand implements CADCommand {
         }
 
         const last = this.pts.length > 0 ? this.pts[this.pts.length - 1] : null;
-        const p = resolvePointInput(text, last, this.ctx.getSettings().units === 'imperial', this.ctx.lastMousePoint, this.ctx.getSettings().ortho);
+        const p = resolvePointInput(text, last, this.ctx.getSettings(), this.ctx.lastMousePoint);
         if (p) { 
             this.onClick(p, false); 
             return true; 
@@ -761,7 +773,7 @@ export class CircleCommand implements CADCommand {
     }
 
     private addCircle(cen: Point, r: number) {
-        const style = getStyleSettings(this.ctx);
+        const style = getStyleSettings(this.ctx, this.name);
         const s: CircleShape = { 
             id: generateId(), 
             type: 'circle', 
@@ -777,7 +789,7 @@ export class CircleCommand implements CADCommand {
     }
 
     onMove(p: Point, snapped: boolean) {
-        const style = getStyleSettings(this.ctx);
+        const style = getStyleSettings(this.ctx, this.name);
         if (this.mode === 'default' && this.pts.length === 1) {
             const r = this.isDiameter ? distance(this.pts[0], p) / 2 : distance(this.pts[0], p);
             this.ctx.setPreview([{id:'p', type:'circle', isPreview:true, layer: style.layer, color: style.color, x: this.pts[0].x, y: this.pts[0].y, radius: r} as any]);
@@ -837,7 +849,7 @@ export class ArcCommand implements CADCommand {
         }
 
         const last = this.pts.length > 0 ? this.pts[this.pts.length - 1] : null;
-        const p = resolvePointInput(text, last, this.ctx.getSettings().units === 'imperial', this.ctx.lastMousePoint, this.ctx.getSettings().ortho);
+        const p = resolvePointInput(text, last, this.ctx.getSettings(), this.ctx.lastMousePoint);
         if (p) { this.onClick(p, false); return true; }
         return false;
     }
@@ -1004,7 +1016,7 @@ export class PolygonCommand implements CADCommand {
                 this.ctx.setMessage("POLYGON Specify first endpoint of edge:");
                 return true;
             }
-            const p = resolvePointInput(text, this.ctx.lastMousePoint, this.ctx.getSettings().units === 'imperial');
+            const p = resolvePointInput(text, null, this.ctx.getSettings(), this.ctx.lastMousePoint);
             if (p) {
                 this.center = p;
                 this.step = 'mode';
@@ -1026,10 +1038,10 @@ export class PolygonCommand implements CADCommand {
             }
         } else if (this.step === 'radius') {
             if (this.mode === 'edge') {
-                const p = resolvePointInput(text, this.ctx.lastMousePoint, this.ctx.getSettings().units === 'imperial');
+                const p = resolvePointInput(text, this.ctx.lastMousePoint, this.ctx.getSettings());
                 if (p) { this.onClick(p, false); return true; }
             } else {
-                const r = parseLength(text, this.ctx.getSettings().units === 'imperial');
+                const r = parseLength(text, this.ctx.getSettings());
                 if (!isNaN(r)) { 
                     this.addPolygon(r); 
                     this.ctx.onFinish(); 
@@ -1171,7 +1183,7 @@ export class EllipseCommand implements CADCommand {
         }
 
         const last = this.pts.length > 0 ? this.pts[this.pts.length - 1] : null;
-        const p = resolvePointInput(text, last, this.ctx.getSettings().units === 'imperial', this.ctx.lastMousePoint, this.ctx.getSettings().ortho);
+        const p = resolvePointInput(text, last, this.ctx.getSettings(), this.ctx.lastMousePoint);
         if (p) { this.onClick(p, false); return true; }
         return false;
     }
@@ -1305,7 +1317,7 @@ export class RectCommand implements CADCommand {
             return true;
         }
 
-        const val = parseLength(text, this.ctx.getSettings().units === 'imperial');
+        const val = parseLength(text, this.ctx.getSettings());
         if (!isNaN(val)) {
             if (this.mode === 'dimensions') {
                 if (this.width === null) {
@@ -1331,7 +1343,7 @@ export class RectCommand implements CADCommand {
         }
 
         const last = this.p1 || null;
-        const p = resolvePointInput(text, last, this.ctx.getSettings().units === 'imperial', this.ctx.lastMousePoint, this.ctx.getSettings().ortho);
+        const p = resolvePointInput(text, last, this.ctx.getSettings(), this.ctx.lastMousePoint);
         if (p) { this.onClick(p); return true; }
         return false;
     }
@@ -1354,7 +1366,7 @@ export class RectCommand implements CADCommand {
 
     private addRect(w: number, h: number) {
         if (!this.p1) return;
-        const style = getStyleSettings(this.ctx);
+        const style = getStyleSettings(this.ctx, this.name);
         // If rotation is 0, we can use a simple rect or a pline. 
         // Standard RECT usually creates a closed PLINE.
         const points: Point[] = [
@@ -1392,7 +1404,7 @@ export class RectCommand implements CADCommand {
 
     onMove(p: Point) {
         if (this.p1) {
-            const style = getStyleSettings(this.ctx);
+            const style = getStyleSettings(this.ctx, this.name);
             let w = p.x - this.p1.x;
             let h = p.y - this.p1.y;
             
@@ -1446,7 +1458,7 @@ export class MoveCommand implements CADCommand {
         
         if (this.base) {
             // Direct distance entry or relative coordinate
-            const p = resolvePointInput(text, this.base, this.ctx.getSettings().units === 'imperial', this.ctx.lastMousePoint, this.ctx.getSettings().ortho);
+            const p = resolvePointInput(text, this.base, this.ctx.getSettings(), this.ctx.lastMousePoint);
             if (p) {
                 this.applyMove(p);
                 return true;
@@ -1571,62 +1583,77 @@ export class EraseCommand implements CADCommand {
 
 export class ZoomCommand implements CADCommand {
     name = "ZOOM"; public p1: Point | null = null;
-    constructor(public ctx: CommandContext) {}
-    onStart() { this.ctx.setMessage("ZOOM Specify corner of window or [All/Extents/In/Out] <Extents>:"); }
+    constructor(public ctx: CommandContext, private initialSub?: string) {}
+
+    onStart() { 
+        if (this.initialSub) {
+            this.onInput(this.initialSub);
+        } else {
+            this.ctx.setMessage("ZOOM Specify corner of window or [All/Extents/Previous/In/Out/Pan] <Extents>:"); 
+        }
+    }
+
     onInput(text: string): boolean {
         const t = text.trim().toLowerCase();
         if (t === 'e' || t === 'extents' || t === 'a' || t === 'all' || t === '') { 
             const isAll = t === 'a' || t === 'all';
             const settings = this.ctx.getSettings();
             const activeVp = this.ctx.getActiveViewport();
-            
-            // For Zoom All: Use limits if shapes are within limits, OR expand to include shapes outside limits
-            // For Zoom Extents: Use ONLY shapes
             const limits = isAll ? { min: settings.limitsMin, max: settings.limitsMax } : undefined;
             const bounds = getAllShapesBounds(this.ctx.getLayers(), this.ctx.getBlocks(), limits);
             
-            // Save current view before changing
             this.ctx.saveToViewHistory();
 
             if (bounds) {
-                const w = Math.max(1, bounds.xMax - bounds.xMin);
-                const h = Math.max(1, bounds.yMax - bounds.yMin);
+                const w = Math.max(0.001, bounds.xMax - bounds.xMin);
+                const h = Math.max(0.001, bounds.yMax - bounds.yMin);
                 const centerX = (bounds.xMax + bounds.xMin) / 2;
                 const centerY = (bounds.yMax + bounds.yMin) / 2;
                 
                 const canvas = this.ctx.getCanvasSize();
                 const ts_scale = settings.drawingScale;
-                const padding = isAll ? 1.05 : 1.15; 
+                // Safe padding: ZOOM ALL ~10%, EXTENTS tighter ~5%
+                const padding = isAll ? 0.90 : 0.95; 
                 
                 if (activeVp) {
-                    // Zoom inside viewport
-                    const scale = Math.min(activeVp.width / (w * padding), activeVp.height / (h * padding));
-                    this.ctx.setView({ scale, originX: -centerX * scale, originY: centerY * scale });
+                    const scale = Math.min(activeVp.width / w, activeVp.height / h);
+                    const finalScale = scale * padding;
+                    this.ctx.setView({ scale: finalScale, originX: -centerX * finalScale, originY: centerY * finalScale });
                 } else {
-                    const scale = Math.min(canvas.width / (w * padding * ts_scale), canvas.height / (h * padding * ts_scale));
-                    this.ctx.setView({ scale, originX: -centerX * scale * ts_scale, originY: centerY * scale * ts_scale });
+                    const scale = Math.min(canvas.width / (w * ts_scale), canvas.height / (h * ts_scale));
+                    const finalScale = scale * padding;
+                    this.ctx.setView({ 
+                        scale: finalScale, 
+                        originX: -centerX * finalScale * ts_scale, 
+                        originY: centerY * finalScale * ts_scale 
+                    });
                 }
-                this.ctx.addLog(`ZOOM_${isAll ? 'ALL' : 'EXTENTS'}: [${w.toFixed(0)} x ${h.toFixed(0)}]`);
+                
+                this.ctx.addLog(`ZOOM_${isAll ? 'ALL' : 'EXTENTS'}: Bounds=[${bounds.xMin.toFixed(0)}, ${bounds.yMin.toFixed(0)} to ${bounds.xMax.toFixed(0)}, ${bounds.yMax.toFixed(0)}]`);
             } else {
+                // If no bounds and isExtents, we don't change much, if isAll we show limits.
                 if (isAll) {
-                    // Even if no shapes, zoom to limits
-                    const w = Math.abs(settings.limitsMax.x - settings.limitsMin.x);
-                    const h = Math.abs(settings.limitsMax.y - settings.limitsMin.y);
+                    const w = Math.max(1, Math.abs(settings.limitsMax.x - settings.limitsMin.x));
+                    const h = Math.max(1, Math.abs(settings.limitsMax.y - settings.limitsMin.y));
                     const centerX = (settings.limitsMax.x + settings.limitsMin.x) / 2;
                     const centerY = (settings.limitsMax.y + settings.limitsMin.y) / 2;
                     const canvas = this.ctx.getCanvasSize();
+                    const ts_scale = settings.drawingScale;
                     
                     if (activeVp) {
-                        const scale = Math.min(activeVp.width / (w * 1.05), activeVp.height / (h * 1.05));
+                        const scale = (Math.min(activeVp.width / w, activeVp.height / h)) * 0.9;
                         this.ctx.setView({ scale, originX: -centerX * scale, originY: centerY * scale });
                     } else {
-                        const scale = Math.min(canvas.width / (w * 1.05 * settings.drawingScale), canvas.height / (h * 1.05 * settings.drawingScale));
-                        this.ctx.setView({ scale, originX: -centerX * scale * settings.drawingScale, originY: centerY * scale * settings.drawingScale });
+                        const scale = (Math.min(canvas.width / (w * ts_scale), canvas.height / (h * ts_scale))) * 0.9;
+                        this.ctx.setView({ 
+                            scale, 
+                            originX: -centerX * scale * ts_scale, 
+                            originY: centerY * scale * ts_scale 
+                        });
                     }
-                    this.ctx.addLog("ZOOM_ALL: Limits");
+                    this.ctx.addLog("ZOOM_ALL: Showing drawing limits.");
                 } else {
-                    this.ctx.setView({ scale: 1, originX: 0, originY: 0 });
-                    this.ctx.addLog("ZOOM_EXTENTS: Empty drawing");
+                    this.ctx.addLog("ZOOM_EXTENTS: Drawing is empty.");
                 }
             }
             this.ctx.onFinish();
@@ -1634,75 +1661,94 @@ export class ZoomCommand implements CADCommand {
         }
         if (t === 'w' || t === 'window') {
             this.ctx.setMessage("ZOOM Window: Specify first corner:");
+            this.p1 = null;
             return true;
         }
-        if (t === 'p' || t === 'previous') {
+        if (t === 'p' || t === 'prev' || t === 'previous') {
             const h = this.ctx.getViewHistory();
             if (h && h.length > 0) {
                 const prev = h[h.length - 1];
                 this.ctx.setView(prev);
                 this.ctx.addLog("ZOOM_PREVIOUS: View restored.");
-                // We should probably pop it or something, but usually Zoom Prev can go back multiple steps
-                // The App.tsx will need to manage this history properly.
             } else {
                 this.ctx.addLog("ZOOM_PREVIOUS: No previous view stored.");
             }
             this.ctx.onFinish();
             return true;
         }
-        if (t === 'i' || t === 'in') { 
-            this.ctx.saveToViewHistory();
-            this.ctx.setView(v => ({...v, scale: v.scale * 1.5})); 
-            this.ctx.onFinish(); 
+        if (t === 'r' || t === 'realtime') {
+            this.ctx.start(new ZoomRealTimeCommand(this.ctx));
+            return true;
+        }
+        if (t === 'pan' || t === 'pn' || t === 'p pan') {
+            this.ctx.start(new PanCommand(this.ctx));
+            return true;
+        }
+        if (t === 'i' || t === 'in' || t === '+') { 
+            this.applyZoomDiscrete(1.25);
             return true; 
         }
-        if (t === 'o' || t === 'out') { 
-            this.ctx.saveToViewHistory();
-            this.ctx.setView(v => ({...v, scale: v.scale / 1.5})); 
-            this.ctx.onFinish(); 
+        if (t === 'o' || t === 'out' || t === '-') { 
+            this.applyZoomDiscrete(1/1.25);
             return true; 
         }
         return false;
     }
-    onClick(p: Point, snapped: boolean, shiftKey?: boolean) { 
-        if (shiftKey) {
-            this.ctx.saveToViewHistory();
-            this.ctx.setView(v => ({...v, scale: v.scale / 1.5}));
-            this.ctx.onFinish();
-            return;
-        }
+
+    private applyZoomDiscrete(factor: number) {
+        this.ctx.saveToViewHistory();
+        const v = this.ctx.getViewState();
+        const cursor = this.ctx.lastMousePoint;
+        const ts_old = v.scale * this.ctx.getSettings().drawingScale;
+        const ts_new = v.scale * factor * this.ctx.getSettings().drawingScale;
+
+        // Zoom toward cursor/touch center
+        // originX_new = originX_old + wx * (ts_old - ts_new)
+        // originY_new = originY_old - wy * (ts_old - ts_new)
+        this.ctx.setView(v => ({
+            ...v,
+            scale: v.scale * factor,
+            originX: v.originX + cursor.x * (ts_old - ts_new),
+            originY: v.originY - cursor.y * (ts_old - ts_new)
+        }));
+        this.ctx.onFinish();
+    }
+
+    onClick(p: Point, snapped: boolean, shiftKey?: boolean) {
         if (!this.p1) {
             this.p1 = p;
-            this.ctx.setMessage("Specify opposite corner:");
+            this.ctx.setMessage("ZOOM Window: Specify opposite corner:");
         } else {
-            this.ctx.saveToViewHistory();
-            const xMin = Math.min(this.p1.x, p.x);
-            const xMax = Math.max(this.p1.x, p.x);
-            const yMin = Math.min(this.p1.y, p.y);
-            const yMax = Math.max(this.p1.y, p.y);
+            const x1 = Math.min(this.p1.x, p.x);
+            const x2 = Math.max(this.p1.x, p.x);
+            const y1 = Math.min(this.p1.y, p.y);
+            const y2 = Math.max(this.p1.y, p.y);
             
-            // Standard CAD Behavior: Zoom exactly to the window specified
-            const centerX = (xMax + xMin) / 2;
-            const centerY = (yMax + yMin) / 2;
-            const w = Math.max(0.001, xMax - xMin);
-            const h = Math.max(0.001, yMax - yMin);
-            const padding = 1.05; // 5% padding for clean view
+            const w = Math.max(0.001, x2 - x1);
+            const h = Math.max(0.001, y2 - y1);
+            const centerX = (x1 + x2) / 2;
+            const centerY = (y1 + y2) / 2;
             
             const canvas = this.ctx.getCanvasSize();
             const ts_scale = this.ctx.getSettings().drawingScale;
-            const activeVp = this.ctx.getActiveViewport();
             
-            if (activeVp) {
-                const scale = Math.min(activeVp.width / (w * padding), activeVp.height / (h * padding));
-                this.ctx.setView({ scale, originX: -centerX * scale, originY: centerY * scale });
-            } else {
-                const scale = Math.min(canvas.width / (w * padding * ts_scale), canvas.height / (h * padding * ts_scale));
-                this.ctx.setView({ scale, originX: -centerX * scale * ts_scale, originY: centerY * scale * ts_scale });
-            }
+            this.ctx.saveToViewHistory();
+            const scale = Math.min(canvas.width / w, canvas.height / h) / ts_scale;
+            const padding = 0.95; // Use slightly less scale to ensure we see the whole window inside
+            const finalScale = scale * padding;
+            
+            this.ctx.setView({ 
+                scale: finalScale, 
+                originX: -centerX * finalScale * ts_scale, 
+                originY: centerY * finalScale * ts_scale 
+            });
+            
+            console.log(`[DEBUG] ZOOM_WINDOW: p1=[${this.p1.x.toFixed(1)}, ${this.p1.y.toFixed(1)}], p2=[${p.x.toFixed(1)}, ${p.y.toFixed(1)}], scale=${finalScale.toFixed(4)}`);
             this.ctx.onFinish();
         }
-    } 
-    onMove(p: Point) {
+    }
+
+    onMove(p: Point, snapped: boolean, shiftKey?: boolean) {
         if (this.p1) {
             this.ctx.setPreview([{
                 id: 'z_window',
@@ -1717,8 +1763,53 @@ export class ZoomCommand implements CADCommand {
                 lineType: 'dashed'
             } as any]);
         }
-    } 
-    onEnter() { this.onInput(''); } 
+    }
+    onEnter() { this.onInput(''); }
+    onCancel() { this.ctx.onFinish(); }
+}
+
+export class ZoomRealTimeCommand implements CADCommand {
+    name = "ZOOM_RT";
+    base: Point | null = null;
+    startView: ViewState | null = null;
+
+    constructor(public ctx: CommandContext) {}
+
+    onStart() {
+        this.ctx.setMessage("ZOOM REALTIME: Drag vertically to zoom. Press Enter to exit.");
+    }
+
+    onClick(p: Point) {
+        if (!this.base) {
+            this.base = p;
+            this.startView = { ...this.ctx.getViewState() };
+        } else {
+            this.base = null;
+            this.startView = null;
+            this.ctx.setMessage("ZOOM REALTIME: Click to start drag or Enter to exit.");
+        }
+    }
+
+    onMove(p: Point) {
+        if (this.base && this.startView) {
+            const dy = this.base.y - p.y; 
+            const factor = Math.pow(1.005, dy); 
+            
+            const nextScale = Math.max(0.000001, this.startView.scale * factor);
+            const ts_old = this.startView.scale * this.ctx.getSettings().drawingScale;
+            const ts_new = nextScale * this.ctx.getSettings().drawingScale;
+
+            // Zoom around the base point (world space)
+            this.ctx.setView({
+                ...this.startView,
+                scale: nextScale,
+                originX: this.startView.originX + this.base.x * (ts_old - ts_new),
+                originY: this.startView.originY - this.base.y * (ts_old - ts_new)
+            });
+        }
+    }
+
+    onEnter() { this.ctx.onFinish(); }
     onCancel() { this.ctx.onFinish(); }
 }
 
@@ -2119,17 +2210,49 @@ export class PanCommand implements CADCommand {
     constructor(public ctx: CommandContext) {}
     
     onStart() { 
-        this.ctx.setMessage("PAN active. Left-click drag to move view. Enter to exit."); 
+        this.ctx.setMessage("PAN: Click two points to move view or [Drag] with left-button. Enter to exit."); 
     }
     
-    onClick(p: Point) {
-        // We use click to toggle the state if needed, but CADCanvas handles the drag.
-        // We can finalize on next click if it's stick-pan, or just let users use Enter/Esc.
+    onClick(p: Point, snapped: boolean, shiftKey?: boolean) {
+        if (!this.base) {
+            this.base = p;
+            this.startView = { ...this.ctx.getViewState() };
+            this.ctx.setMessage("PAN: Specify second point:");
+        } else {
+            const dx = p.x - this.base.x;
+            const dy = p.y - this.base.y;
+            
+            const settings = this.ctx.getSettings();
+            const ts = this.startView!.scale * settings.drawingScale;
+            
+            this.ctx.setView({
+                ...this.startView!,
+                originX: this.startView!.originX + (dx * ts),
+                originY: this.startView!.originY - (dy * ts)
+            });
+            this.ctx.onFinish();
+        }
     }
 
-    onMove(p: Point) {
-        // Real-time panning feedback if we used a different approach, 
-        // but CADCanvas is already handling it based on 'PAN' activeCommandName.
+    onMove(p: Point, snapped: boolean, shiftKey?: boolean) {
+        if (this.base && this.startView) {
+            const dx = p.x - this.base.x;
+            const dy = p.y - this.base.y;
+            const ts = this.startView.scale * this.ctx.getSettings().drawingScale;
+            
+            // Limit coordinate range to prevent instability
+            const nextView = {
+                ...this.startView,
+                originX: this.startView.originX + (dx * ts),
+                originY: this.startView.originY - (dy * ts)
+            };
+            
+            // Sanity check
+            if (isNaN(nextView.originX) || isNaN(nextView.originY)) return;
+            if (Math.abs(nextView.originX) > 1e12 || Math.abs(nextView.originY) > 1e12) return;
+
+            this.ctx.setView(nextView);
+        }
     }
 
     onEnter() { this.ctx.onFinish(); } 
@@ -2158,7 +2281,7 @@ export class OffsetCommand implements CADCommand {
         }
 
         if (this.target === null) {
-            const d = parseLength(text, this.ctx.getSettings().units === 'imperial');
+            const d = parseLength(text, this.ctx.getSettings());
             if (!isNaN(d) && d > 0) { 
                 this.dist = d; 
                 this.mode = 'dist';
@@ -2239,11 +2362,12 @@ export class RayCommand implements CADCommand {
             this.p1 = p;
             this.ctx.setMessage("RAY Specify through point:");
         } else {
-            const layer = getStyleSettings(this.ctx).layer;
+            const style = getStyleSettings(this.ctx, this.name);
+            const layer = style.layer;
             const shape: InfiniteLineShape = {
-                id: generateId(), type: 'ray', layer, color: getStyleSettings(this.ctx).color,
+                id: generateId(), type: 'ray', layer, color: style.color,
                 x1: this.p1.x, y1: this.p1.y, x2: p.x, y2: p.y,
-                thickness: getStyleSettings(this.ctx).thickness, lineType: getStyleSettings(this.ctx).lineType
+                thickness: style.thickness, lineType: style.lineType
             };
             this.ctx.setLayers(prev => ({ ...prev, [layer]: [...(prev[layer] || []), shape] }));
             this.p1 = null;
@@ -2252,11 +2376,11 @@ export class RayCommand implements CADCommand {
     }
     onMove(p: Point) {
         if (this.p1) {
-            const style = getStyleSettings(this.ctx);
+            const style = getStyleSettings(this.ctx, this.name);
             this.ctx.setPreview([{
                 id: 'preview', type: 'ray', isPreview: true,
                 x1: this.p1.x, y1: this.p1.y, x2: p.x, y2: p.y,
-                color: style.color, layer: style.layer
+                color: style.color, layer: style.layer, lineType: style.lineType
             } as any]);
         }
     }
@@ -2272,11 +2396,12 @@ export class XLineCommand implements CADCommand {
             this.p1 = p;
             this.ctx.setMessage("XLINE Specify through point:");
         } else {
-            const layer = getStyleSettings(this.ctx).layer;
+            const style = getStyleSettings(this.ctx, this.name);
+            const layer = style.layer;
             const shape: InfiniteLineShape = {
-                id: generateId(), type: 'xline', layer, color: getStyleSettings(this.ctx).color,
+                id: generateId(), type: 'xline', layer, color: style.color,
                 x1: this.p1.x, y1: this.p1.y, x2: p.x, y2: p.y,
-                thickness: getStyleSettings(this.ctx).thickness, lineType: getStyleSettings(this.ctx).lineType
+                thickness: style.thickness, lineType: style.lineType
             };
             this.ctx.setLayers(prev => ({ ...prev, [layer]: [...(prev[layer] || []), shape] }));
             this.p1 = null;
@@ -2285,11 +2410,11 @@ export class XLineCommand implements CADCommand {
     }
     onMove(p: Point) {
         if (this.p1) {
-            const style = getStyleSettings(this.ctx);
+            const style = getStyleSettings(this.ctx, this.name);
             this.ctx.setPreview([{
                 id: 'preview', type: 'xline', isPreview: true,
                 x1: this.p1.x, y1: this.p1.y, x2: p.x, y2: p.y,
-                color: style.color, layer: style.layer
+                color: style.color, layer: style.layer, lineType: style.lineType
             } as any]);
         }
     }
@@ -2304,7 +2429,7 @@ export class FilletCommand implements CADCommand {
         const t = text.trim().toLowerCase();
         if (t === 'r' || t === 'radius') { this.ctx.setMessage("FILLET Specify fillet radius <" + this.radius + ">:"); return true; }
         if (t === 'm' || t === 'multiple') { this.isMultiple = true; this.ctx.setMessage("FILLET [Multiple] Select first object or [Radius]:"); return true; }
-        const r = parseLength(text, this.ctx.getSettings().units === 'imperial');
+        const r = parseLength(text, this.ctx.getSettings());
         if (!isNaN(r)) { this.radius = r; this.ctx.setMessage("FILLET Select first object:"); return true; }
         return false;
     }
@@ -2356,7 +2481,7 @@ export class ChamferCommand implements CADCommand {
         const t = text.trim().toLowerCase();
         if (t === 'd' || t === 'distance') { this.ctx.setMessage("CHAMFER Specify first chamfer distance <" + this.dist1 + ">:"); return true; }
         if (t === 'm' || t === 'multiple') { this.isMultiple = true; this.ctx.setMessage("CHAMFER [Multiple] Select first line or [Distance]:"); return true; }
-        const d = parseLength(text, this.ctx.getSettings().units === 'imperial');
+        const d = parseLength(text, this.ctx.getSettings());
         if (!isNaN(d)) {
             if (this.dist1 === 0 || text.includes('d')) { // Simplified check for "re-setting" distance
                  this.dist1 = d; this.ctx.setMessage("CHAMFER Specify second chamfer distance <" + this.dist1 + ">:"); 
@@ -2742,13 +2867,13 @@ export class RotateCommand implements CADCommand {
                 return true;
             }
 
-            const val = parseLength(text, false); // Angle is always numeric degrees
+            const val = parseFloat(text); // Angle is always numeric degrees
             if (!isNaN(val)) {
                 this.applyRotate((val * Math.PI) / 180);
                 return true;
             }
         } else if (this.mode === 'reference') {
-             const val = parseLength(text, false);
+             const val = parseFloat(text);
              if (!isNaN(val)) {
                  this.refAngle = (val * Math.PI) / 180;
                  this.mode = 'ref_second';
@@ -2881,13 +3006,13 @@ export class ScaleCommand implements CADCommand {
                 return true;
             }
 
-            const val = parseLength(text, this.ctx.getSettings().units === 'imperial');
+            const val = parseLength(text, this.ctx.getSettings());
             if (!isNaN(val)) {
                 this.applyScale(val);
                 return true;
             }
         } else if (this.mode === 'reference') {
-             const val = parseLength(text, this.ctx.getSettings().units === 'imperial');
+             const val = parseLength(text, this.ctx.getSettings());
              if (!isNaN(val)) {
                  this.refDist = val;
                  this.mode = 'ref_second';
@@ -2895,7 +3020,7 @@ export class ScaleCommand implements CADCommand {
                  return true;
              }
         } else if (this.mode === 'ref_second') {
-             const val = parseLength(text, this.ctx.getSettings().units === 'imperial');
+             const val = parseLength(text, this.ctx.getSettings());
              if (!isNaN(val)) {
                  const factor = val / (this.refDist || 1);
                  this.applyScale(factor);
@@ -3159,7 +3284,7 @@ export class DonutCommand implements CADCommand {
     constructor(public ctx: CommandContext) {}
     onStart() { this.ctx.setMessage("DONUT Specify inner diameter <0.00>:"); }
     onInput(text: string): boolean {
-        const val = parseLength(text, this.ctx.getSettings().units === 'imperial');
+        const val = parseLength(text, this.ctx.getSettings());
         if (this.center) {
             if (!isNaN(val) && val > 0) { this.addDonut(val / 2); this.ctx.onFinish(); return true; }
         } else if (this.innerR === 0) {
@@ -3214,7 +3339,7 @@ export class PointCommand implements CADCommand {
         this.ctx.addLog("POINT_CREATED");
     }
     onInput(text: string): boolean {
-        const p = resolvePointInput(text, null, this.ctx.getSettings().units === 'imperial', this.ctx.lastMousePoint, this.ctx.getSettings().ortho);
+        const p = resolvePointInput(text, null, this.ctx.getSettings(), this.ctx.lastMousePoint);
         if (p) { this.onClick(p); return true; }
         return false;
     }

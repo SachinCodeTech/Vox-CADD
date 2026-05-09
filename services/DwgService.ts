@@ -114,7 +114,10 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
 
         const entities: Shape[] = [];
         const blocks: Record<string, BlockDefinition> = {};
-        const layers: Record<string, LayerConfig> = {};
+        const layers: Record<string, LayerConfig> = {
+            '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FF0000', thickness: 0.25, lineType: 'continuous' },
+            'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, plottable: false, color: '#666666', thickness: 0.1, lineType: 'continuous' }
+        };
         const stats = { total: 0, unsupported: 0, counts: {} as Record<string, number> };
         const paperEntities: Shape[] = [];
         const layouts: Record<string, LayoutDefinition> = {};
@@ -142,154 +145,265 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
         const convertEntity = (ent: any): Shape | null => {
             if (!ent) return null;
             const id = generateId();
-            const layer = ent.layer || '0';
-            const type = ent.type;
+            
+            // Handle layer as string or object
+            let layer = '0';
+            if (typeof ent.layer === 'string') layer = ent.layer;
+            else if (ent.layer && typeof ent.layer.name === 'string') layer = ent.layer.name;
+            else if (typeof ent.layerName === 'string') layer = ent.layerName;
+            else if (ent.layer && ent.layer.id) layer = String(ent.layer.id);
+            else if (ent.layer_id) layer = String(ent.layer_id);
+            
+            // Normalize special AutoCAD layers
+            const lowerLayer = layer.toLowerCase();
+            if (lowerLayer === 'defpoints') layer = 'defpoints';
+            if (layer === '0' || lowerLayer === '0') layer = '0';
+            
+            // Robust type detection - using includes as suggested in Phase 1
+            const type = (ent.type || ent.objectType || '').toUpperCase().trim();
             const color = aciToHex(ent.color, ent.true_color || ent.trueColor);
-            const thickness = ent.thickness || mapLineweight(ent.lineweight);
-            const lineScale = ent.ltScale || 1;
+            const thickness = ent.thickness !== undefined && typeof ent.thickness === 'number' ? ent.thickness : mapLineweight(ent.lineweight || ent.lineWeight);
+            const lineType = (ent.lineType || ent.linetype || 'bylayer').toLowerCase();
+            const lineScale = ent.ltScale || ent.lineTypeScale || 1;
+
+            const isValid = (val: any) => typeof val === 'number' && isFinite(val) && Math.abs(val) < 1e12;
             
             stats.total++;
             stats.counts[type] = (stats.counts[type] || 0) + 1;
 
-            switch (type) {
-                case 'LINE':
-                    if (ent.startPoint && ent.endPoint) {
-                        return { id, type: 'line', layer, color, x1: ent.startPoint.x, y1: ent.startPoint.y, x2: ent.endPoint.x, y2: ent.endPoint.y, thickness, lineType: ent.lineType || 'continuous' } as any;
-                    }
-                    break;
-                case 'CIRCLE':
-                    if (ent.center) {
-                        return { id, type: 'circle', layer, color, x: ent.center.x, y: ent.center.y, radius: ent.radius || 1, thickness, lineScale } as any;
-                    }
-                    break;
-                case 'ARC':
-                    if (ent.center) {
-                        return { id, type: 'arc', layer, color, x: ent.center.x, y: ent.center.y, radius: ent.radius || 1, startAngle: ent.startAngle || 0, endAngle: ent.endAngle || Math.PI, counterClockwise: false, thickness, lineScale } as any;
-                    }
-                    break;
-                case 'LWPOLYLINE':
-                case 'POLYLINE1D':
-                case 'POLYLINE2D':
-                case 'POLYLINE3D':
-                    if (ent.vertices && ent.vertices.length > 1) {
-                        return { id: generateId(), type: 'pline', layer, color, points: ent.vertices.map((v: any) => ({ x: v.x, y: v.y, bulge: v.bulge })), closed: !!(ent.flag & 1) || !!ent.closed, thickness, lineScale, lineType: ent.lineType || 'continuous' } as any;
-                    }
-                    else if (ent.controlPoints && ent.controlPoints.length > 1) {
-                        return { id: generateId(), type: 'pline', layer, color, points: ent.controlPoints.map((v: any) => ({ x: v.x, y: v.y })), closed: !!ent.closed, thickness, lineScale } as any;
-                    }
-                    break;
-                case 'SPLINE':
-                    const splPoints = ent.controlPoints || ent.fitPoints || ent.vertices;
-                    if (splPoints && splPoints.length > 1) {
-                        return { id: generateId(), type: 'spline', layer, color, points: splPoints.map((v: any) => ({ x: v.x, y: v.y })), closed: !!ent.closed, thickness, lineScale } as any;
-                    }
-                    break;
-                case 'LEADER':
-                    if (ent.vertices && ent.vertices.length >= 2) {
-                        return { id: generateId(), type: 'leader', layer, color, x1: ent.vertices[0].x, y1: ent.vertices[0].y, x2: ent.vertices[1].x, y2: ent.vertices[1].y, text: '', size: 2.5, thickness, lineScale } as any;
-                    }
-                    break;
-                case 'RAY':
-                case 'XLINE':
-                    if (ent.startPoint && ent.endPoint) {
-                        return { id: generateId(), type: type.toLowerCase() as any, layer, color, x1: ent.startPoint.x, y1: ent.startPoint.y, x2: ent.endPoint.x, y2: ent.endPoint.y, thickness, lineScale } as any;
-                    }
-                    break;
-                case 'SOLID':
-                case '3DFACE':
-                case 'TRACE':
-                    const solidPts = ent.vertices || ent.points;
-                    if (solidPts && solidPts.length >= 3) {
-                        return { id: generateId(), type: 'polygon', layer, color, points: solidPts.map((v: any) => ({ x: v.x, y: v.y })), closed: true, filled: true, thickness, lineScale } as any;
-                    }
-                    break;
-                case 'TEXT':
-                case 'MTEXT':
-                    const pos = ent.position || ent.insertPoint || ent.basePoint;
-                    if (pos) {
-                        const rawText = ent.text || ent.content || '';
-                        return { 
-                            id, type: (type === 'MTEXT' || rawText.includes('\n')) ? 'mtext' : 'text', 
-                            layer, color, x: pos.x, y: pos.y, size: ent.height || 2.5, width: ent.width || 0, 
-                            content: cleanText(rawText), rotation: ent.rotation || 0,
-                            underline: /\\L/i.test(rawText), bold: rawText.includes('|b1'), thickness, lineScale 
-                        } as any;
-                    }
-                    break;
-                case 'ELLIPSE':
-                    if (ent.center && ent.majorAxis && ent.ratio !== undefined) {
-                        return { id, type: 'ellipse', layer, color, x: ent.center.x, y: ent.center.y, rx: Math.sqrt(ent.majorAxis.x ** 2 + ent.majorAxis.y ** 2), ry: Math.sqrt(ent.majorAxis.x ** 2 + ent.majorAxis.y ** 2) * ent.ratio, rotation: Math.atan2(ent.majorAxis.y, ent.majorAxis.x), thickness, lineScale } as any;
-                    }
-                    break;
-                case 'INSERT':
-                    if (ent.insertPoint && ent.blockName) {
-                        return { id, type: 'block', layer, color, x: ent.insertPoint.x, y: ent.insertPoint.y, blockId: ent.blockName, scaleX: ent.scale?.x || 1, scaleY: ent.scale?.y || 1, rotation: ent.rotation || 0, thickness } as any;
-                    }
-                    break;
-                case 'POINT':
-                    if (ent.position) {
-                        return { id, type: 'point', layer, color, x: ent.position.x, y: ent.position.y, size: 1, thickness, lineScale } as any;
-                    }
-                    break;
-                case 'DIMENSION':
-                    if (ent.definitionPoint && ent.textMidPoint) {
-                        return { id, type: 'dimension', layer, color, dimType: 'aligned', x1: ent.definitionPoint.x || 0, y1: ent.definitionPoint.y || 0, x2: ent.definitionPoint2?.x || 0, y2: ent.definitionPoint2?.y || 0, dimX: ent.textMidPoint.x, dimY: ent.textMidPoint.y, text: ent.text || '', thickness, lineScale } as any;
-                    }
-                    break;
-                case 'HATCH':
-                    if (ent.boundaryPaths && Array.isArray(ent.boundaryPaths)) {
-                        const pts: Point[] = [];
-                        ent.boundaryPaths.forEach((path: any) => {
-                            if (path?.vertices) path.vertices.forEach((v: any) => pts.push({ x: v.x, y: v.y, bulge: v.bulge }));
-                        });
-                        if (pts.length > 2) {
-                            return { id, type: 'hatch', layer, color, points: pts, pattern: (ent.patternName || 'ansi31').toLowerCase(), scale: ent.patternScale || 1, rotation: (ent.patternAngle || 0) * (180 / Math.PI), thickness: 0.1 } as any;
+            try {
+                switch (true) {
+                    case type.includes('LINE') && !type.includes('POLYLINE') && !type.includes('XLINE'):
+                        const start = ent.startPoint || ent.start_point || ent.points?.[0] || ent.start;
+                        const end = ent.endPoint || ent.end_point || ent.points?.[1] || ent.end;
+                        if (start && end && isValid(start.x) && isValid(start.y) && isValid(end.x) && isValid(end.y)) {
+                            // Anti-radiating-lines filter
+                            const isStart0 = Math.abs(start.x) < 1e-6 && Math.abs(start.y) < 1e-6;
+                            const isEnd0 = Math.abs(end.x) < 1e-6 && Math.abs(end.y) < 1e-6;
+                            const dist = Math.sqrt((start.x - end.x) ** 2 + (start.y - end.y) ** 2);
+                            if ((isStart0 || isEnd0) && dist > 1e5 && !(isStart0 && isEnd0)) return null;
+                            
+                            return { id, type: 'line', layer, color, x1: start.x, y1: start.y, x2: end.x, y2: end.y, thickness, lineType, lineScale } as any;
                         }
-                    }
-                    break;
+                        break;
+                    case type.includes('CIRCLE'):
+                        const center = ent.center || ent.center_point || ent.position;
+                        if (center) {
+                            return { id, type: 'circle', layer, color, x: center.x, y: center.y, radius: ent.radius || 1, thickness, lineType, lineScale } as any;
+                        }
+                        break;
+                    case type.includes('ARC'):
+                        const arcCenter = ent.center || ent.center_point || ent.position;
+                        if (arcCenter) {
+                            return { id, type: 'arc', layer, color, x: arcCenter.x, y: arcCenter.y, radius: ent.radius || 1, startAngle: ent.startAngle || 0, endAngle: ent.endAngle || Math.PI, counterClockwise: false, thickness, lineType, lineScale } as any;
+                        }
+                        break;
+                    case type.includes('POLYLINE') || type.includes('LWPOLYLINE'):
+                        let vertices = (ent.vertices || ent.points || []).filter((v: any) => v && isValid(v.x) && isValid(v.y));
+                        if (vertices.length > 2) {
+                            const hasManyNonZero = vertices.filter((v: any) => Math.abs(v.x) > 1e-6 || Math.abs(v.y) > 1e-6).length > vertices.length / 2;
+                            if (hasManyNonZero) {
+                                vertices = vertices.filter((v: any) => Math.abs(v.x) > 1e-6 || Math.abs(v.y) < 1e-6);
+                            }
+                        }
+                        if (vertices.length > 1) {
+                            return { id: generateId(), type: 'pline', layer, color, points: vertices.map((v: any) => ({ x: v.x, y: v.y, bulge: v.bulge || 0 })), closed: !!(ent.flag & 1) || !!ent.closed || !!ent.isClosed, thickness, lineType, lineScale } as any;
+                        }
+                        break;
+                    case type.includes('SPLINE'):
+                        const splPoints = (ent.controlPoints || ent.fitPoints || ent.vertices || ent.points || []).filter((v: any) => v && isValid(v.x) && isValid(v.y));
+                        if (splPoints.length > 1) {
+                            return { id: generateId(), type: 'spline', layer, color, points: splPoints.map((v: any) => ({ x: v.x, y: v.y })), closed: !!ent.closed || !!ent.isClosed, thickness, lineType, lineScale } as any;
+                        }
+                        break;
+                    case type.includes('TEXT') || type.includes('MTEXT') || type.includes('ATTRIB') || type.includes('ATTDEF'):
+                        const pos = ent.position || ent.insertPoint || ent.basePoint || ent.insertionPoint || ent.location;
+                        if (pos && isValid(pos.x) && isValid(pos.y)) {
+                            const rawText = ent.text || ent.content || ent.textString || ent.value || ent.string || '';
+                            const text = cleanText(rawText);
+                            let fontFamily = 'standard';
+                            const fMatch = rawText.match(/\\f([^;|]+)[;|]/);
+                            if (fMatch) fontFamily = fMatch[1];
+                            else if (ent.style) fontFamily = ent.style.name || ent.style.id || 'standard';
+                            
+                            const rotation = ent.rotation !== undefined ? ent.rotation : 0;
+                            const h = ent.height || ent.textHeight || 2.5;
+                            return { 
+                                id, type: (type.includes('MTEXT') || rawText.includes('\P')) ? 'mtext' : 'text', 
+                                layer, color, x: pos.x, y: pos.y, 
+                                size: h, height: h,
+                                content: text, text: text, rotation, fontFamily,
+                                underline: /\\L/i.test(rawText), bold: rawText.includes('|b1'), thickness, lineType, lineScale 
+                            } as any;
+                        }
+                        break;
+                    case type.includes('ELLIPSE'):
+                        const eCenter = ent.center || ent.position;
+                        const eMajor = ent.majorAxis || ent.major_axis;
+                        if (eCenter && eMajor && ent.ratio !== undefined) {
+                            const rot = Math.atan2(eMajor.y, eMajor.x);
+                            return { id, type: 'ellipse', layer, color, x: eCenter.x, y: eCenter.y, rx: Math.sqrt(eMajor.x**2 + eMajor.y**2), ry: Math.sqrt(eMajor.x**2 + eMajor.y**2) * ent.ratio, rotation: rot, thickness, lineType } as any;
+                        }
+                        break;
+                    case type.includes('HATCH'):
+                        const loops: Point[][] = [];
+                        const paths = ent.boundaryPaths || ent.paths || ent.loops || ent.boundary;
+                        if (paths && Array.isArray(paths)) {
+                            paths.forEach((path: any) => {
+                                const pts: Point[] = [];
+                                const pVertices = path?.vertices || path?.points || path?.edges || (Array.isArray(path) ? path : []);
+                                if (Array.isArray(pVertices)) {
+                                    pVertices.forEach((v: any) => {
+                                        if (v && isValid(v.x) && isValid(v.y)) pts.push({ x: v.x, y: v.y, bulge: v.bulge });
+                                    });
+                                }
+                                if (pts.length >= 2) loops.push(pts);
+                            });
+                        }
+                        if (loops.length > 0) {
+                            return { id, type: 'hatch', layer, color, points: loops[0], loops, pattern: (ent.patternName || 'solid').toLowerCase(), scale: ent.patternScale || 1, rotation: ent.patternAngle || 0, filled: true, fill: true } as any;
+                        }
+                        break;
+                    case type.includes('INSERT') || type.includes('BLOCK'):
+                        const insPoint = ent.insertPoint || ent.position || ent.insertionPoint;
+                        const bName = ent.blockName || ent.name || ent.block;
+                        if (insPoint && bName) {
+                            const blockId = typeof bName === 'string' ? bName : (bName.name || bName.id || '0');
+                            const scaleX = ent.scale?.x || ent.xScale || 1;
+                            const scaleY = ent.scale?.y || ent.yScale || 1;
+                            return { id, type: 'block', layer, color, x: insPoint.x, y: insPoint.y, blockId, scaleX, scaleY, rotation: ent.rotation || 0, name: blockId } as any;
+                        }
+                        break;
+                    case type.includes('DIMENSION') || type.includes('DIM'):
+                        const dp1 = ent.definitionPoint || ent.defPoint || ent.points?.[0];
+                        const dp2 = ent.definitionPoint2 || ent.defPoint2 || ent.points?.[1];
+                        if (dp1 && dp2) {
+                            const meas = ent.measurement !== undefined ? `◉ ${ent.measurement.toFixed(2)}` : (ent.text || '');
+                            return { id, type: 'dimension', layer, color, dimType: 'aligned', x1: dp1.x, y1: dp1.y, x2: dp2.x, y2: dp2.y, text: meas, content: meas } as any;
+                        }
+                        break;
+                }
+            } catch (err) {
+                console.warn(`Extraction error for ${type}:`, err);
+                stats.unsupported++;
             }
-            stats.unsupported++;
+
+            if (!['POINT', 'VERTEX', 'SEQEND'].includes(type) && !stats.counts[type]) {
+                stats.unsupported++;
+            }
             return null;
         };
 
         // Layers Setup
         layers['0'] = { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' };
+        
+        const processLayer = (l: any) => {
+            if (!l) return;
+            let name = typeof l.name === 'string' ? l.name : (l.layerName || String(l.id || '0'));
+            
+            // Normalize special AutoCAD layers
+            const lowerName = name.toLowerCase();
+            if (lowerName === 'defpoints') name = 'defpoints';
+            if (name === '0' || lowerName === '0') name = '0';
+
+            if (name === '0' && layers['0']) {
+                // Update 0 layer if properties found
+                if (l.color !== undefined) layers['0'].color = aciToHex(Math.abs(l.color));
+                return;
+            }
+            
+            const aci = l.color !== undefined ? l.color : (l.aci !== undefined ? l.aci : 7);
+            const flag = l.flag !== undefined ? l.flag : (l.flags || 0);
+            
+            // Standard CAD Layer flags: 1=Frozen, 2=Frozen by default, 4=Locked
+            layers[name] = { 
+                id: name, 
+                name: name, 
+                visible: aci >= 0 && !(flag & 1),
+                locked: !!(flag & 4), 
+                frozen: !!(flag & 1), 
+                plottable: name.toLowerCase() !== 'defpoints' && (l.is_plottable !== false && l.plot !== false && l.isPlottable !== false), 
+                color: aciToHex(Math.abs(aci)), 
+                thickness: mapLineweight(l.lineweight || l.lineWeight || l.lineweight_enum || l.lineWeight_enum) || 0.25, 
+                lineType: (l.lineType || l.linetype || l.linestyle || 'continuous').toLowerCase() as any 
+            };
+        };
         if (db.layers && Array.isArray(db.layers)) {
-            db.layers.forEach((l: any) => {
-                const name = l.name || l.id;
-                layers[name] = { id: name, name: name, visible: true, locked: !!(l.flag & 4), frozen: !!(l.flag & 1), plottable: name.toLowerCase() !== 'defpoints', color: aciToHex(l.color), thickness: 0.25, lineType: 'continuous' };
-            });
+            const numLayers = db.layers.length;
+            for (let i = 0; i < numLayers; i++) {
+                if (i % 50 === 0) await new Promise(r => setTimeout(r, 0));
+                processLayer(db.layers[i]);
+            }
         }
 
         // Blocks Setup
-        if (db.blocks && Array.isArray(db.blocks)) {
-            db.blocks.forEach((b: any) => {
-                const name = b.name || b.id;
-                if (name && b.entities) {
-                    const blockShapes: Shape[] = [];
-                    b.entities.forEach((ent: any) => {
-                        const s = convertEntity(ent);
-                        if (s) blockShapes.push(s);
-                    });
-                    blocks[name] = { id: name, name: name, basePoint: b.basePoint || { x: 0, y: 0 }, shapes: blockShapes };
+        const rawBlocks = db.blocks || db.block_records || db.blockRecords || [];
+        if (rawBlocks) {
+            if (Array.isArray(rawBlocks)) {
+                const numRawBlocks = rawBlocks.length;
+                for (let i = 0; i < numRawBlocks; i++) {
+                    if (i % 20 === 0) await new Promise(r => setTimeout(r, 0));
+                    const b = rawBlocks[i];
+                    const name = b.name || b.id || b.blockName;
+                    if (name) {
+                        const bEntities = b.entities || b.objects || [];
+                        const blockShapes: Shape[] = [];
+                        if (Array.isArray(bEntities)) {
+                            bEntities.forEach((be: any) => {
+                                const s = convertEntity(be);
+                                if (s) blockShapes.push(s);
+                            });
+                        }
+                        const bp = b.basePoint || b.position || { x: 0, y: 0 };
+                        blocks[name] = { id: name, name: name, basePoint: { x: bp.x || 0, y: bp.y || 0 }, shapes: blockShapes };
+                    }
                 }
-            });
+            } else {
+                const bKeys = Object.keys(rawBlocks);
+                for (let i = 0; i < bKeys.length; i++) {
+                    if (i % 20 === 0) await new Promise(r => setTimeout(r, 0));
+                    const name = bKeys[i];
+                    const b = rawBlocks[name];
+                    const bEntities = b.entities || b.objects || [];
+                    const blockShapes: Shape[] = [];
+                    if (Array.isArray(bEntities)) {
+                        bEntities.forEach((be: any) => {
+                            const s = convertEntity(be);
+                            if (s) blockShapes.push(s);
+                        });
+                    }
+                    const bp = b.basePoint || b.position || { x: 0, y: 0 };
+                    blocks[name] = { id: name, name: name, basePoint: { x: bp.x || 0, y: bp.y || 0 }, shapes: blockShapes };
+                }
+            }
         }
 
         // Entities Setup
-        if (db.entities && Array.isArray(db.entities)) {
-            db.entities.forEach((ent: any) => {
+        const rawEntities = db.entities || db.objects || [];
+        if (Array.isArray(rawEntities)) {
+            const numEntities = rawEntities.length;
+            for (let i = 0; i < numEntities; i++) {
+                if (i % 1000 === 0) await new Promise(r => setTimeout(r, 0));
+                const ent = rawEntities[i];
                 const s = convertEntity(ent);
                 if (s) {
-                    if (ent.isPaperSpace) paperEntities.push(s);
+                    if (!layers[s.layer]) {
+                        layers[s.layer] = { id: s.layer, name: s.layer, visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' };
+                    }
+                    if (ent.isPaperSpace || ent.inPaperSpace || ent.paper_space) paperEntities.push(s);
                     else entities.push(s);
                 }
-            });
+            }
         }
-
         if (paperEntities.length > 0) {
             layouts['layout1'] = { id: 'layout1', name: 'Layout1', paperSize: { width: 297, height: 210 }, entities: paperEntities, viewports: [{ id: 'vp1', x: 0, y: 0, width: 297, height: 210, viewState: { scale: 1, originX: 0, originY: 0 } }] };
         }
+        
+        console.log(`✅ DWG Import Finished:`);
+        console.log(`   • Total Shapes Imported: ${entities.length}`);
+        console.log(`   • Unsupported Entities: ${stats.unsupported}`);
+        console.log(`   • Entities breakdown:`, stats.counts);
+        console.log(`   • Layers Detected: ${Object.keys(layers).length}`);
 
         return {
             version: "2.0",

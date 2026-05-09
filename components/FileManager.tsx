@@ -140,19 +140,19 @@ const FileManager: React.FC<FileManagerProps> = ({ currentName, recentFiles = []
 
     return (
         <div 
-            className="relative bg-[#0a0a0c] w-[95vw] max-w-[420px] max-h-[90vh] rounded-[2.5rem] shadow-[0_60px_150px_rgba(0,0,0,0.9)] border border-white/10 flex flex-col overflow-hidden select-none font-sans" 
+            className="relative bg-[#0a0a0c] w-full md:w-[420px] max-w-[95vw] h-full sm:h-auto sm:max-h-[90vh] rounded-[1.5rem] sm:rounded-[2.5rem] shadow-[0_60px_150px_rgba(0,0,0,0.9)] border border-white/10 flex flex-col overflow-hidden select-none font-sans" 
         >
             {/* Header Section */}
             <div 
-                className="flex justify-between items-center p-8 pb-4"
+                className="flex justify-between items-center p-6 sm:p-8 pb-4"
             >
-                <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-[1.2rem] bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+                <div className="flex items-center gap-3 sm:gap-4">
+                  <div className="w-10 h-10 sm:w-14 sm:h-14 rounded-[0.8rem] sm:rounded-[1.2rem] bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
                     <VoxIcon size={32} />
                   </div>
                   <div>
-                    <h3 className="text-lg font-black text-white uppercase tracking-tight">Project Center</h3>
-                    <p className="text-[9px] text-neutral-500 font-bold uppercase tracking-[0.2em] mt-1 flex items-center gap-1.5">
+                    <h3 className="text-base sm:text-lg font-black text-white uppercase tracking-tight">Project Center</h3>
+                    <p className="text-[8px] sm:text-[9px] text-neutral-500 font-bold uppercase tracking-[0.2em] mt-1 flex items-center gap-1.5">
                       <Briefcase size={10} /> CAD File Management
                     </p>
                   </div>
@@ -160,15 +160,15 @@ const FileManager: React.FC<FileManagerProps> = ({ currentName, recentFiles = []
                 <button onClick={onClose} className="w-10 h-10 flex items-center justify-center hover:bg-white/5 rounded-full text-neutral-500 hover:text-white transition-all"><X size={28} /></button>
             </div>
 
-            <div className="p-8 space-y-10 overflow-y-auto max-h-[75vh] scrollbar-none">
+            <div className="p-4 sm:p-8 space-y-6 sm:space-y-10 overflow-y-auto max-h-[75vh] scrollbar-none">
                 
                 {/* Storage Actions Section */}
                 <div>
                     <h4 className="text-[10px] font-black text-neutral-600 uppercase tracking-[0.25em] mb-4 px-2 flex justify-between items-center">
                         <span>Get Started</span>
-                        <span className="text-[8px] text-cyan-500/50 lowercase italic">Drafting with precision</span>
+                        <span className="text-[8px] text-cyan-500/50 lowercase italic hidden sm:inline">Drafting with precision</span>
                     </h4>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-3 sm:gap-4">
                         <ProjectActionBtn icon={FilePlus} label="New" sublabel="New Workspace" onClick={() => onAction('new')} />
                         <ProjectActionBtn icon={FolderOpen} label="Open" sublabel="Existing File" onClick={() => onAction('open')} />
                         <ProjectActionBtn icon={VoxIcon} label="Save" sublabel={currentName} onClick={() => onAction('save')} />
@@ -188,7 +188,7 @@ const FileManager: React.FC<FileManagerProps> = ({ currentName, recentFiles = []
                             const fileDate = typeof file === 'string' ? Date.now() : file.date;
                             return (
                                 <RecentFileItem 
-                                    key={i} 
+                                    key={`${fileName}-${i}`} 
                                     name={fileName} 
                                     date={fileDate} 
                                     current={fileName === currentName}

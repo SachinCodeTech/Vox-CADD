@@ -28,11 +28,13 @@ interface PropertiesPanelProps {
   selectedShapes: Shape[];
   onUpdateShape: (id: string, updates: Partial<Shape>) => void;
   layers: Record<string, LayerConfig>;
+  lineTypeDefinitions?: Record<string, any>;
   settings: AppSettings;
   onUpdateSettings: (s: Partial<AppSettings>) => void;
   onClose: () => void;
   onCommand?: (cmd: string) => void;
   onFilterType?: (type: string) => void;
+  onOpenColorSelector?: (currentColor: string, onSelect: (color: string) => void, title?: string) => void;
 }
 
 const LineTypePreview = ({ type, color = "#00bcd4", weight = 1 }: { type: LineType, color?: string, weight?: number }) => {
@@ -73,7 +75,7 @@ const LineTypePreview = ({ type, color = "#00bcd4", weight = 1 }: { type: LineTy
 };
 
 const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ 
-    selectedShapes, onUpdateShape, layers, settings, onUpdateSettings, onClose, onCommand, onFilterType
+    selectedShapes, onUpdateShape, layers, lineTypeDefinitions, settings, onUpdateSettings, onClose, onCommand, onFilterType, onOpenColorSelector
 }) => {
   const isImperial = settings.units === 'imperial';
   const [pos, setPos] = useState({ x: 0, y: 0 });
@@ -152,13 +154,13 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 data-lpignore="true"
                 data-form-type="other"
                 onBlur={() => { 
-                    const p = parseLength(local, isImperial); 
+                    const p = parseLength(local, settings); 
                     if (!isNaN(p)) onChange(p); 
                     else setLocal(primary); 
                 }}
                 onKeyDown={(e) => {
                     if (e.key === 'Enter') {
-                        const p = parseLength(local, isImperial);
+                        const p = parseLength(local, settings);
                         if (!isNaN(p)) onChange(p);
                         (e.target as HTMLInputElement).blur();
                     }
@@ -175,7 +177,9 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     return <NumericInput value={value} onChange={() => {}} readOnly={true} isArea={true} />;
   };
 
-  const lineTypes: { value: LineType; label: string }[] = [
+  const baseLineTypes: { value: LineType; label: string }[] = [
+    { value: 'bylayer', label: 'By Layer' },
+    { value: 'byblock', label: 'By Block' },
     { value: 'continuous', label: 'Continuous' }, 
     { value: 'dashed', label: 'Dashed' }, 
     { value: 'dotted', label: 'Dotted' }, 
@@ -194,6 +198,20 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     { value: 'zigzag2', label: 'Zigzag 2' },
     { value: 'dots2', label: 'Dots (dense)' },
     { value: 'dash2', label: 'Dashed (short)' },
+  ];
+
+  const allLineTypes = [...baseLineTypes];
+  if (lineTypeDefinitions) {
+    Object.keys(lineTypeDefinitions).forEach(key => {
+      if (!allLineTypes.find(lt => lt.value === key)) {
+          allLineTypes.push({ value: key as LineType, label: lineTypeDefinitions[key].description || key });
+      }
+    });
+  }
+
+  const LINE_WEIGHTS = [
+    "DEFAULT", "0.00", "0.05", "0.09", "0.13", "0.15", "0.18", "0.20", "0.25",
+    "0.30", "0.35", "0.40", "0.50", "0.60", "0.70", "0.80", "1.00", "1.40", "2.00", "2.11"
   ];
 
   const renderGeometry = (s: Shape) => {
@@ -325,14 +343,25 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                  className="w-full bg-[#121214] border border-white/5 text-[11px] text-white font-mono rounded-xl px-4 py-3 outline-none focus:border-[#00bcd4]/50 transition-all uppercase"
                >
                  <option value="solid">Solid</option>
-                 <option value="ansi31">ANSI31</option>
-                 <option value="ansi32">ANSI32</option>
-                 <option value="ansi37">ANSI37</option>
+                 <option value="ansi31">ANSI31 (Iron)</option>
+                 <option value="ansi32">ANSI32 (Steel)</option>
+                 <option value="ansi33">ANSI33 (Bronze)</option>
+                 <option value="ansi37">ANSI37 (Glass)</option>
+                 <option value="ansi38">ANSI38 (Check)</option>
                  <option value="dots">Dots</option>
                  <option value="cross">Cross</option>
                  <option value="net">Net</option>
                  <option value="honey">Honey</option>
                  <option value="gravel">Gravel</option>
+                 <option value="brick">Brick</option>
+                 <option value="hound">Houndst.</option>
+                 <option value="grid">Grid</option>
+                 <option value="triang">Triangle</option>
+                 <option value="zigzag">Zigzag</option>
+                 <option value="stars">Stars</option>
+                 <option value="grass">Grass</option>
+                 <option value="clay">Clay</option>
+                 <option value="cork">Cork</option>
                </select>
             </PropertyRow>
             <PropertyRow label="Scale"><NumericInput value={h.scale || 1} onChange={v => handleShapeChange('scale', v)} /></PropertyRow>
@@ -370,6 +399,30 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 <PropertyRow label="Position X"><NumericInput value={t.x} onChange={v => handleShapeChange('x', v)} /></PropertyRow>
                 <PropertyRow label="Position Y"><NumericInput value={t.y} onChange={v => handleShapeChange('y', v)} /></PropertyRow>
                 <PropertyRow label="Height"><NumericInput value={t.size} onChange={v => handleShapeChange('size', v)} /></PropertyRow>
+                <PropertyRow label="Font Family">
+                    <select 
+                        className="w-full bg-[#121214] border border-white/5 text-[10px] text-white font-mono rounded-lg px-3 py-2 outline-none focus:border-[#00bcd4]/50 transition-all uppercase"
+                        value={t.fontFamily || 'monospace'}
+                        onChange={e => handleShapeChange('fontFamily', e.target.value)}
+                    >
+                        <option value="monospace">Monospace</option>
+                        <option value="serif">Serif</option>
+                        <option value="sans-serif">Sans-Serif</option>
+                        <option value="Inter">Inter (UI)</option>
+                        <option value="Space Grotesk">Space Grotesk (Tech)</option>
+                        <option value="Outfit">Outfit (Modern)</option>
+                        <option value="JetBrains Mono">JetBrains Mono (Code)</option>
+                        <option value="Playfair Display">Playfair Display (Elegant)</option>
+                        <option value="Impact">Impact (Bold)</option>
+                        <option value="Comic Sans MS">Comic Sans MS (Draft)</option>
+                        <option value="Arial">Arial</option>
+                        <option value="Helvetica">Helvetica</option>
+                        <option value="Times New Roman">Times New Roman</option>
+                        <option value="Georgia">Georgia</option>
+                        <option value="Verdana">Verdana</option>
+                        <option value="Courier New">Courier New</option>
+                    </select>
+                </PropertyRow>
                 <PropertyRow label="Rotation"><NumericInput value={t.rotation || 0} onChange={v => handleShapeChange('rotation', v)} /></PropertyRow>
                 <PropertyRow label="Content">
                     <textarea 
@@ -387,13 +440,13 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
   return (
     <div 
-      className="relative glass-panel w-[95vw] max-w-[340px] max-h-[85vh] rounded-[2rem] shadow-[0_50px_120px_rgba(0,0,0,0.95)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-300 border border-white/10"
-      style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, zIndex: 160 }}
+      className="relative glass-panel w-full sm:w-[340px] sm:max-w-[95vw] h-full sm:h-auto sm:max-h-[85vh] sm:rounded-[2rem] shadow-[0_50px_120px_rgba(0,0,0,0.95)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-300 border border-white/10"
+      style={{ transform: window.innerWidth > 640 ? `translate(${pos.x}px, ${pos.y}px)` : undefined, zIndex: 160 }}
     >
       <div 
-        className="flex justify-between items-center px-6 py-4 border-b border-white/5 bg-[#1a1a1c] cursor-grab active:cursor-grabbing touch-none shrink-0"
-        onMouseDown={e => startDrag(e.clientX, e.clientY)}
-        onTouchStart={e => e.touches.length > 0 && startDrag(e.touches[0].clientX, e.touches[0].clientY)}
+        className="flex justify-between items-center px-6 py-4 border-b border-white/5 bg-[#1a1a1c] sm:cursor-grab active:sm:cursor-grabbing touch-none shrink-0"
+        onMouseDown={e => window.innerWidth > 640 && startDrag(e.clientX, e.clientY)}
+        onTouchStart={e => window.innerWidth > 640 && e.touches.length > 0 && startDrag(e.touches[0].clientX, e.touches[0].clientY)}
       >
         <div className="flex items-center gap-3 pointer-events-none">
             <div className="w-8 h-8 rounded-xl bg-[#00bcd4]/10 flex items-center justify-center text-[#00bcd4]">
@@ -464,52 +517,98 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                           
                           <PropertySection title="General Appearance" icon={Layers}>
                             <PropertyRow label="Layer">
-                                <select 
-                                  className="w-full bg-[#121214] border border-white/5 text-[10px] text-white rounded-lg px-3 py-2 outline-none uppercase font-black cursor-pointer appearance-none hover:border-[#00bcd4]/30 transition-all" 
-                                  value={s.layer} 
-                                  onChange={(e) => onUpdateShape(s.id, { layer: e.target.value })}
-                                >
-                                    {Object.values(layers).map((l: LayerConfig) => <option key={l.id} value={l.id}>{l.name}</option>)}
-                                </select>
+                                <div className="relative group/select">
+                                    <select 
+                                      className="w-full bg-[#121214] border border-white/5 text-[10px] text-white rounded-xl px-4 py-3 outline-none font-black uppercase cursor-pointer appearance-none hover:border-[#00bcd4]/40 hover:bg-black transition-all shadow-inner" 
+                                      value={s.layer} 
+                                      onChange={(e) => onUpdateShape(s.id, { layer: e.target.value })}
+                                    >
+                                        {Object.values(layers).map((l: LayerConfig) => <option key={`prop-layer-opt-${l.id}`} value={l.id} className="bg-[#121214] text-white">{l.name}</option>)}
+                                    </select>
+                                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-neutral-600 transition-colors group-hover/select:text-[#00bcd4]">
+                                        <ChevronDown size={11} />
+                                    </div>
+                                </div>
                             </PropertyRow>
 
                             <PropertyRow label="Color">
                               <div className="flex items-center gap-3">
-                                <div className="relative w-8 h-8 rounded-lg overflow-hidden bg-[#121214] border border-white/10 cursor-pointer shadow-lg active:scale-95 transition-transform shrink-0">
-                                  <div 
-                                    className="absolute inset-[2px] rounded-[6px] transition-all" 
-                                    style={{ backgroundColor: s.color || '#ffffff' }}
-                                  />
-                                  <input 
-                                    type="color" 
-                                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" 
-                                    value={s.color || '#ffffff'} 
-                                    onChange={(e) => onUpdateShape(s.id, { color: e.target.value })} 
-                                  />
+                                <div 
+                                  title="Change Color"
+                                  className="relative w-10 h-10 rounded-xl overflow-hidden border border-white/10 cursor-pointer shadow-lg active:scale-95 transition-transform shrink-0"
+                                  style={{ backgroundColor: s.color && (s.color === 'BYLAYER' || s.color === 'BYBLOCK') ? '#444' : (s.color || '#ffffff') }}
+                                  onClick={() => {
+                                      onOpenColorSelector?.(s.color || '#FFFFFF', (color) => {
+                                          onUpdateShape(s.id, { color });
+                                      }, `Entity: ${s.type.toUpperCase()}`);
+                                  }}
+                                >
+                                  { (s.color === 'BYLAYER' || s.color === 'BYBLOCK') && (
+                                      <div className="absolute inset-0 flex items-center justify-center text-[7px] font-black uppercase text-white/40">
+                                          {s.color === 'BYLAYER' ? 'LAYER' : 'BLOCK'}
+                                      </div>
+                                  )}
                                 </div>
-                                <div className="flex flex-col gap-0">
-                                  <span className="text-[10px] font-black font-mono text-[#00bcd4] uppercase tracking-wider leading-none">
-                                      {s.color || 'BYLAYER'}
-                                  </span>
-                                  <span className="text-[7px] font-black text-neutral-600 uppercase tracking-widest mt-1">Entity Color</span>
+                                <div className="flex-1">
+                                  <input 
+                                    type="text"
+                                    className="w-full bg-[#121214] border border-white/5 text-[10px] text-white font-mono rounded-xl px-4 py-3 outline-none focus:border-[#00bcd4]/50 transition-all uppercase shadow-inner"
+                                    value={s.color || 'BYLAYER'}
+                                    spellCheck={false}
+                                    onClick={() => {
+                                        onOpenColorSelector?.(s.color || '#FFFFFF', (color) => {
+                                            onUpdateShape(s.id, { color });
+                                        }, `Entity: ${s.type.toUpperCase()}`);
+                                    }}
+                                    readOnly
+                                  />
                                 </div>
                               </div>
                             </PropertyRow>
 
                             <PropertyRow label="Linetype">
                                 <div className="flex items-center gap-3">
-                                    <select 
-                                      className="flex-1 bg-[#121214] border border-white/5 text-[10px] text-white rounded-lg px-3 py-2 outline-none uppercase font-black cursor-pointer appearance-none hover:border-[#00bcd4]/30 transition-all" 
-                                      value={s.lineType || 'continuous'} 
-                                      onChange={(e) => onUpdateShape(s.id, { lineType: e.target.value as LineType })}
-                                    >
-                                        {lineTypes.map(lt => <option key={lt.value} value={lt.value}>{lt.label}</option>)}
-                                    </select>
-                                    <div className="bg-white/5 rounded-lg px-2 py-2 flex items-center justify-center min-w-[70px]">
+                                    <div className="flex-1 relative group/select">
+                                        <select 
+                                          className="w-full bg-[#121214] border border-white/5 text-[10px] text-white rounded-xl px-4 pr-8 py-3 outline-none uppercase font-black cursor-pointer appearance-none hover:border-[#00bcd4]/40 hover:bg-black transition-all shadow-inner" 
+                                          value={s.lineType || 'continuous'} 
+                                          onChange={(e) => onUpdateShape(s.id, { lineType: e.target.value as LineType })}
+                                        >
+                                            {allLineTypes.map((lt, idx) => <option key={`${lt.value}-${idx}`} value={lt.value} className="bg-[#121214] text-white py-2">{lt.label}</option>)}
+                                        </select>
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-neutral-600 transition-colors group-hover/select:text-[#00bcd4]">
+                                            <ChevronDown size={11} />
+                                        </div>
+                                    </div>
+                                    <div className="bg-white/5 rounded-xl px-3 py-3 flex items-center justify-center min-w-[80px] shadow-inner border border-white/5">
                                       <LineTypePreview 
                                           type={s.lineType || 'continuous'} 
                                           color={s.color || '#00bcd4'}
                                       />
+                                    </div>
+                                </div>
+                            </PropertyRow>
+
+                            <PropertyRow label="Lineweight">
+                                <div className="relative group/select">
+                                    <select 
+                                        className="w-full bg-[#121214] border border-white/5 text-[10px] text-white rounded-xl px-4 pr-8 py-3 outline-none uppercase font-black cursor-pointer appearance-none hover:border-[#00bcd4]/40 hover:bg-black transition-all shadow-inner text-left font-mono" 
+                                        value={typeof s.thickness === 'number' ? s.thickness.toFixed(2) : (s.thickness || 'BYLAYER')} 
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          if (val === 'BYLAYER' || val === 'BYBLOCK' || val === 'DEFAULT') {
+                                            onUpdateShape(s.id, { thickness: val });
+                                          } else {
+                                            onUpdateShape(s.id, { thickness: parseFloat(val) });
+                                          }
+                                        }}
+                                    >
+                                        <option value="BYLAYER" className="bg-[#121214] text-white">By Layer</option>
+                                        <option value="BYBLOCK" className="bg-[#121214] text-white">By Block</option>
+                                        {LINE_WEIGHTS.map(w => <option key={w} value={w} className="bg-[#121214] text-white">{w}{w !== 'DEFAULT' ? 'mm' : ''}</option>)}
+                                    </select>
+                                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-neutral-600 transition-colors group-hover/select:text-[#00bcd4]">
+                                        <ChevronDown size={11} />
                                     </div>
                                 </div>
                             </PropertyRow>
@@ -526,15 +625,36 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                           <PropertySection title="General appearance" icon={Layers}>
                              <PropertyRow label="Global Color">
                                <div className="flex items-center gap-3">
-                                 <div className="relative w-8 h-8 rounded-lg overflow-hidden bg-[#121214] border border-white/10 cursor-pointer shadow-lg active:scale-95 transition-transform shrink-0">
-                                    <div className="absolute inset-[2px] rounded-[6px]" style={{ backgroundColor: filtered.every(s => s.color === filtered[0].color) ? (filtered[0].color || '#ffffff') : '#444' }} />
+                                 <div 
+                                   title="Change All Colors"
+                                   className="relative w-8 h-8 rounded-lg overflow-hidden border border-white/10 cursor-pointer shadow-lg active:scale-95 transition-transform shrink-0"
+                                   style={{ backgroundColor: filtered.every(s => s.color === filtered[0].color) ? (filtered[0].color === 'BYLAYER' || filtered[0].color === 'BYBLOCK' ? '#444' : (filtered[0].color || '#ffffff')) : '#222' }}
+                                   onClick={() => {
+                                       onOpenColorSelector?.(filtered[0].color || '#FFFFFF', (color) => {
+                                           filtered.forEach(s => onUpdateShape(s.id, { color }));
+                                       }, `Multiple: ${filtered.length} Objects`);
+                                   }}
+                                 >
+                                    {filtered.every(s => s.color === filtered[0].color) && (filtered[0].color === 'BYLAYER' || filtered[0].color === 'BYBLOCK') && (
+                                        <div className="absolute inset-0 flex items-center justify-center text-[6px] font-black uppercase text-white/40">
+                                            {filtered[0].color === 'BYLAYER' ? 'LAYER' : 'BLOCK'}
+                                        </div>
+                                    )}
+                                 </div>
+                                 <div className="flex-1">
                                     <input 
-                                        type="color" 
-                                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" 
-                                        onChange={(e) => filtered.forEach(s => onUpdateShape(s.id, { color: e.target.value }))} 
+                                      type="text"
+                                      className="w-full bg-[#121214] border border-white/5 text-[10px] text-white font-mono rounded-lg px-2 py-1.5 outline-none focus:border-[#00bcd4]/50 transition-all uppercase cursor-pointer"
+                                      placeholder="Mixed"
+                                      value={filtered.every(s => s.color === filtered[0].color) ? (filtered[0].color || 'BYLAYER') : ''}
+                                      onClick={() => {
+                                          onOpenColorSelector?.(filtered[0].color || '#FFFFFF', (color) => {
+                                              filtered.forEach(s => onUpdateShape(s.id, { color }));
+                                          }, `Multiple: ${filtered.length} Objects`);
+                                      }}
+                                      readOnly
                                     />
                                  </div>
-                                 <span className="text-[9px] text-neutral-500 font-black uppercase tracking-widest leading-tight">Batch color override</span>
                                </div>
                              </PropertyRow>
                              <PropertyRow label="Global Layer">
@@ -635,18 +755,26 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                         onChange={(e) => selectedShapes.forEach(s => onUpdateShape(s.id, { layer: e.target.value }))}
                                     >
                                         <option value="" disabled>Select Layer...</option>
-                                        {Object.values(layers).map((l: LayerConfig) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                                        {Object.values(layers).map((l: LayerConfig) => <option key={`bulk-layer-opt-${l.id}`} value={l.id}>{l.name}</option>)}
                                     </select>
                                 </PropertyRow>
                                 <PropertyRow label="Set All Colors">
                                     <div className="flex items-center gap-3">
-                                      <div className="relative w-8 h-8 rounded-lg overflow-hidden bg-[#121214] border border-white/10 cursor-pointer shadow-lg active:scale-95 transition-transform shrink-0">
-                                          <div className="absolute inset-[2px] rounded-[6px]" style={{ backgroundColor: selectedShapes.every(s => s.color === selectedShapes[0].color) ? (selectedShapes[0].color || '#ffffff') : '#444' }} />
-                                          <input 
-                                              type="color" 
-                                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" 
-                                              onChange={(e) => selectedShapes.forEach(s => onUpdateShape(s.id, { color: e.target.value }))} 
-                                          />
+                                      <div 
+                                        title="Override All Colors"
+                                        className="relative w-8 h-8 rounded-lg overflow-hidden border border-white/10 cursor-pointer shadow-lg active:scale-95 transition-transform shrink-0"
+                                        style={{ backgroundColor: selectedShapes.every(s => s.color === selectedShapes[0].color) ? (selectedShapes[0].color === 'BYLAYER' || selectedShapes[0].color === 'BYBLOCK' ? '#444' : (selectedShapes[0].color || '#ffffff')) : '#222' }}
+                                        onClick={() => {
+                                            onOpenColorSelector?.(selectedShapes[0]?.color || '#FFFFFF', (color) => {
+                                                selectedShapes.forEach(s => onUpdateShape(s.id, { color }));
+                                            }, "Bulk Color Override");
+                                        }}
+                                      >
+                                          {selectedShapes.every(s => s.color === selectedShapes[0].color) && (selectedShapes[0].color === 'BYLAYER' || selectedShapes[0].color === 'BYBLOCK') && (
+                                              <div className="absolute inset-0 flex items-center justify-center text-[6px] font-black uppercase text-white/40">
+                                                  {selectedShapes[0].color === 'BYLAYER' ? 'LAYER' : 'BLOCK'}
+                                              </div>
+                                          )}
                                       </div>
                                       <span className="text-[9px] text-neutral-500 font-black uppercase tracking-widest">Global Color Override</span>
                                     </div>

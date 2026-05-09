@@ -151,7 +151,7 @@ const CalculatorPanel: React.FC<CalculatorPanelProps> = ({ onClose }) => {
                             )}
                             {['C', '/', '*', 'DEL', '7', '8', '9', '-', '4', '5', '6', '+', '1', '2', '3', '=', '0', '.'].map((key, i) => (
                                 <button 
-                                    key={i} 
+                                    key={`calc-k-${key}-${i}`} 
                                     onClick={() => handleCalcInput(key)} 
                                     className={`h-10 rounded-xl text-xs font-black transition-all active:scale-95 flex items-center justify-center uppercase tracking-widest ${
                                         ['C', 'DEL'].includes(key) 

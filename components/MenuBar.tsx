@@ -4,7 +4,7 @@ import {
   FilePlus, FolderOpen, Save, Share2, Download, 
   Settings, Info, HelpCircle, Layout, Grid, 
   Zap, Calculator, Layers, Sliders, Ruler, Target,
-  Globe, Cpu, Type, MousePointer2, Settings2, Trash2, FileText,
+  Globe, Cpu, Type, MousePointer2, Settings2, Trash2, FileText, Palette,
   Mail, MessageSquare, FileCode, XCircle
 } from 'lucide-react';
 import { UnitType } from '../types';
@@ -83,6 +83,13 @@ const MenuBar: React.FC<MenuBarProps> = ({ onAction, currentFileName, units }) =
             desc="Initialize fresh drafting canvas"
             color="bg-emerald-500" 
             onClick={() => onAction('new')} 
+        />
+        <MenuButton 
+            icon={Palette} 
+            label="Plot Style Manager" 
+            desc="Configure CTB color mapping & lineweights"
+            color="bg-cyan-500" 
+            onClick={() => onAction('toggleCtbManager')} 
         />
         <MenuButton 
             icon={FileText} 
