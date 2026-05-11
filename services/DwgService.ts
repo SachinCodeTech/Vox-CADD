@@ -124,8 +124,18 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
 
         const cleanText = (text: string): string => {
             if (!text) return "";
+            
+            let actualText = text;
+            // Clean up AutoCAD anonymous names and garbage codes
+            if (actualText.startsWith('A$') || actualText.includes('$')) {
+                actualText = actualText.split('*').pop() || actualText;
+            }
+            if (actualText.includes(';')) {
+                actualText = actualText.split(';').pop() || actualText;
+            }
+
             // Robust MText cleanup
-            return text
+            return actualText
                 .replace(/\\P/g, "\n")
                 .replace(/\\L/g, "")
                 .replace(/\\l/g, "")
@@ -144,7 +154,6 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
 
         const convertEntity = (ent: any): Shape | null => {
             if (!ent) return null;
-            const id = generateId();
             
             // Handle layer as string or object
             let layer = '0';
@@ -159,7 +168,7 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
             if (lowerLayer === 'defpoints') layer = 'defpoints';
             if (layer === '0' || lowerLayer === '0') layer = '0';
             
-            // Robust type detection - using includes as suggested in Phase 1
+            // Robust type detection - using includes as suggested
             const type = (ent.type || ent.objectType || '').toUpperCase().trim();
             const color = aciToHex(ent.color, ent.true_color || ent.trueColor);
             const thickness = ent.thickness !== undefined && typeof ent.thickness === 'number' ? ent.thickness : mapLineweight(ent.lineweight || ent.lineWeight);
@@ -168,6 +177,9 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
 
             const isValid = (val: any) => typeof val === 'number' && isFinite(val) && Math.abs(val) < 1e12;
             
+            // Improved unique ID generation for each imported entity
+            const nextId = () => `dwg-${type.toLowerCase()}-${generateId()}`;
+
             stats.total++;
             stats.counts[type] = (stats.counts[type] || 0) + 1;
 
@@ -183,19 +195,19 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             const dist = Math.sqrt((start.x - end.x) ** 2 + (start.y - end.y) ** 2);
                             if ((isStart0 || isEnd0) && dist > 1e5 && !(isStart0 && isEnd0)) return null;
                             
-                            return { id, type: 'line', layer, color, x1: start.x, y1: start.y, x2: end.x, y2: end.y, thickness, lineType, lineScale } as any;
+                            return { id: nextId(), type: 'line', layer, color, x1: start.x, y1: start.y, x2: end.x, y2: end.y, thickness, lineType, lineScale } as any;
                         }
                         break;
                     case type.includes('CIRCLE'):
                         const center = ent.center || ent.center_point || ent.position;
                         if (center) {
-                            return { id, type: 'circle', layer, color, x: center.x, y: center.y, radius: ent.radius || 1, thickness, lineType, lineScale } as any;
+                            return { id: nextId(), type: 'circle', layer, color, x: center.x, y: center.y, radius: ent.radius || 1, thickness, lineType, lineScale } as any;
                         }
                         break;
                     case type.includes('ARC'):
                         const arcCenter = ent.center || ent.center_point || ent.position;
                         if (arcCenter) {
-                            return { id, type: 'arc', layer, color, x: arcCenter.x, y: arcCenter.y, radius: ent.radius || 1, startAngle: ent.startAngle || 0, endAngle: ent.endAngle || Math.PI, counterClockwise: false, thickness, lineType, lineScale } as any;
+                            return { id: nextId(), type: 'arc', layer, color, x: arcCenter.x, y: arcCenter.y, radius: ent.radius || 1, startAngle: ent.startAngle || 0, endAngle: ent.endAngle || Math.PI, counterClockwise: false, thickness, lineType, lineScale } as any;
                         }
                         break;
                     case type.includes('POLYLINE') || type.includes('LWPOLYLINE'):
@@ -207,13 +219,13 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             }
                         }
                         if (vertices.length > 1) {
-                            return { id: generateId(), type: 'pline', layer, color, points: vertices.map((v: any) => ({ x: v.x, y: v.y, bulge: v.bulge || 0 })), closed: !!(ent.flag & 1) || !!ent.closed || !!ent.isClosed, thickness, lineType, lineScale } as any;
+                            return { id: nextId(), type: 'pline', layer, color, points: vertices.map((v: any) => ({ x: v.x, y: v.y, bulge: v.bulge || 0 })), closed: !!(ent.flag & 1) || !!ent.closed || !!ent.isClosed, thickness, lineType, lineScale } as any;
                         }
                         break;
                     case type.includes('SPLINE'):
                         const splPoints = (ent.controlPoints || ent.fitPoints || ent.vertices || ent.points || []).filter((v: any) => v && isValid(v.x) && isValid(v.y));
                         if (splPoints.length > 1) {
-                            return { id: generateId(), type: 'spline', layer, color, points: splPoints.map((v: any) => ({ x: v.x, y: v.y })), closed: !!ent.closed || !!ent.isClosed, thickness, lineType, lineScale } as any;
+                            return { id: nextId(), type: 'spline', layer, color, points: splPoints.map((v: any) => ({ x: v.x, y: v.y })), closed: !!ent.closed || !!ent.isClosed, thickness, lineType, lineScale } as any;
                         }
                         break;
                     case type.includes('TEXT') || type.includes('MTEXT') || type.includes('ATTRIB') || type.includes('ATTDEF'):
@@ -229,7 +241,7 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             const rotation = ent.rotation !== undefined ? ent.rotation : 0;
                             const h = ent.height || ent.textHeight || 2.5;
                             return { 
-                                id, type: (type.includes('MTEXT') || rawText.includes('\P')) ? 'mtext' : 'text', 
+                                id: nextId(), type: (type.includes('MTEXT') || rawText.includes('\P')) ? 'mtext' : 'text', 
                                 layer, color, x: pos.x, y: pos.y, 
                                 size: h, height: h,
                                 content: text, text: text, rotation, fontFamily,
@@ -242,7 +254,7 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                         const eMajor = ent.majorAxis || ent.major_axis;
                         if (eCenter && eMajor && ent.ratio !== undefined) {
                             const rot = Math.atan2(eMajor.y, eMajor.x);
-                            return { id, type: 'ellipse', layer, color, x: eCenter.x, y: eCenter.y, rx: Math.sqrt(eMajor.x**2 + eMajor.y**2), ry: Math.sqrt(eMajor.x**2 + eMajor.y**2) * ent.ratio, rotation: rot, thickness, lineType } as any;
+                            return { id: nextId(), type: 'ellipse', layer, color, x: eCenter.x, y: eCenter.y, rx: Math.sqrt(eMajor.x**2 + eMajor.y**2), ry: Math.sqrt(eMajor.x**2 + eMajor.y**2) * ent.ratio, rotation: rot, thickness, lineType } as any;
                         }
                         break;
                     case type.includes('HATCH'):
@@ -261,7 +273,7 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             });
                         }
                         if (loops.length > 0) {
-                            return { id, type: 'hatch', layer, color, points: loops[0], loops, pattern: (ent.patternName || 'solid').toLowerCase(), scale: ent.patternScale || 1, rotation: ent.patternAngle || 0, filled: true, fill: true } as any;
+                            return { id: nextId(), type: 'hatch', layer, color, points: loops[0], loops, pattern: (ent.patternName || 'solid').toLowerCase(), scale: ent.patternScale || 1, rotation: ent.patternAngle || 0, filled: true, fill: true } as any;
                         }
                         break;
                     case type.includes('INSERT') || type.includes('BLOCK'):
@@ -271,15 +283,20 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             const blockId = typeof bName === 'string' ? bName : (bName.name || bName.id || '0');
                             const scaleX = ent.scale?.x || ent.xScale || 1;
                             const scaleY = ent.scale?.y || ent.yScale || 1;
-                            return { id, type: 'block', layer, color, x: insPoint.x, y: insPoint.y, blockId, scaleX, scaleY, rotation: ent.rotation || 0, name: blockId } as any;
+                            return { id: nextId(), type: 'block', layer, color, x: insPoint.x, y: insPoint.y, blockId, scaleX, scaleY, rotation: ent.rotation || 0, name: blockId } as any;
                         }
                         break;
                     case type.includes('DIMENSION') || type.includes('DIM'):
-                        const dp1 = ent.definitionPoint || ent.defPoint || ent.points?.[0];
-                        const dp2 = ent.definitionPoint2 || ent.defPoint2 || ent.points?.[1];
-                        if (dp1 && dp2) {
-                            const meas = ent.measurement !== undefined ? `◉ ${ent.measurement.toFixed(2)}` : (ent.text || '');
-                            return { id, type: 'dimension', layer, color, dimType: 'aligned', x1: dp1.x, y1: dp1.y, x2: dp2.x, y2: dp2.y, text: meas, content: meas } as any;
+                        const dimText = ent.measurement !== undefined ? `${ent.measurement.toFixed(2)}` : (ent.text || 'DIM');
+                        const dimPos = ent.textPosition || ent.text_point || ent.insertionPoint || ent.definitionPoint || ent.defPoint || ent.position;
+                        if (dimPos && isValid(dimPos.x) && isValid(dimPos.y)) {
+                            return { 
+                                id: nextId(), type: 'text', layer, color, 
+                                x: dimPos.x, y: dimPos.y, 
+                                text: dimText, content: dimText, 
+                                size: 2.8, height: 2.8,
+                                rotation: 0, fontFamily: 'standard'
+                            } as any;
                         }
                         break;
                 }

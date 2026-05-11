@@ -13,7 +13,7 @@ interface DraftingSettingsProps {
 
 const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, onChange, onSettingsChange, onClose }) => {
   const [pos, setPos] = useState({ x: 0, y: 0 });
-  const [activeTab, setActiveTab] = useState<'snaps' | 'grid' | 'units'>('snaps');
+  const [activeTab, setActiveTab] = useState<'snaps' | 'grid' | 'units' | 'polar'>('snaps');
   const [isInteracting, setIsInteracting] = useState(false);
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
@@ -79,35 +79,55 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
 
   return (
     <div 
-        className="relative w-full md:w-[340px] max-w-[95vw] sm:max-w-[calc(100vw-40px)] h-full sm:h-auto bg-[#0a0a0c] border border-white/10 rounded-[1.5rem] sm:rounded-2xl shadow-[0_30px_100px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden select-none font-sans"
+      className="relative glass-panel w-full sm:w-[340px] sm:max-w-[95vw] h-full sm:h-auto sm:max-h-[85vh] sm:rounded-[2rem] shadow-[0_50px_120px_rgba(0,0,0,0.95)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-300 border border-white/10"
+      style={{ transform: window.innerWidth > 640 ? `translate(${pos.x}px, ${pos.y}px)` : undefined, zIndex: 160 }}
+    >
+      <div 
+        className="flex justify-between items-center px-6 py-4 border-b border-white/5 bg-[#1a1a1c] sm:cursor-grab active:sm:cursor-grabbing touch-none shrink-0"
+        onMouseDown={e => window.innerWidth > 640 && startDrag(e.clientX, e.clientY)}
+        onTouchStart={e => window.innerWidth > 640 && e.touches.length > 0 && startDrag(e.touches[0].clientX, e.touches[0].clientY)}
       >
-        <div 
-          className="p-4 sm:p-5 border-b border-white/5 bg-white/5 flex justify-between items-center"
-        >
-          <div className="flex items-center gap-2 pointer-events-none">
-            <Target size={18} className="text-cyan-500" />
-            <h2 className="text-[11px] font-black text-white uppercase tracking-[0.2em]">Drafting Dashboard</h2>
-          </div>
-          <button onClick={onClose} className="p-1 hover:bg-neutral-800 rounded-lg text-neutral-500 hover:text-white transition-colors cursor-pointer"><X size={18} /></button>
+        <div className="flex items-center gap-3 pointer-events-none">
+            <div className="w-8 h-8 rounded-xl bg-cyan-500/10 flex items-center justify-center text-cyan-400">
+                <Target size={16} />
+            </div>
+            <h3 className="text-[11px] font-black text-white uppercase tracking-[0.25em]">Drafting Settings</h3>
         </div>
+        <button onClick={onClose} className="w-8 h-8 flex items-center justify-center hover:bg-white/10 rounded-full text-neutral-500 hover:text-white transition-all"><X size={20} /></button>
+      </div>
 
-        {/* Tab Navigation */}
-        <div className="flex bg-black border-b border-white/5 p-1 shrink-0">
-            <button onClick={() => setActiveTab('snaps')} className={`flex-1 flex flex-col items-center py-2 rounded-lg transition-all ${activeTab === 'snaps' ? 'bg-white/5 text-cyan-400' : 'text-neutral-600'}`}>
-                <Zap size={14} />
-                <span className="text-[7px] font-black uppercase mt-1">Snaps</span>
-            </button>
-            <button onClick={() => setActiveTab('grid')} className={`flex-1 flex flex-col items-center py-2 rounded-lg transition-all ${activeTab === 'grid' ? 'bg-white/5 text-cyan-400' : 'text-neutral-600'}`}>
-                <LayoutGrid size={14} />
-                <span className="text-[7px] font-black uppercase mt-1">Grid</span>
-            </button>
-            <button onClick={() => setActiveTab('units')} className={`flex-1 flex flex-col items-center py-2 rounded-lg transition-all ${activeTab === 'units' ? 'bg-white/5 text-cyan-400' : 'text-neutral-600'}`}>
-                <Globe size={14} />
-                <span className="text-[7px] font-black uppercase mt-1">Units</span>
-            </button>
-        </div>
+      <div className="flex bg-[#1a1a1c] border-b border-white/5 shrink-0">
+          <button 
+            onClick={() => setActiveTab('snaps')}
+            className={`flex-1 flex items-center justify-center gap-2 py-3 text-[9px] font-black uppercase tracking-[0.2em] transition-all border-b-2 ${activeTab === 'snaps' ? 'text-cyan-400 border-cyan-400 bg-cyan-400/5' : 'text-neutral-500 border-transparent hover:text-white'}`}
+          >
+            <Zap size={12} />
+            Snaps
+          </button>
+          <button 
+            onClick={() => setActiveTab('grid')}
+            className={`flex-1 flex items-center justify-center gap-2 py-3 text-[9px] font-black uppercase tracking-[0.2em] transition-all border-b-2 ${activeTab === 'grid' ? 'text-cyan-400 border-cyan-400 bg-cyan-400/5' : 'text-neutral-500 border-transparent hover:text-white'}`}
+          >
+            <LayoutGrid size={12} />
+            Grid
+          </button>
+          <button 
+            onClick={() => setActiveTab('units')}
+            className={`flex-1 flex items-center justify-center gap-2 py-3 text-[9px] font-black uppercase tracking-[0.2em] transition-all border-b-2 ${activeTab === 'units' ? 'text-cyan-400 border-cyan-400 bg-cyan-400/5' : 'text-neutral-500 border-transparent hover:text-white'}`}
+          >
+            <Globe size={12} />
+            Units
+          </button>
+          <button 
+            onClick={() => setActiveTab('polar')}
+            className={`flex-1 flex items-center justify-center gap-2 py-3 text-[9px] font-black uppercase tracking-[0.2em] transition-all border-b-2 ${activeTab === 'polar' ? 'text-cyan-400 border-cyan-400 bg-cyan-400/5' : 'text-neutral-500 border-transparent hover:text-white'}`}
+          >
+            <Compass size={12} />
+            Polar
+          </button>
+      </div>
 
-        <div className="px-4 py-4 max-h-[50vh] overflow-y-auto scrollbar-none bg-[#0a0a0c]">
+      <div className="flex-1 overflow-y-auto max-h-[70vh] p-6 space-y-8 scrollbar-none bg-[#0d0d0f]">
             {activeTab === 'snaps' && (
                 <div className="grid grid-cols-1 gap-1.5">
                     <SnapItem id="endpoint" label="Endpoint" icon={Square} active={options.endpoint} />
@@ -121,7 +141,6 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
                     <SnapItem id="tangent" label="Tangent" icon={Compass} active={options.tangent} />
                     <SnapItem id="extension" label="Extension" icon={Maximize} active={options.extension} />
                     <SnapItem id="parallel" label="Parallel" icon={Equal} active={options.parallel} />
-                    <SnapItem id="polar" label="Polar" icon={Compass} active={options.polar} />
                     <SnapItem id="gcenter" label="Geometric Center" icon={Pentagon} active={options.gcenter} />
                     <SnapItem id="appint" label="Apparent Intersection" icon={Scissors} active={options.appint} />
                     
@@ -149,12 +168,26 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
                     </div>
                     <div className="space-y-3">
                         <label className="text-[9px] font-black text-neutral-600 uppercase tracking-widest px-1">Grid Spacing</label>
-                        <input 
-                            type="number" 
-                            value={settings.gridSpacing} 
-                            onChange={e => onSettingsChange({ gridSpacing: parseFloat(e.target.value) || 100 })}
-                            className="w-full bg-black border border-white/10 rounded-xl py-3 px-4 text-xs text-cyan-400 font-mono focus:border-cyan-500 outline-none" 
-                        />
+                        <div className="flex gap-2">
+                           <div className="flex-1 space-y-1">
+                               <span className="text-[7px] text-neutral-500 font-bold uppercase block px-1">Spacing</span>
+                               <input 
+                                   type="number" 
+                                   value={settings.gridSpacing} 
+                                   onChange={e => onSettingsChange({ gridSpacing: parseFloat(e.target.value) || 100 })}
+                                   className="w-full bg-black border border-white/10 rounded-xl py-3 px-4 text-xs text-cyan-400 font-mono focus:border-cyan-500 outline-none" 
+                               />
+                           </div>
+                           <div className="flex-1 space-y-1">
+                               <span className="text-[7px] text-neutral-500 font-bold uppercase block px-1">Major Lines</span>
+                               <input 
+                                   type="number" 
+                                   value={settings.gridMajorInterval || 5} 
+                                   onChange={e => onSettingsChange({ gridMajorInterval: parseInt(e.target.value) || 5 })}
+                                   className="w-full bg-black border border-white/10 rounded-xl py-3 px-4 text-xs text-cyan-400 font-mono focus:border-cyan-500 outline-none" 
+                               />
+                           </div>
+                        </div>
                     </div>
                     <div className="space-y-3 border-t border-white/5 pt-6">
                         <label className="text-[9px] font-black text-neutral-600 uppercase tracking-widest px-1">Global Linetype Scale (LTSCALE)</label>
@@ -174,6 +207,51 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
                             </div>
                         </div>
                         <p className="text-[7px] text-neutral-500 font-bold uppercase tracking-widest px-1">Adjusts the density of dashed and dotted lines globally.</p>
+                    </div>
+                </div>
+            )}
+
+            {activeTab === 'polar' && (
+                <div className="space-y-6">
+                    <div className="space-y-3">
+                        <label className="text-[9px] font-black text-neutral-600 uppercase tracking-widest px-1">Polar Tracking</label>
+                        <button 
+                            onClick={() => onSettingsChange({ polarTrackingEnabled: !settings.polarTrackingEnabled })} 
+                            className={`w-full flex items-center justify-between p-4 rounded-xl border transition-all ${settings.polarTrackingEnabled ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' : 'bg-neutral-900 border-white/5 text-neutral-600'}`}
+                         >
+                            <div className="flex items-center gap-3">
+                                <Compass size={16} />
+                                <div className="flex flex-col items-start">
+                                    <span className="text-[10px] font-black uppercase tracking-widest">Polar Tracking (F10)</span>
+                                    <span className="text-[7px] font-bold opacity-60 uppercase">Alignment guides at specific angles</span>
+                                </div>
+                            </div>
+                            <div className={`w-10 h-5 rounded-full relative transition-all ${settings.polarTrackingEnabled ? 'bg-cyan-500' : 'bg-neutral-800'}`}>
+                                <div className={`absolute top-1 w-3 h-3 rounded-full bg-white transition-all ${settings.polarTrackingEnabled ? 'right-1' : 'left-1'}`} />
+                            </div>
+                         </button>
+                    </div>
+
+                    <div className="space-y-3">
+                        <label className="text-[9px] font-black text-neutral-600 uppercase tracking-widest px-1">Increment Angle</label>
+                        <select 
+                            value={(settings.polarAngles?.[0] || 90).toString()}
+                            onChange={e => {
+                                const base = parseFloat(e.target.value);
+                                const angles = [];
+                                angles.push(base);
+                                onSettingsChange({ polarAngles: angles });
+                            }}
+                            className="w-full bg-black border border-white/10 rounded-xl py-3 px-4 text-[10px] text-white font-bold tracking-tight focus:border-cyan-500 outline-none appearance-none"
+                        >
+                            <option value="90">90</option>
+                            <option value="45">45, 90, 135, 180...</option>
+                            <option value="30">30, 60, 90, 120...</option>
+                            <option value="22.5">22.5, 45, 67.5...</option>
+                            <option value="15">15, 30, 45, 60...</option>
+                            <option value="10">10, 20, 30, 40...</option>
+                            <option value="5">5, 10, 15, 20...</option>
+                        </select>
                     </div>
                 </div>
             )}
@@ -237,7 +315,7 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
                                 onChange={e => onSettingsChange({ precision: e.target.value })}
                                 className="w-full bg-black border border-white/10 rounded-xl py-3 px-4 text-[10px] text-white font-mono focus:border-cyan-500 outline-none appearance-none"
                             >
-                                {(settings.linearFormat === 'architectural' || settings.linearFormat === 'fractional' ? ['1"', '1/2"', '1/4"', '1/8"', '1/16"', '1/32"', '1/64"'] : ['0', '0.0', '0.00', '0.000', '0.0000']).map(p => (
+                                {(settings.linearFormat === 'architectural' || settings.linearFormat === 'fractional' ? ['1"', '1/2"', '1/4"', '1/8"', '1/16"', '1/32"', '1/64"', '1/128"', '1/256"'] : ['0', '0.0', '0.00', '0.000', '0.0000', '0.00000', '0.000000', '0.0000000', '0.00000000']).map(p => (
                                     <option key={p} value={p}>{p}</option>
                                 ))}
                             </select>
@@ -266,7 +344,7 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
                                 onChange={e => onSettingsChange({ anglePrecision: e.target.value })}
                                 className="w-full bg-black border border-white/10 rounded-xl py-3 px-4 text-[10px] text-white font-mono focus:border-cyan-500 outline-none appearance-none"
                             >
-                                {['0', '0.0', '0.00', '0.000', '0.0000'].map(p => (
+                                {['0', '0.0', '0.00', '0.000', '0.0000', '0.00000', '0.000000', '0.0000000'].map(p => (
                                     <option key={p} value={p}>{p}</option>
                                 ))}
                             </select>

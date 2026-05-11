@@ -22,10 +22,10 @@ export const createDefaultCtb = (): CtbFile => {
   };
 };
 
-export const createAcadCtb = (): CtbFile => {
+export const createVoxCtb = (): CtbFile => {
   const styles: Record<number, CtbPlotStyle> = {};
   
-  // Standard acad.ctb behavior: use object values
+  // Standard vox.ctb behavior: use object values
   for (let i = 1; i <= 255; i++) {
     styles[i] = {
       color: i,
@@ -37,8 +37,8 @@ export const createAcadCtb = (): CtbFile => {
   }
   
   return {
-    id: 'acad',
-    name: 'acad.ctb',
+    id: 'vox',
+    name: 'vox.ctb',
     description: 'Use object colors and lineweights',
     styles
   };

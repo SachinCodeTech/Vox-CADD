@@ -103,9 +103,9 @@ const DimStyleManager: React.FC<DimStyleManagerProps> = ({ settings, onUpdateSet
             <div className="px-2 py-1 mb-2">
                 <span className="text-[8px] font-black uppercase text-neutral-600 tracking-widest">Available Styles</span>
             </div>
-            {Object.values(styles).map((style: DimensionStyle) => (
+            {Object.values(styles).map((style: DimensionStyle, i) => (
               <div 
-                key={style.id}
+                key={`${style.id}-${i}`}
                 className={`flex items-center justify-between px-3 py-2.5 rounded-xl transition-all group cursor-pointer shrink-0 ${activeStyleId === style.id ? 'bg-cyan-500 text-black shadow-[0_0_15px_rgba(0,188,212,0.2)]' : 'text-neutral-400 hover:bg-white/5'}`}
                 onClick={() => {
                   setActiveStyleId(style.id);

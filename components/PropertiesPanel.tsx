@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 // Fix: Added missing PolyShape import to satisfy type cast on line 154
-import { Shape, AppSettings, LayerConfig, LineType, Point, LineShape, CircleShape, RectShape, ArcShape, TextShape, MTextShape, LeaderShape, PolyShape, EllipseShape, DonutShape, DimensionShape, DoubleLineShape } from '../types';
+import { Shape, AppSettings, LayerConfig, LineType, Point, LineShape, CircleShape, RectShape, ArcShape, TextShape, MTextShape, LeaderShape, PolyShape, EllipseShape, DonutShape, DimensionShape, DoubleLineShape, LayoutDefinition } from '../types';
 import { X, Sliders, Layers, Target, Maximize2, PenTool, FileEdit, Move, Zap, ChevronDown, ChevronRight, Info, Type, Ruler, Box, Compass, Activity, Hash, Layers2, Square, Copy, Scissors, ExternalLink, RefreshCw, XCircle } from 'lucide-react';
 import { formatLength, parseLength, distance, calculateArea, calculatePolylineLength, formatDualLength, formatDualArea, calculateShapeLength } from '../services/cadService';
 
@@ -32,6 +32,8 @@ interface PropertiesPanelProps {
   settings: AppSettings;
   onUpdateSettings: (s: Partial<AppSettings>) => void;
   onClose: () => void;
+  activeLayout?: LayoutDefinition;
+  onUpdateLayout?: (id: string, updates: Partial<LayoutDefinition>) => void;
   onCommand?: (cmd: string) => void;
   onFilterType?: (type: string) => void;
   onOpenColorSelector?: (currentColor: string, onSelect: (color: string) => void, title?: string) => void;
@@ -75,7 +77,7 @@ const LineTypePreview = ({ type, color = "#00bcd4", weight = 1 }: { type: LineTy
 };
 
 const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ 
-    selectedShapes, onUpdateShape, layers, lineTypeDefinitions, settings, onUpdateSettings, onClose, onCommand, onFilterType, onOpenColorSelector
+    selectedShapes, onUpdateShape, layers, lineTypeDefinitions, settings, onUpdateSettings, onClose, activeLayout, onUpdateLayout, onCommand, onFilterType, onOpenColorSelector
 }) => {
   const isImperial = settings.units === 'imperial';
   const [pos, setPos] = useState({ x: 0, y: 0 });
@@ -210,7 +212,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   }
 
   const LINE_WEIGHTS = [
-    "DEFAULT", "0.00", "0.05", "0.09", "0.13", "0.15", "0.18", "0.20", "0.25",
+    "DEFAULT", "0.00 (Hairline)", "0.05", "0.09", "0.13", "0.15", "0.18", "0.20", "0.25",
     "0.30", "0.35", "0.40", "0.50", "0.60", "0.70", "0.80", "1.00", "1.40", "2.00", "2.11"
   ];
 
@@ -402,25 +404,37 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 <PropertyRow label="Font Family">
                     <select 
                         className="w-full bg-[#121214] border border-white/5 text-[10px] text-white font-mono rounded-lg px-3 py-2 outline-none focus:border-[#00bcd4]/50 transition-all uppercase"
-                        value={t.fontFamily || 'monospace'}
+                        value={t.fontFamily || 'standard'}
                         onChange={e => handleShapeChange('fontFamily', e.target.value)}
                     >
-                        <option value="monospace">Monospace</option>
-                        <option value="serif">Serif</option>
-                        <option value="sans-serif">Sans-Serif</option>
-                        <option value="Inter">Inter (UI)</option>
-                        <option value="Space Grotesk">Space Grotesk (Tech)</option>
-                        <option value="Outfit">Outfit (Modern)</option>
-                        <option value="JetBrains Mono">JetBrains Mono (Code)</option>
-                        <option value="Playfair Display">Playfair Display (Elegant)</option>
-                        <option value="Impact">Impact (Bold)</option>
-                        <option value="Comic Sans MS">Comic Sans MS (Draft)</option>
-                        <option value="Arial">Arial</option>
-                        <option value="Helvetica">Helvetica</option>
-                        <option value="Times New Roman">Times New Roman</option>
-                        <option value="Georgia">Georgia</option>
-                        <option value="Verdana">Verdana</option>
-                        <option value="Courier New">Courier New</option>
+                        <optgroup label="CAD STYLES" className="bg-[#0d0d0f] text-cyan-500">
+                            <option value="standard">STANDARD (INTER)</option>
+                            <option value="txt">TXT (MONO)</option>
+                            <option value="simplex">SIMPLEX</option>
+                            <option value="romanS">ROMANS</option>
+                            <option value="isocp">ISOCP</option>
+                            <option value="isoct">ISOCT</option>
+                        </optgroup>
+                        <optgroup label="MODERN" className="bg-[#0d0d0f] text-neutral-400">
+                            <option value="poppins">POPPINS</option>
+                            <option value="montserrat">MONTSERRAT</option>
+                            <option value="roboto">ROBOTO</option>
+                            <option value="raleway">RALEWAY</option>
+                            <option value="lato">LATO</option>
+                            <option value="opensans">OPEN SANS</option>
+                            <option value="space-grotesk">SPACE GROTESK</option>
+                            <option value="outfit">OUTFIT</option>
+                            <option value="syne">SYNE</option>
+                            <option value="ibm-plex-sans">IBM PLEX SANS</option>
+                            <option value="ibm-plex-mono">IBM PLEX MONO</option>
+                        </optgroup>
+                        <optgroup label="DISPLAY" className="bg-[#0d0d0f] text-neutral-500">
+                            <option value="arvo">ARVO</option>
+                            <option value="anton">ANTON</option>
+                            <option value="oswald">OSWALD</option>
+                            <option value="rubik">RUBIK</option>
+                            <option value="pacifico">PACIFICO (SCRIPT)</option>
+                        </optgroup>
                     </select>
                 </PropertyRow>
                 <PropertyRow label="Rotation"><NumericInput value={t.rotation || 0} onChange={v => handleShapeChange('rotation', v)} /></PropertyRow>
@@ -590,25 +604,36 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                             </PropertyRow>
 
                             <PropertyRow label="Lineweight">
-                                <div className="relative group/select">
-                                    <select 
-                                        className="w-full bg-[#121214] border border-white/5 text-[10px] text-white rounded-xl px-4 pr-8 py-3 outline-none uppercase font-black cursor-pointer appearance-none hover:border-[#00bcd4]/40 hover:bg-black transition-all shadow-inner text-left font-mono" 
-                                        value={typeof s.thickness === 'number' ? s.thickness.toFixed(2) : (s.thickness || 'BYLAYER')} 
-                                        onChange={(e) => {
-                                          const val = e.target.value;
-                                          if (val === 'BYLAYER' || val === 'BYBLOCK' || val === 'DEFAULT') {
-                                            onUpdateShape(s.id, { thickness: val });
-                                          } else {
-                                            onUpdateShape(s.id, { thickness: parseFloat(val) });
-                                          }
-                                        }}
-                                    >
-                                        <option value="BYLAYER" className="bg-[#121214] text-white">By Layer</option>
-                                        <option value="BYBLOCK" className="bg-[#121214] text-white">By Block</option>
-                                        {LINE_WEIGHTS.map(w => <option key={w} value={w} className="bg-[#121214] text-white">{w}{w !== 'DEFAULT' ? 'mm' : ''}</option>)}
-                                    </select>
-                                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-neutral-600 transition-colors group-hover/select:text-[#00bcd4]">
-                                        <ChevronDown size={11} />
+                                <div className="flex items-center gap-3">
+                                    <div className="flex-1 relative group/select">
+                                        <select 
+                                            className="w-full bg-[#121214] border border-white/5 text-[10px] text-white rounded-xl px-4 pr-8 py-3 outline-none uppercase font-black cursor-pointer appearance-none hover:border-[#00bcd4]/40 hover:bg-black transition-all shadow-inner text-left font-mono" 
+                                            value={typeof s.thickness === 'number' ? s.thickness.toFixed(2) : (s.thickness || 'BYLAYER')} 
+                                            onChange={(e) => {
+                                            const val = e.target.value;
+                                            if (val === 'BYLAYER' || val === 'BYBLOCK' || val === 'DEFAULT') {
+                                                onUpdateShape(s.id, { thickness: val });
+                                            } else {
+                                                onUpdateShape(s.id, { thickness: parseFloat(val) });
+                                            }
+                                            }}
+                                        >
+                                            <option value="BYLAYER" className="bg-[#121214] text-white">By Layer</option>
+                                            <option value="BYBLOCK" className="bg-[#121214] text-white">By Block</option>
+                                            {LINE_WEIGHTS.map(w => <option key={w} value={w} className="bg-[#121214] text-white">{w}{w !== 'DEFAULT' ? 'mm' : ''}</option>)}
+                                        </select>
+                                        <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-neutral-600 transition-colors group-hover/select:text-[#00bcd4]">
+                                            <ChevronDown size={11} />
+                                        </div>
+                                    </div>
+                                    <div className="w-16 flex flex-col items-center gap-1">
+                                        <div className="text-[7px] text-neutral-600 font-black uppercase">Weight</div>
+                                        <div className="w-full h-[3px] bg-white/[0.05] rounded-full overflow-hidden">
+                                            <div 
+                                                className="h-full bg-[#00bcd4]" 
+                                                style={{ width: `${Math.min(100, (parseFloat(String(s.thickness === 'BYLAYER' ? (layers[s.layer]?.thickness || 0.25) : s.thickness)) || 0.25) * 40)}%` }}
+                                            />
+                                        </div>
                                     </div>
                                 </div>
                             </PropertyRow>
@@ -664,7 +689,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                     onChange={(e) => filtered.forEach(s => onUpdateShape(s.id, { layer: e.target.value }))}
                                 >
                                     <option value="" disabled>Mixed Layers</option>
-                                    {Object.values(layers).map((l: LayerConfig) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                                    {Object.values(layers).map((l: LayerConfig) => <option key={`prop-multi-layer-${l.id}`} value={l.id}>{l.name}</option>)}
                                 </select>
                              </PropertyRow>
                           </PropertySection>
@@ -784,6 +809,57 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                     </div>
                   </div>
                 )}
+              </div>
+          ) : activeLayout ? (
+              <div className="flex flex-col">
+                  <div className="px-6 py-4 bg-cyan-500/10 border-b border-cyan-500/20 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Layers2 size={16} className="text-[#00bcd4]" />
+                      <span className="text-[12px] font-black text-[#00bcd4] uppercase tracking-[0.15em]">Layout Properties</span>
+                    </div>
+                    <span className="text-[9px] text-neutral-500 font-black uppercase tracking-widest">Active View</span>
+                  </div>
+                  
+                  <PropertySection title="Page Setup" icon={Info}>
+                    <PropertyRow label="Layout Name">
+                        <input 
+                            type="text"
+                            className="w-full bg-[#121214] border border-white/5 text-[10px] text-white font-black uppercase rounded-xl px-4 py-3 outline-none focus:border-[#00bcd4]/50 transition-all"
+                            value={activeLayout.name}
+                            onChange={e => onUpdateLayout?.(activeLayout.id, { name: e.target.value })}
+                        />
+                    </PropertyRow>
+                    <PropertyRow label="Paper Height">
+                        <NumericInput 
+                            value={activeLayout.paperSize.height} 
+                            onChange={v => onUpdateLayout?.(activeLayout.id, { paperSize: { ...activeLayout.paperSize, height: v } })} 
+                        />
+                    </PropertyRow>
+                    <PropertyRow label="Paper Width">
+                        <NumericInput 
+                            value={activeLayout.paperSize.width} 
+                            onChange={v => onUpdateLayout?.(activeLayout.id, { paperSize: { ...activeLayout.paperSize, width: v } })} 
+                        />
+                    </PropertyRow>
+                  </PropertySection>
+
+                  <PropertySection title="Layout Objects" icon={Box}>
+                    <div className="px-6 py-4 space-y-3">
+                        <div className="flex items-center justify-between text-[10px]">
+                            <span className="text-neutral-500 uppercase font-black tracking-widest">Viewports</span>
+                            <span className="text-white font-mono">{activeLayout.viewports.length}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px]">
+                            <span className="text-neutral-500 uppercase font-black tracking-widest">Annotations</span>
+                            <span className="text-white font-mono">{(activeLayout.entities || []).length}</span>
+                        </div>
+                    </div>
+                  </PropertySection>
+
+                  <div className="py-20 px-8 flex flex-col items-center text-center opacity-40 grayscale">
+                      <Target size={32} className="text-neutral-700 mb-6" />
+                      <p className="text-[9px] text-neutral-600 font-black uppercase tracking-widest leading-relaxed">No entities selected for inspection.</p>
+                  </div>
               </div>
           ) : (
               <div className="flex flex-col py-20 px-8 items-center text-center">

@@ -173,9 +173,9 @@ const CalculatorPanel: React.FC<CalculatorPanelProps> = ({ onClose }) => {
                     <div className="space-y-3">
                         {/* Unit Type Selection */}
                         <div className="grid grid-cols-3 gap-1.5 bg-[#25252a] p-1.5 rounded-xl border border-white/10">
-                            {(['length', 'area', 'volume'] as UnitCategory[]).map(type => (
+                            {(['length', 'area', 'volume'] as UnitCategory[]).map((type, i) => (
                                 <button 
-                                    key={type}
+                                    key={`${type}-${i}`}
                                     onClick={() => setConvType(type)} 
                                     className={`flex flex-col items-center justify-center gap-1.5 py-2.5 rounded-lg transition-all duration-300 ${convType === type ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40 shadow-[0_0_15px_rgba(6,182,121,0.1)]' : 'text-neutral-500 hover:text-neutral-300 opacity-60'}`}
                                 >
@@ -208,7 +208,7 @@ const CalculatorPanel: React.FC<CalculatorPanelProps> = ({ onClose }) => {
                                             onChange={e => setFromUnit(e.target.value)} 
                                             className="w-full h-full bg-[#35353a] text-white text-[10px] font-black border border-white/10 rounded-lg outline-none cursor-pointer appearance-none px-3 pr-8 uppercase tracking-widest"
                                         >
-                                            {Object.keys(UNIT_DATA[convType]).map(u => <option key={u} value={u} className="bg-[#2a2a2e]">{u}</option>)}
+                                            {Object.keys(UNIT_DATA[convType]).map((u, i) => <option key={`from-${u}-${i}`} value={u} className="bg-[#2a2a2e]">{u}</option>)}
                                         </select>
                                         <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-cyan-400">
                                             <ChevronDown size={14} />
@@ -240,7 +240,7 @@ const CalculatorPanel: React.FC<CalculatorPanelProps> = ({ onClose }) => {
                                             onChange={e => setToUnit(e.target.value)} 
                                             className="w-full h-full bg-[#35353a] text-white text-[10px] font-black border border-white/10 rounded-lg outline-none cursor-pointer appearance-none px-3 pr-8 uppercase tracking-widest"
                                         >
-                                            {Object.keys(UNIT_DATA[convType]).map(u => <option key={u} value={u} className="bg-[#2a2a2e]">{u}</option>)}
+                                            {Object.keys(UNIT_DATA[convType]).map((u, i) => <option key={`to-${u}-${i}`} value={u} className="bg-[#2a2a2e]">{u}</option>)}
                                         </select>
                                         <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-cyan-400">
                                             <ChevronDown size={14} />

@@ -200,6 +200,7 @@ export interface LeaderShape extends BaseShape {
   y2: number;
   text: string;
   size: number;
+  arrowType?: 'closed' | 'open' | 'tick' | 'dot' | 'none';
 }
 
 export type HatchPattern = 'solid' | 'ansi31' | 'ansi32' | 'ansi33' | 'ansi37' | 'ansi38' | 'dots' | 'cross' | 'net' | 'honey' | 'clay' | 'cork' | 'grass' | 'gravel' | 'stars' | 'brick' | 'hound' | 'grid' | 'triang' | 'zigzag';
@@ -377,8 +378,11 @@ export interface AppSettings {
   precision: string;
   fillEnabled: boolean;
   gridSpacing: number; 
+  gridMajorInterval?: number;
   snapSpacing: number; 
   snapOptions: SnapOptions;
+  polarTrackingEnabled?: boolean;
+  polarAngles?: number[];
   showHUD: boolean; 
   showLineWeights: boolean;
   textSize: number;

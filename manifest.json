@@ -42,8 +42,8 @@
         "application/vnd.voxcadd.project": [".vox"],
         "application/dxf": [".dxf"],
         "application/dwg": [".dwg"],
-        "application/acad": [".dwg", ".dxf"],
-        "application/x-autocad": [".dwg", ".dxf"],
+        "application/vox": [".vox", ".dwg", ".dxf"],
+        "application/x-voxcad": [".vox", ".dwg", ".dxf"],
         "image/vnd.dwg": [".dwg"],
         "image/vnd.dxf": [".dxf"],
         "text/plain": [".vox", ".dxf"]

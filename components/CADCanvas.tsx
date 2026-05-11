@@ -1,7 +1,7 @@
 
 import React, { useRef, useEffect, useState, useCallback, useMemo, useImperativeHandle, forwardRef } from 'react';
 import { Shape, ViewState, AppSettings, SnapPoint, LayerConfig, Point, MTextShape, BlockDefinition, LayoutDefinition, LineTypeDefinition, LineType, CtbFile } from '../types';
-import { hitTestShape, findBestSnap, formatLength, formatDimensionValue, getShapesInRect, getShapeBounds, isRectIntersecting, formatDualLength, isShapeClosed, isPointInsideShape, getPolylineOffsetPoints, calculateShapeLength, distance, getAllShapesBounds } from '../services/cadService';
+import { hitTestShape, findBestSnap, formatLength, formatAngle, formatDimensionValue, calculateDimensionValue, getShapesInRect, getShapeBounds, isRectIntersecting, formatDualLength, isShapeClosed, isPointInsideShape, getPolylineOffsetPoints, calculateShapeLength, distance, getAllShapesBounds } from '../services/cadService';
 import { resolveShapeProperties, resolveColor, resolveLineWeight, resolveLineType } from '../services/propertyService';
 
 interface CADCanvasProps {
@@ -98,6 +98,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   const worldPointOnPinch = useRef<Point | null>(null);
   const lastClickTime = useRef<number>(0);
   const touchStartTime = useRef<number>(0);
+  const isModel = activeTab === 'model';
   const touchStartCount = useRef<number>(0);
 
   const getPixelRatio = () => window.devicePixelRatio || 1;
@@ -225,7 +226,11 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     const wp = screenToWorld(x, y);
     worldCursorRef.current = wp;
     const ts = view.scale * settings.drawingScale;
-    if (settings.snap && (activeTab === 'model' || isViewportActive)) {
+    
+    // SHIFT key temporarily overrides OSNAP setting
+    const osnapActive = shiftKey ? !settings.snap : settings.snap;
+    
+    if (osnapActive && (activeTab === 'model' || isViewportActive)) {
       const allRenderable = getAllShapesForRendering().filter(s => {
         const conf = layerConfig[s.layer];
         return conf ? conf.visible : true;
@@ -238,7 +243,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           tps.push({ x: basePoint.x, y: basePoint.y, type: 'polar' });
       }
 
-      const s = findBestSnap(wp, allRenderable, settings.snapOptions, ts, tps);
+      const s = findBestSnap(wp, allRenderable, settings.snapOptions, ts, tps, settings);
 
       // Acquire logic: if hover over a snap point for 600ms, add to tracking
       if (s && s.type !== 'polar' && s.type !== 'near') {
@@ -382,7 +387,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         const sMax = calculateScreenToWorld(w*r, h*r, view, w, h);
         
         let g = settings.gridSpacing;
-        const majorEvery = 5;
+        const majorEvery = settings.gridMajorInterval || 5;
         
         // Dynamic coarsening for "graph paper" feel and performance
         const ts_adj = ts;
@@ -603,13 +608,17 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     const screenPos = worldToScreen(targetWorldP.x, targetWorldP.y);
     
     ctx.save(); ctx.setTransform(r, 0, 0, r, 0, 0);
-    ctx.strokeStyle = isModel ? `rgba(255, 255, 255, 0.4)` : `rgba(0,0,0,0.4)`; 
-    ctx.lineWidth = 0.5; ctx.beginPath();
+    ctx.strokeStyle = isModel ? `rgba(255, 255, 255, 0.5)` : `rgba(0,0,0,0.5)`; 
+    ctx.lineWidth = 1.0; ctx.beginPath();
+    
+    // Crosshair lines
     ctx.moveTo(screenPos.x, 0); ctx.lineTo(screenPos.x, h);
     ctx.moveTo(0, screenPos.y); ctx.lineTo(w, screenPos.y);
     ctx.stroke();
+    
+    // Pickbox in center
     ctx.lineWidth = 1.0;
-    ctx.strokeRect(screenPos.x - 5, screenPos.y - 5, 10, 10);
+    ctx.strokeRect(screenPos.x - 6, screenPos.y - 6, 12, 12);
     
     if (settings.showHUD) {
         const text = `${formatLength(targetWorldP.x, settings)}, ${formatLength(targetWorldP.y, settings)}`;
@@ -643,6 +652,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         case 'rect': drawBox(s.x, s.y); drawBox(s.x+s.width, s.y); drawBox(s.x+s.width, s.y+s.height); drawBox(s.x, s.y+s.height); drawBox(s.x + s.width/2, s.y); drawBox(s.x + s.width, s.y + s.height/2); break;
         case 'pline': case 'polygon': case 'spline': s.points.forEach(p => drawBox(p.x, p.y)); break;
         case 'arc': drawBox(s.x, s.y); drawBox(s.x + s.radius * Math.cos(s.startAngle), s.y + s.radius * Math.sin(s.startAngle)); drawBox(s.x + s.radius * Math.cos(s.endAngle), s.y + s.radius * Math.sin(s.endAngle)); drawBox(s.x + s.radius * Math.cos((s.startAngle+s.endAngle)/2), s.y + s.radius * Math.sin((s.startAngle+s.endAngle)/2)); break;
+        case 'dimension': case 'leader': drawBox(s.x1, s.y1); drawBox(s.x2, s.y2); if (s.type === 'dimension') drawBox((s as any).dimX, (s as any).dimY); break;
     }
     ctx.restore();
   };
@@ -695,7 +705,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     if (!s.isPreview && conf && (!conf.visible || conf.frozen)) return;
     
     // LOD: Skip tiny text
-    if ((s.type === 'text' || s.type === 'mtext') && s.size * ts < 5) return;
+    if ((s.type === 'text' || s.type === 'mtext') && s.size * ts < 2) return;
 
     // Resolve properties correctly using the new property service
     const activeCtb = settings.activeCtbId && settings.ctbFiles ? settings.ctbFiles[settings.activeCtbId] : undefined;
@@ -723,8 +733,17 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
 
     let finalThickness = weight;
     if (settings.showLineWeights) {
-        // More professional weight mapping: 0.1mm -> ~1px, 0.5mm -> ~5px
-        finalThickness = weight * 6; // Adjusted multiplier
+        // Improved weight mapping for clearer display
+        // 0.00 treated as hairline (super thin)
+        // Others scaled using a more distinctive function
+        if (weight <= 0.001) {
+            finalThickness = 0.20; // Slightly thickened hairline for better visibility
+        } else {
+            // Smoother non-linear mapping
+            // weight 0.05 -> ~0.5
+            // weight 0.25 -> ~1.8
+            finalThickness = Math.pow(weight, 0.7) * 4.5 + 0.15;
+        }
     } else if (!isS && !isH && !s.isPreview) {
         finalThickness = 1.0;
     }
@@ -742,7 +761,9 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         ctx.strokeStyle = baseColor; 
         ctx.globalAlpha = resolved.opacity;
         if (conf?.locked) ctx.globalAlpha *= 0.45; 
-        ctx.lineWidth = Math.max(0.5/ts, finalThickness/ts); 
+        // Ensure even hairline is visible at any zoom
+        const minLw = (weight <= 0.001) ? 0.25/ts : 0.6/ts;
+        ctx.lineWidth = Math.max(minLw, finalThickness/ts); 
     }
     
     // Line Type implementation
@@ -943,6 +964,26 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
             .replace(/\{|}/g, '');
     };
 
+    const drawArrowhead = (size: number, type: string = 'closed') => {
+        ctx.save();
+        ctx.beginPath();
+        ctx.fillStyle = ctx.strokeStyle;
+        if (type === 'tick') {
+            ctx.moveTo(-size/2, -size/2); ctx.lineTo(size/2, size/2);
+            ctx.stroke();
+        } else if (type === 'dot') {
+            ctx.arc(0, 0, size/4, 0, Math.PI * 2); ctx.fill();
+        } else if (type === 'open') {
+            ctx.moveTo(size, size/3); ctx.lineTo(0, 0); ctx.lineTo(size, -size/3);
+            ctx.stroke();
+        } else {
+            ctx.moveTo(size, size/4); ctx.lineTo(0, 0); ctx.lineTo(size, -size/4); 
+            ctx.closePath(); 
+            ctx.fill();
+        }
+        ctx.restore();
+    };
+
     switch (s.type) {
       case 'line': 
         if (isSafe(s.x1) && isSafe(s.y1) && isSafe(s.x2) && isSafe(s.y2)) {
@@ -1028,55 +1069,66 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           };
           
           const arrowS = ds.arrowSize * (ds.arrowScale || 1.0);
-          const drawDimArrow = (size: number, type: string = 'closed') => {
-              if (type === 'tick') {
-                  ctx.moveTo(-size/2, -size/2); ctx.lineTo(size/2, size/2);
-              } else if (type === 'dot') {
-                  ctx.beginPath(); ctx.arc(0, 0, size/4, 0, Math.PI * 2); ctx.fill();
-              } else if (type === 'open') {
-                  ctx.moveTo(size, size/3); ctx.lineTo(0, 0); ctx.lineTo(size, -size/3);
-              } else {
-                  ctx.moveTo(size, size/4); ctx.lineTo(0, 0); ctx.lineTo(size, -size/4); ctx.closePath(); ctx.fill();
-              }
-          };
 
-          const measuredValue = s.dimType === 'radius' 
-              ? distance({ x: s.cx ?? s.x1, y: s.cy ?? s.y1 }, { x: s.x2, y: s.y2 }) 
-              : (s.dimType === 'diameter' 
-                  ? distance({ x: s.cx ?? s.x1, y: s.cy ?? s.y1 }, { x: s.x2, y: s.y2 }) * 2 
-                  : distance({ x: s.x1, y: s.y1 }, { x: s.x2, y: s.y2 }));
-          const dimText = (!s.text || s.text === '<>') ? formatDimensionValue(measuredValue, ds, settings) : processText(s.text);
+          const measuredValue = calculateDimensionValue(s, s.dimX, s.dimY);
+          const rawText = s.text || '<>';
+          const dimValueText = s.dimType === 'angular' ? formatAngle(measuredValue, settings) : formatDimensionValue(measuredValue, ds, settings);
+          const dimText = processText(rawText.replace('<>', dimValueText));
 
           if (s.dimType === 'radius' || s.dimType === 'diameter' || s.dimType === 'angular' || s.dimType === 'arc') {
               const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
               const angle = Math.atan2(dy, dx);
               
+              ctx.beginPath();
               ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2);
+              ctx.stroke();
               
               ctx.save();
               ctx.translate(s.x2, s.y2); ctx.rotate(angle + Math.PI);
-              drawDimArrow(arrowS, ds.arrowType);
+              drawArrowhead(arrowS, ds.arrowType);
               ctx.restore();
 
               if (s.dimType === 'diameter') {
                   ctx.save();
                   ctx.translate(s.x1 - dx, s.y1 - dy);
                   ctx.rotate(angle);
-                  drawDimArrow(arrowS, ds.arrowType);
+                  drawArrowhead(arrowS, ds.arrowType);
                   ctx.restore();
+                  ctx.beginPath();
                   ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x1 - dx, s.y1 - dy);
+                  ctx.stroke();
               }
 
               ctx.save();
-              const tx = (s.x1 + s.x2) / 2 + Math.cos(angle + Math.PI/2) * (ds.textOffset + ds.textSize/2);
-              const ty = (s.y1 + s.y2) / 2 + Math.sin(angle + Math.PI/2) * (ds.textOffset + ds.textSize/2);
+              // Calculate text position
+              let tx = (s.x1 + s.x2) / 2;
+              let ty = (s.y1 + s.y2) / 2;
+              if (s.dimType === 'diameter') {
+                  tx = s.x1; ty = s.y1;
+              }
+              
+              const offset = (ds.textPlacement === 'above' || ds.textPlacement === undefined) ? (ds.textOffset + ds.textSize/2) : 0;
+              tx += Math.cos(angle + Math.PI/2) * offset;
+              ty += Math.sin(angle + Math.PI/2) * offset;
+              
               ctx.translate(tx, ty);
               let tAngle = angle;
               if (tAngle > Math.PI/2) tAngle -= Math.PI;
               if (tAngle < -Math.PI/2) tAngle += Math.PI;
               ctx.rotate(tAngle); ctx.scale(1, -1);
-              ctx.font = `${ds.textSize}px monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-              ctx.fillStyle = ctx.strokeStyle; ctx.fillText(dimText, 0, 0);
+              ctx.font = `bold ${ds.textSize}px "JetBrains Mono", monospace`; 
+              ctx.textAlign = 'center'; 
+              ctx.textBaseline = 'middle';
+
+              // Text Background - "Cut" the line
+              const metrics = ctx.measureText(dimText);
+              const padX = ds.textSize * 0.4;
+              const padY = ds.textSize * 0.2;
+              ctx.fillStyle = isModel ? "#0a0a0c" : "#ffffff"; // Use correct background for masking
+              ctx.fillRect(-metrics.width/2 - padX, -ds.textSize/2 - padY, metrics.width + padX*2, ds.textSize + padY*2);
+
+              ctx.fillStyle = baseColor; 
+              ctx.fillText(dimText, 0, 0);
               ctx.restore();
               break;
           }
@@ -1084,11 +1136,15 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           if (s.dimType === 'ordinate') {
               const dx = Math.abs(s.x2 - s.x1), dy = Math.abs(s.y2 - s.y1);
               const isX = dx > dy;
+              ctx.beginPath();
               ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2);
+              ctx.stroke();
               ctx.save();
               ctx.translate(s.x2, s.y2); ctx.scale(1, -1);
-              ctx.font = `${ds.textSize}px monospace`; ctx.textAlign = isX ? 'left' : 'center'; ctx.textBaseline = isX ? 'middle' : 'bottom';
-              ctx.fillStyle = ctx.strokeStyle;
+              ctx.font = `bold ${ds.textSize}px "JetBrains Mono", monospace`; 
+              ctx.textAlign = (isX ? 'left' : 'center') as CanvasTextAlign; 
+              ctx.textBaseline = (isX ? 'middle' : 'bottom') as CanvasTextBaseline;
+              ctx.fillStyle = baseColor;
               ctx.fillText(dimText, isX ? ds.textOffset : 0, isX ? 0 : -ds.textOffset);
               ctx.restore();
               break;
@@ -1104,6 +1160,8 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
              if (vdx > vdy) { dx = 0; d_len = Math.abs(dy); } else { dy = 0; d_len = Math.abs(dx); }
           }
           
+          if (d_len === 0) break;
+
           const ux = dx / d_len, uy = dy / d_len;
           const nx = -uy, ny = ux;
           const vdx = s.dimX - s.x1, vdy = s.dimY - s.y1;
@@ -1117,23 +1175,24 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               else { px2 = s.x2 + nx * distFromLine; py2 = ex1y; }
           }
 
+          ctx.beginPath();
           ctx.moveTo(ex1x, ex1y); ctx.lineTo(px2, py2);
           ctx.moveTo(s.x1 + nx * ds.offsetLine * sign, s.y1 + ny * ds.offsetLine * sign);
           ctx.lineTo(ex1x + nx * ds.extendLine * sign, ex1y + ny * ds.extendLine * sign);
           ctx.moveTo(s.x2 + nx * ds.offsetLine * sign, s.y2 + ny * ds.offsetLine * sign);
           ctx.lineTo(px2 + nx * ds.extendLine * sign, py2 + ny * ds.extendLine * sign);
+          ctx.stroke();
 
           const angle = Math.atan2(py2 - ex1y, px2 - ex1x);
-          ctx.save(); ctx.translate(ex1x, ex1y); ctx.rotate(angle); drawDimArrow(arrowS, ds.arrowType); ctx.restore();
-          ctx.save(); ctx.translate(px2, py2); ctx.rotate(angle + Math.PI); drawDimArrow(arrowS, ds.arrowType); ctx.restore();
+          ctx.save(); ctx.translate(ex1x, ex1y); ctx.rotate(angle); drawArrowhead(arrowS, ds.arrowType); ctx.restore();
+          ctx.save(); ctx.translate(px2, py2); ctx.rotate(angle + Math.PI); drawArrowhead(arrowS, ds.arrowType); ctx.restore();
           
           ctx.save();
           let placementOffset = 0;
           if (ds.textPlacement === 'above') placementOffset = (ds.textOffset + ds.textSize/2);
           else if (ds.textPlacement === 'below') placementOffset = -(ds.textOffset + ds.textSize/2);
-          else placementOffset = (ds.textOffset + ds.textSize/2); // Default to centered above for now if not explicitly handled differently
+          else placementOffset = (ds.textOffset + ds.textSize/2); 
           
-          // Actually if centered, we might want it ON the line.
           if (ds.textPlacement === 'center') placementOffset = 0;
 
           const mx = (ex1x + px2) / 2 + nx * placementOffset * sign;
@@ -1143,16 +1202,20 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           if (tAngle > Math.PI/2) tAngle -= Math.PI;
           if (tAngle < -Math.PI/2) tAngle += Math.PI;
           ctx.rotate(tAngle); ctx.scale(1, -1);
-          ctx.font = `${ds.textSize}px monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.font = `bold ${ds.textSize}px "JetBrains Mono", monospace`; 
+          ctx.textAlign = 'center'; 
+          ctx.textBaseline = 'middle';
           
           if (ds.textPlacement === 'center') {
-              // Draw background to clear the line
               const metrics = ctx.measureText(dimText);
-              ctx.fillStyle = '#0d1117'; // Match canvas background if possible, or use a property
-              ctx.fillRect(-metrics.width/2 - 20, -ds.textSize/2 - 10, metrics.width + 40, ds.textSize + 20);
+              const padX = ds.textSize * 0.4;
+              const padY = ds.textSize * 0.2;
+              ctx.fillStyle = isModel ? "#0a0a0c" : "#ffffff";
+              ctx.fillRect(-metrics.width/2 - padX, -ds.textSize/2 - padY, metrics.width + padX*2, ds.textSize + padY*2);
           }
 
-          ctx.fillStyle = ctx.strokeStyle; ctx.fillText(dimText, 0, 0);
+          ctx.fillStyle = baseColor; 
+          ctx.fillText(dimText, 0, 0);
           ctx.restore();
           break;
       }
@@ -1249,15 +1312,22 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         }
         break;
       case 'leader': {
+          ctx.beginPath();
           ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2);
-          // Simple arrowhead
+          ctx.stroke();
+          
           const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
           const a = Math.atan2(dy, dx);
-          const size = 10 / ts;
-          ctx.moveTo(s.x1, s.y1);
-          ctx.lineTo(s.x1 + size * Math.cos(a + 0.5), s.y1 + size * Math.sin(a + 0.5));
-          ctx.moveTo(s.x1, s.y1);
-          ctx.lineTo(s.x1 + size * Math.cos(a - 0.5), s.y1 + size * Math.sin(a - 0.5));
+          
+          // Use dimStyle standard arrow size or a default if not defined
+          const ds = settings.dimStyles[settings.activeDimStyle] || settings.dimStyles['standard'] || { arrowSize: 200 };
+          const arrowS = ds.arrowSize * (ds.arrowScale || 1.0);
+          
+          ctx.save();
+          ctx.translate(s.x1, s.y1);
+          ctx.rotate(a);
+          drawArrowhead(arrowS, s.arrowType || 'closed');
+          ctx.restore();
           break;
       }
       case 'text':
@@ -1289,13 +1359,27 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
             'anton': 'Anton',
             'oswald': 'Oswald',
             'rubik': 'Rubik',
-            'pacifico': 'Pacifico'
+            'pacifico': 'Pacifico',
+            'poppins': 'Poppins',
+            'montserrat': 'Montserrat',
+            'roboto': 'Roboto',
+            'raleway': 'Raleway',
+            'lato': 'Lato',
+            'opensans': 'Open Sans',
+            'work-sans': 'Work Sans',
+            'space-grotesk': 'Space Grotesk',
+            'outfit': 'Outfit',
+            'syne': 'Syne',
+            'ibm-plex-sans': 'IBM Plex Sans',
+            'ibm-plex-mono': 'IBM Plex Mono',
+            'comfortaa': 'Comfortaa'
         };
         
         const rawFont = (s as any).fontFamily || 'monospace';
         const font = cadFontMap[rawFont.toLowerCase()] || rawFont;
+        const textSize = s.size || 2.5;
         
-        ctx.font=`${style} ${weight} ${s.size}px "${font}", monospace`; 
+        ctx.font=`${style} ${weight} ${textSize}px "${font}", monospace`; 
         ctx.fillStyle=ctx.strokeStyle; 
         
         const ap = (s as any).attachmentPoint || 1;
@@ -1310,36 +1394,44 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
 
         if (s.type === 'mtext') {
             const rawContent = processText(s.content);
+            const textSize = s.size || 2.5;
             let lines: string[] = [];
             
             if (s.width > 0) {
-                const words = rawContent.split(' ');
-                let currentLine = '';
-                words.forEach(word => {
-                    const testLine = currentLine + (currentLine ? ' ' : '') + word;
-                    if (ctx.measureText(testLine).width > s.width && currentLine) {
-                        lines.push(currentLine);
-                        currentLine = word;
-                    } else {
-                        currentLine = testLine;
+                const paragraphs = rawContent.split('\n');
+                paragraphs.forEach(para => {
+                    if (!para.trim() && paragraphs.length > 1) {
+                        lines.push('');
+                        return;
                     }
+                    const words = para.split(' ');
+                    let currentLine = '';
+                    words.forEach(word => {
+                        const testLine = currentLine + (currentLine ? ' ' : '') + word;
+                        if (ctx.measureText(testLine).width > s.width && currentLine) {
+                            lines.push(currentLine);
+                            currentLine = word;
+                        } else {
+                            currentLine = testLine;
+                        }
+                    });
+                    if (currentLine) lines.push(currentLine);
                 });
-                lines.push(currentLine);
             } else {
                 lines = rawContent.split('\n');
             }
 
             const lineSpacing = 1.25;
-            const totalH = lines.length * s.size * lineSpacing;
+            const totalH = lines.length * textSize * lineSpacing;
             const xOffset = (align.h === 'center' ? s.width/2 : align.h === 'right' ? s.width : 0);
             
             // Adjust start Y based on vertical alignment
             let yBase = 0;
-            if (align.v === 'middle') yBase = -totalH / 2 + s.size / 2;
-            else if (align.v === 'bottom') yBase = -totalH + s.size;
+            if (align.v === 'middle') yBase = -totalH / 2 + textSize / 2;
+            else if (align.v === 'bottom') yBase = -totalH + textSize;
             
             lines.forEach((line, i) => {
-                const ly = yBase + i * s.size * lineSpacing;
+                const ly = yBase + i * textSize * lineSpacing;
                 
                 if ((s as any).highlight) {
                     const tw = ctx.measureText(line).width;
@@ -1348,7 +1440,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                     else if (align.h === 'right') hx -= tw;
                     ctx.save();
                     ctx.fillStyle = 'rgba(0, 188, 212, 0.2)';
-                    ctx.fillRect(hx - 2, ly - s.size * 0.8, tw + 4, s.size * 1.1);
+                    ctx.fillRect(hx - 2, ly - textSize * 0.8, tw + 4, textSize * 1.1);
                     ctx.restore();
                 }
                 
@@ -1359,11 +1451,12 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                     let ux = xOffset;
                     if (align.h === 'center') ux -= tw/2;
                     else if (align.h === 'right') ux -= tw;
-                    ctx.fillRect(ux, ly + s.size * 0.1, tw, s.size/10);
+                    ctx.fillRect(ux, ly + textSize * 0.1, tw, textSize/10);
                 }
             });
         } else {
             const content = processText(s.content);
+            const textSize = s.size || 2.5;
             if ((s as any).highlight) {
                 const tw = ctx.measureText(content).width;
                 let hx = 0;
@@ -1371,7 +1464,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                 else if (align.h === 'right') hx -= tw;
                 ctx.save();
                 ctx.fillStyle = 'rgba(0, 188, 212, 0.2)';
-                ctx.fillRect(hx - 2, -s.size * 0.4, tw + 4, s.size * 0.8);
+                ctx.fillRect(hx - 2, -textSize * 0.4, tw + 4, textSize * 0.8);
                 ctx.restore();
             }
             ctx.fillText(content, 0, 0);
@@ -1380,7 +1473,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                 let ux = 0;
                 if (align.h === 'center') ux -= tw/2;
                 else if (align.h === 'right') ux -= tw;
-                ctx.fillRect(ux, s.size * 0.1, tw, s.size/10);
+                ctx.fillRect(ux, textSize * 0.1, tw, textSize/10);
             }
         }
         ctx.restore(); break;
@@ -1757,55 +1850,81 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   };
 
   const drawSnapMarker = (ctx: CanvasRenderingContext2D, snap: SnapPoint, ts: number) => {
-    ctx.save(); const { x, y, type } = snap, size = 10 / ts;
-    ctx.strokeStyle = "#00bcd4"; ctx.lineWidth = 2.5 / ts; ctx.beginPath();
+    ctx.save();
+    const { x, y, type } = snap;
+    const size = 12 / ts; 
+    ctx.strokeStyle = "#00f0ff"; 
+    ctx.lineWidth = 2.5 / ts;
+    ctx.beginPath();
+    
     switch (type) {
-      case 'end': ctx.rect(x-size, y-size, size*2, size*2); break;
-      case 'mid': ctx.moveTo(x, y-size); ctx.lineTo(x-size, y+size); ctx.lineTo(x+size, y+size); ctx.closePath(); break;
-      case 'cen': ctx.arc(x, y, size, 0, Math.PI*2); break;
-      case 'int': ctx.moveTo(x-size, y-size); ctx.lineTo(x+size, y+size); ctx.moveTo(x+size, y-size); ctx.lineTo(x-size, y+size); break;
-      case 'perp': ctx.moveTo(x-size, y); ctx.lineTo(x, y); ctx.lineTo(x, y-size); break;
-      case 'tan': 
-        ctx.arc(x, y, size, 0, Math.PI*2);
-        ctx.moveTo(x-size, y-size); ctx.lineTo(x+size, y-size);
+      case 'end':
+        ctx.rect(x - size, y - size, size * 2, size * 2);
+        break;
+      case 'mid':
+        ctx.moveTo(x, y - size);
+        ctx.lineTo(x - size, y + size);
+        ctx.lineTo(x + size, y + size);
+        ctx.closePath();
+        break;
+      case 'cen':
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        break;
+      case 'node':
+        ctx.moveTo(x - size, y - size); ctx.lineTo(x + size, y + size);
+        ctx.moveTo(x + size, y - size); ctx.lineTo(x - size, y + size);
+        ctx.stroke();
+        ctx.beginPath(); ctx.arc(x, y, size/2, 0, Math.PI * 2);
         break;
       case 'quad':
-        ctx.moveTo(x, y-size); ctx.lineTo(x+size, y); ctx.lineTo(x, y+size); ctx.lineTo(x-size, y); ctx.closePath();
-        ctx.stroke(); ctx.beginPath();
-        ctx.arc(x, y, size/2, 0, Math.PI*2);
+        ctx.moveTo(x, y - size); ctx.lineTo(x + size, y); ctx.lineTo(x, y + size); ctx.lineTo(x - size, y);
+        ctx.closePath();
         break;
-      case 'ext':
-        ctx.moveTo(x-size, y); ctx.lineTo(x+size, y);
-        ctx.moveTo(x, y-size); ctx.lineTo(x, y+size);
+      case 'int':
+        ctx.moveTo(x - size, y - size); ctx.lineTo(x + size, y + size);
+        ctx.moveTo(x + size, y - size); ctx.lineTo(x - size, y + size);
         break;
-      case 'par':
-        ctx.moveTo(x-size, y-size/2); ctx.lineTo(x+size, y-size/2);
-        ctx.moveTo(x-size, y+size/2); ctx.lineTo(x+size, y+size/2);
+      case 'perp':
+        ctx.moveTo(x - size, y); ctx.lineTo(x, y); ctx.lineTo(x, y - size);
+        ctx.moveTo(x - size, y - size); ctx.lineTo(x, y - size); ctx.lineTo(x, y);
         break;
       case 'gcen':
-        ctx.moveTo(x-size, y); ctx.lineTo(x+size, y);
-        ctx.moveTo(x, y-size); ctx.lineTo(x, y+size);
-        ctx.stroke(); ctx.beginPath();
-        ctx.arc(x, y, size/2, 0, Math.PI*2);
+        ctx.moveTo(x - size, y - size/2); ctx.lineTo(x, y - size); ctx.lineTo(x + size, y - size/2);
+        ctx.lineTo(x + size, y + size/2); ctx.lineTo(x, y + size); ctx.lineTo(x - size, y + size/2);
+        ctx.closePath();
         break;
       case 'appint':
-        ctx.moveTo(x-size, y-size); ctx.lineTo(x+size, y+size);
-        ctx.moveTo(x+size, y-size); ctx.lineTo(x-size, y+size);
-        ctx.stroke(); ctx.beginPath();
-        ctx.rect(x-size/2, y-size/2, size, size);
+        ctx.moveTo(x - size, y - size); ctx.lineTo(x + size, y + size);
+        ctx.moveTo(x + size, y - size); ctx.lineTo(x - size, y + size);
+        ctx.setLineDash([2/ts, 2/ts]);
+        ctx.stroke();
+        ctx.setLineDash([]);
         break;
-      case 'near': 
-        ctx.moveTo(x, y-size); ctx.lineTo(x+size, y); ctx.lineTo(x, y+size); ctx.lineTo(x-size, y); ctx.closePath();
+      case 'tan':
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x - size, y - size); ctx.lineTo(x + size, y - size);
+        break;
+      case 'near':
+        ctx.moveTo(x, y - size); ctx.lineTo(x + size, y); ctx.lineTo(x, y + size); ctx.lineTo(x - size, y);
+        ctx.closePath();
+        break;
+      case 'ext':
+        ctx.setLineDash([2/ts, 2/ts]);
+        ctx.moveTo(x - size, y); ctx.lineTo(x + size, y);
+        ctx.moveTo(x, y - size); ctx.lineTo(x, y + size);
         break;
       case 'polar':
-        // X with circle for polar
-        ctx.moveTo(x-size, y-size); ctx.lineTo(x+size, y+size);
-        ctx.moveTo(x+size, y-size); ctx.lineTo(x-size, y+size);
+        ctx.moveTo(x - size, y - size); ctx.lineTo(x + size, y + size);
+        ctx.moveTo(x + size, y - size); ctx.lineTo(x - size, y + size);
         ctx.stroke(); ctx.beginPath();
-        ctx.arc(x, y, size/2, 0, Math.PI*2);
+        ctx.arc(x, y, size/2, 0, Math.PI * 2);
         break;
+      default:
+        ctx.rect(x - size, y - size, size * 2, size * 2);
     }
-    ctx.stroke(); ctx.restore();
+    ctx.stroke();
+    ctx.restore();
   };
 
   const selectionTimer = useRef<NodeJS.Timeout | null>(null);
@@ -1896,7 +2015,13 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       const now = Date.now();
       // Only handle double-tap for single pointer to avoid blocking pinch
       if (count === 1 && now - lastClickTime.current < 300) { 
-          if (activeTab !== 'model' && onViewportToggle) onViewportToggle(x, y); 
+          if (isCommandActive && onAction) {
+              onAction('enter');
+          } else if (activeTab !== 'model' && onViewportToggle) {
+              onViewportToggle(x, y); 
+          } else if (activeTab === 'model') {
+              onAction?.('zoomExtents');
+          }
           return; 
       }
       lastClickTime.current = now;
@@ -1905,7 +2030,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         if (e.button === 1 || e.button === 2 || activeCommandName === 'PAN') {
             setIsPanning(true);
         } else if (e.button === 0) {
-            if (activeCommandName === 'SPLINE' || activeCommandName === 'SKETCH' || activeCommandName === 'ZOOM') {
+            if (activeCommandName === 'ZOOM') {
                 const wp = screenToWorld(x, y);
                 if (onClick) onClick(wp.x, wp.y, !!activeSnapRef.current, e.shiftKey);
             }

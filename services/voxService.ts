@@ -84,6 +84,9 @@ export const voxToProject = (voxString: string): VoxProject | null => {
     
     if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
       jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
+    } else {
+      // If it doesn't look like a JSON object, don't even try to parse it
+      return null;
     }
 
     const vox: any = JSON.parse(jsonStr);

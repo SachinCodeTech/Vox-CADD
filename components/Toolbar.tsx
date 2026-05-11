@@ -98,8 +98,10 @@ const ToolCircleBtn: React.FC<{
 
 const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settings, activePanel, onSettingChange, canUndo, canRedo, activeCommandName, showCircleOptions, showArcOptions, showEllipseOptions }) => {
   const [dimFlyoutOpen, setDimFlyoutOpen] = useState(false);
+  const [leaderFlyoutOpen, setLeaderFlyoutOpen] = useState(false);
 
     const btnRef = React.useRef<HTMLDivElement>(null);
+    const leaderBtnRef = React.useRef<HTMLDivElement>(null);
     const [flyoutPos, setFlyoutPos] = useState({ x: 0, y: 0 });
 
     const toggleFlyout = () => {
@@ -108,6 +110,14 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
             setFlyoutPos({ x: rect.left, y: rect.top });
         }
         setDimFlyoutOpen(!dimFlyoutOpen);
+    };
+
+    const toggleLeaderFlyout = () => {
+        if (!leaderFlyoutOpen && leaderBtnRef.current) {
+            const rect = leaderBtnRef.current.getBoundingClientRect();
+            setFlyoutPos({ x: rect.left, y: rect.top });
+        }
+        setLeaderFlyoutOpen(!leaderFlyoutOpen);
     };
 
   const renderContent = () => {
@@ -224,7 +234,43 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
                     </>
                 )}
             </div>
-            <ToolCircleBtn onClick={() => onCommand('lea')} icon={<Navigation className="rotate-[-135deg]" />} label="LEADER" active={activeCommandName === 'LEADER'} />
+            <div className="relative shrink-0" ref={leaderBtnRef}>
+                <ToolCircleBtn 
+                    onClick={() => { if (leaderFlyoutOpen) setLeaderFlyoutOpen(false); else onCommand('lea'); }} 
+                    onLongPress={toggleLeaderFlyout}
+                    icon={<div className="relative"><Navigation className="rotate-[-135deg]" />{leaderFlyoutOpen && <div className="absolute -bottom-1 -right-1 bg-cyan-500 rounded-full w-2 h-2" />}</div>} 
+                    label="LEADER"
+                    active={activeCommandName === 'LEADER'} 
+                />
+                {leaderFlyoutOpen && (
+                    <>
+                    <div className="fixed inset-0 z-[1050]" onClick={() => setLeaderFlyoutOpen(false)} />
+                    <div 
+                        className="fixed bg-[#0a0a0c]/98 backdrop-blur-2xl border border-white/10 rounded-2xl p-2 flex flex-col gap-1 shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[1100] animate-in zoom-in-95 fade-in slide-in-from-bottom-4 duration-200 min-w-[180px]"
+                        style={{ 
+                            left: Math.max(10, Math.min(flyoutPos.x - 90, window.innerWidth - 190)), 
+                            bottom: (window.innerHeight - flyoutPos.y) + 8
+                        }}
+                    >
+                        <div className="px-3 py-1.5 border-b border-white/5 mb-1 text-center">
+                            <div className="text-[7.5px] font-black uppercase text-cyan-500 tracking-widest">Leader Arrowheads</div>
+                        </div>
+                        <button onClick={() => { onCommand('lea:closed'); setLeaderFlyoutOpen(false); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+                            <div className="w-4 h-4 bg-white/20 rounded-sm flex items-center justify-center"><Navigation className="rotate-[-135deg] scale-75" /></div> Closed Filled
+                        </button>
+                        <button onClick={() => { onCommand('lea:open'); setLeaderFlyoutOpen(false); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+                            <div className="w-4 h-4 border border-white/40 rounded-sm flex items-center justify-center"><ArrowUpRight className="scale-75" /></div> Open Arrow
+                        </button>
+                        <button onClick={() => { onCommand('lea:tick'); setLeaderFlyoutOpen(false); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+                            <div className="w-4 h-4 border border-white/40 rounded-sm flex items-center justify-center"><Dot className="scale-75 opacity-50 rotate-45" /></div> Architectural Tick
+                        </button>
+                        <button onClick={() => { onCommand('lea:dot'); setLeaderFlyoutOpen(false); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+                            <div className="w-4 h-4 bg-white/20 rounded-full flex items-center justify-center"></div> Small Dot
+                        </button>
+                    </div>
+                    </>
+                )}
+            </div>
             <ToolCircleBtn onClick={() => onCommand('dist')} icon={<Target />} label="DIST" active={activeCommandName === 'DIST'} />
             <ToolCircleBtn onClick={() => onCommand('area')} icon={<BoxSelect />} label="AREA" active={activeCommandName === 'AREA'} />
             <ToolCircleBtn onClick={() => onCommand('h')} icon={<Grid3X3 />} label="HATCH" active={activeCommandName === 'HATCH'} />

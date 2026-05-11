@@ -12,6 +12,8 @@ import CalculatorPanel from './CalculatorPanel';
 import DraftingSettings from './DraftingSettings';
 import DrawingProperties from './DrawingProperties';
 import InfoPanel from './InfoPanel';
+import GlobalCommandPalette from './GlobalCommandPalette';
+import { COMMAND_LIST } from './CommandBar';
 import NewFileDialog from './NewFileDialog';
 import HatchPatternSelector from './HatchPatternSelector';
 import LineTypeManager from './LineTypeManager';
@@ -34,7 +36,7 @@ import {
   ArcCommand, MoveCommand, EraseCommand, DistanceCommand, AreaCommand, 
   DimensionCommand, TextCommand, MTextCommand, ZoomCommand, ZoomRealTimeCommand, 
   RotateCommand, ScaleCommand, MirrorCommand, CopyCommand,
-  ExtendCommand, ExplodeCommand,
+  ExtendCommand, ExplodeCommand, JoinCommand, BreakCommand, BreakAtPointCommand,
   RayCommand, XLineCommand,
   HatchCommand, LeaderCommand, PanCommand, OffsetCommand, TrimCommand, FilletCommand, ChamferCommand, EllipseCommand, PolygonCommand, MatchPropertiesCommand,
   DonutCommand, PointCommand,
@@ -49,9 +51,9 @@ import ImportSummaryDialog from './ImportSummaryDialog';
 import { storageService } from '../services/storageService';
 import { trackFileMetadata, syncUserMetadata, onAuthChange, logAppEvent } from '../services/firebaseService';
 
-import { createAcadCtb, createDefaultCtb } from '../services/ctbService';
+import { createVoxCtb, createDefaultCtb } from '../services/ctbService';
 
-const acadCtb = createAcadCtb();
+const voxCtb = createVoxCtb();
 const monoCtb = createDefaultCtb();
 
 const INITIAL_SETTINGS: AppSettings = {
@@ -63,7 +65,11 @@ const INITIAL_SETTINGS: AppSettings = {
   linearFormat: 'decimal', angularFormat: 'decimalDegrees', anglePrecision: '0', 
   precision: '0.0000',
   fillEnabled: false,
-  gridSpacing: 100, snapSpacing: 10,
+  gridSpacing: 100, 
+  gridMajorInterval: 5,
+  snapSpacing: 10,
+  polarTrackingEnabled: true,
+  polarAngles: [90, 45, 30],
   snapOptions: { 
     endpoint: true, midpoint: true, center: true, intersection: true, 
     nearest: false, quadrant: true, perpendicular: true, tangent: true,
@@ -79,7 +85,9 @@ const INITIAL_SETTINGS: AppSettings = {
     'standard': { 
       id: 'standard', name: 'Standard', 
       arrowSize: 200, textSize: 250, textOffset: 100, 
-      extendLine: 150, offsetLine: 100, precision: 2 
+      extendLine: 150, offsetLine: 100, precision: 4,
+      textPlacement: 'above',
+      arrowType: 'closed'
     },
     'architectural': { 
       id: 'architectural', name: 'Architectural', 
@@ -98,9 +106,9 @@ const INITIAL_SETTINGS: AppSettings = {
     projectRevision: 'V-1.0',
     description: ''
   },
-  activeCtbId: 'acad',
+  activeCtbId: 'vox',
   ctbFiles: {
-    'acad': acadCtb,
+    'vox': voxCtb,
     'monochrome': monoCtb
   }
 };
@@ -202,6 +210,17 @@ const App: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [logMessage]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsCommandPaletteOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const [loadingFile, setLoadingFile] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState<string>("");
@@ -373,6 +392,7 @@ const App: React.FC = () => {
   const [showEllipseOptions, setShowEllipseOptions] = useState(false);
   const [fileHandle, setFileHandle] = useState<any>(null);
   const [activePanel, setActivePanel] = useState<PanelType>('none');
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [previewShapes, setPreviewShapes] = useState<Shape[] | null>(null);
   const [mtextEditor, setMtextEditor] = useState<{ 
     initialValue: string, 
@@ -486,21 +506,21 @@ const App: React.FC = () => {
     const layout = layouts.find(l => l.id === id);
     if (!layout) return;
     
-    // For properties, we'll just use a double prompt pattern for now with the new dialog
+    // As per user request: ask for height and width
     setPromptDialog({
-      title: 'Paper Width (mm)',
-      message: 'Enter paper width in millimeters:',
-      initialValue: layout.paperSize.width.toString(),
+      title: 'Paper Height (mm)',
+      message: 'Enter paper height in millimeters (e.g. 210 for A4):',
+      initialValue: layout.paperSize.height.toString(),
       type: 'prompt',
-      onConfirm: (width) => {
-        if (!width) return;
+      onConfirm: (height) => {
+        if (!height || isNaN(parseFloat(height))) return;
         setPromptDialog({
-          title: 'Paper Height (mm)',
-          message: 'Enter paper height in millimeters:',
-          initialValue: layout.paperSize.height.toString(),
+          title: 'Paper Width (mm)',
+          message: 'Enter paper width in millimeters (e.g. 297 for A4):',
+          initialValue: layout.paperSize.width.toString(),
           type: 'prompt',
-          onConfirm: (height) => {
-            if (height) {
+          onConfirm: (width) => {
+            if (width && !isNaN(parseFloat(width))) {
               setLayouts(prev => prev.map(l => l.id === id ? { ...l, paperSize: { width: parseFloat(width), height: parseFloat(height) } } : l));
               setLogMessage("LAYOUT_PROPERTIES_UPDATED");
             }
@@ -831,6 +851,10 @@ const App: React.FC = () => {
                 return;
             }
             project = voxToProject(content);
+            // Fallback for DXF-formatted .vox files (legacy or renamed)
+            if (!project && (content.trim().startsWith('999') || content.includes('SECTION'))) {
+                project = await dxfToProject(content, settingsRef.current);
+            }
         }
 
         if (project) {
@@ -1208,23 +1232,35 @@ const App: React.FC = () => {
         openInput.click();
         break;
       case 'rename': {
-        const oldName = currentFileName;
-        let newName = payload;
-        if (newName && !newName.toLowerCase().endsWith('.vox') && !newName.toLowerCase().endsWith('.dxf')) {
-          newName += '.vox';
-        }
-        if (!newName || oldName === newName) return;
+        const targetName = payload || currentFileName;
+        setPromptDialog({
+          title: 'Rename Drawing',
+          message: `Enter new name for "${targetName}":`,
+          initialValue: targetName.replace(/\.(vox|dxf)$/i, ''),
+          type: 'prompt',
+          onConfirm: async (newName) => {
+            if (!newName || newName === targetName.replace(/\.(vox|dxf)$/i, '')) return;
+            
+            const ext = targetName.split('.').pop() || 'vox';
+            const finalNewName = newName.toLowerCase().endsWith(`.${ext}`) ? newName : `${newName}.${ext}`;
 
-        // Migrate storage via IndexedDB
-        storageService.renameLarge(`${STORAGE_PREFIX}${oldName}`, `${STORAGE_PREFIX}${newName}`);
-        
-        // Update registry
-        const updatedRecent = recentFiles.map(f => f.name === oldName ? { ...f, name: newName } : f);
-        setRecentFiles(updatedRecent);
-        localStorage.setItem(REGISTRY_KEY, JSON.stringify(updatedRecent));
+            // Migrate storage via IndexedDB
+            await storageService.renameLarge(`${STORAGE_PREFIX}${targetName}`, `${STORAGE_PREFIX}${finalNewName}`);
+            
+            // Update registry
+            setRecentFiles(prev => {
+              const updated = prev.map(f => f.name === targetName ? { ...f, name: finalNewName } : f);
+              localStorage.setItem(REGISTRY_KEY, JSON.stringify(updated));
+              return updated;
+            });
 
-        setCurrentFileName(newName);
-        setLogMessage(`RENAMED_TO: ${newName}`);
+            if (targetName === currentFileName) {
+              setCurrentFileName(finalNewName);
+            }
+            
+            setLogMessage(`SUCCESS: RENAMED TO ${finalNewName.toUpperCase()}`);
+          }
+        });
         break;
       }
       case 'deleteRecent': {
@@ -1771,6 +1807,8 @@ const App: React.FC = () => {
       'ro': RotateCommand, 'rotate': RotateCommand, 'sc': ScaleCommand, 'scale': ScaleCommand,
       'mi': MirrorCommand, 'mirror': MirrorCommand, 'co': CopyCommand, 'copy': CopyCommand,
       'ex': ExtendCommand, 'extend': ExtendCommand, 'x': ExplodeCommand, 'explode': ExplodeCommand,
+      'j': JoinCommand, 'join': JoinCommand, 'br': BreakCommand, 'break': BreakCommand,
+      'brp': BreakAtPointCommand, 'breakatpoint': BreakAtPointCommand,
       'f': FilletCommand, 'fillet': FilletCommand,
       'cha': ChamferCommand, 'chamfer': ChamferCommand,
       'ray': RayCommand, 'xl': XLineCommand, 'xline': XLineCommand,
@@ -1783,8 +1821,8 @@ const App: React.FC = () => {
     };
     
     const CommandClass = commandMap[cmdKey];
-      if (CommandClass) {
-        setLastCommandName(cmdKey);
+    if (CommandClass && typeof CommandClass === 'function' && Object.prototype.hasOwnProperty.call(commandMap, cmdKey)) {
+      setLastCommandName(cmdKey);
         
         // Command UI State Normalization
         const statusMap: Record<string, string> = {
@@ -1809,6 +1847,9 @@ const App: React.FC = () => {
             's': 'STRETCH', 'stretch': 'STRETCH',
             'tr': 'TRIM', 'trim': 'TRIM',
             'ex': 'EXTEND', 'extend': 'EXTEND',
+            'j': 'JOIN', 'join': 'JOIN',
+            'br': 'BREAK', 'break': 'BREAK',
+            'brp': 'BREAKATPOINT', 'breakatpoint': 'BREAKATPOINT',
             'x': 'EXPLODE', 'explode': 'EXPLODE',
             'o': 'OFFSET', 'offset': 'OFFSET',
             'f': 'FILLET', 'fillet': 'FILLET',
@@ -1880,6 +1921,10 @@ const App: React.FC = () => {
       else if (cmdKey === 'zr') cmd = new ZoomRealTimeCommand(engineRef.current!.ctx);
       else if (cmdKey === 'zi') cmd = new ZoomCommand(engineRef.current!.ctx, 'in');
       else if (cmdKey === 'zo') cmd = new ZoomCommand(engineRef.current!.ctx, 'out');
+      else if (cmdKey === 'lea:closed') cmd = new LeaderCommand(engineRef.current!.ctx, 'closed');
+      else if (cmdKey === 'lea:open') cmd = new LeaderCommand(engineRef.current!.ctx, 'open');
+      else if (cmdKey === 'lea:tick') cmd = new LeaderCommand(engineRef.current!.ctx, 'tick');
+      else if (cmdKey === 'lea:dot') cmd = new LeaderCommand(engineRef.current!.ctx, 'dot');
       else cmd = new CommandClass(engineRef.current!.ctx);
       
       setActiveCommandName(cmd.name);
@@ -1954,6 +1999,7 @@ const App: React.FC = () => {
           return next;
         }),
         getActiveTab: () => activeTabRef.current,
+        isCommandActive: isCommandActive,
         start: (cmd: CADCommand) => { setActiveCommandName(cmd.name); engineRef.current?.start(cmd); },
         onExternalRequest: (type, data, cb: (res: any, props?: any) => void) => {
             if (type === 'set_active_tab') {
@@ -2095,7 +2141,7 @@ const App: React.FC = () => {
     // If no command is active and we have a selection, check for grips first
     if (engineRef.current && !engineRef.current.active && selectedIds.length > 0) {
         const ts = view.scale * settings.drawingScale;
-        const threshold = 12 / ts;
+        const threshold = 16 / ts; // Increased for better pro-tool feel and touch response
         const allShapes = Object.values(layers).flat() as Shape[];
         const selectedShapes = allShapes.filter(s => selectedIds.includes(s.id));
         
@@ -2149,12 +2195,13 @@ const App: React.FC = () => {
       <AnimatePresence mode="wait">
         {isAppLoading && (
           <LoadingScreen 
-            key="loading"
+            key="app-loading-screen"
             onComplete={() => setIsAppLoading(false)} 
           />
         )}
       </AnimatePresence>
-<header className="h-10 flex items-center justify-between px-4 shrink-0 bg-black border-b border-white/5 z-[110]">
+
+      <header className="h-10 flex items-center justify-between px-4 shrink-0 bg-black border-b border-white/5 z-[110]">
         <div className="flex items-center gap-3 shrink-0">
           <VoxIcon size={22} className="text-cyan-400" />
           <div className="flex items-center gap-2">
@@ -2162,7 +2209,6 @@ const App: React.FC = () => {
               <span className="font-black text-[15px] uppercase tracking-tighter text-white">VOX</span>
               <span className="font-normal text-[15px] uppercase tracking-tighter text-cyan-500">CADD</span>
             </div>
-            <div className="text-[7px] font-black text-neutral-600 uppercase tracking-[0.2em] bg-white/5 px-1.5 py-0.5 rounded-sm border border-white/5">V-1.0.1</div>
           </div>
         </div>
 
@@ -2339,6 +2385,7 @@ const App: React.FC = () => {
             onViewportToggle={handleViewportToggle} 
             onClick={onCanvasClick} 
             onMouseMove={(x,y,s,shift) => { if(engineRef.current) engineRef.current.move({x,y}, s, shift); }} 
+            onAction={handleAction}
             selectedIds={selectedIds} 
             onSelectionChange={(ids, additive) => {
               if (additive) {
@@ -2386,14 +2433,15 @@ const App: React.FC = () => {
         </div>
 
         <div className="absolute right-3 top-3 flex flex-col gap-2 z-10">
-          {sidebarButtons.map(p => (
-            <button key={p.id} onClick={() => { if(navigator.vibrate) navigator.vibrate(5); handleAction(p.action); }} className={`w-9 h-9 rounded-full flex items-center justify-center transition-all border no-tap ${activePanel === p.activeOn ? 'bg-[#00bcd4] text-black border-[#00bcd4]' : 'bg-black/60 backdrop-blur-sm border-white/10 text-neutral-400 hover:text-[#00bcd4] hover:border-[#00bcd4] hover:bg-[#00bcd4]/5'}`}><p.icon size={16} /></button>
+          {sidebarButtons.map((p, index) => (
+            <button key={`${p.id}-${index}`} onClick={() => { if(navigator.vibrate) navigator.vibrate(5); handleAction(p.action); }} className={`w-9 h-9 rounded-full flex items-center justify-center transition-all border no-tap ${activePanel === p.activeOn ? 'bg-[#00bcd4] text-black border-[#00bcd4]' : 'bg-black/60 backdrop-blur-sm border-white/10 text-neutral-400 hover:text-[#00bcd4] hover:border-[#00bcd4] hover:bg-[#00bcd4]/5'}`}><p.icon size={16} /></button>
           ))}
         </div>
 
         <AnimatePresence>
           {activePanel === 'layers' && (
             <motion.div 
+              key="panel-layers-overlay"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -2469,6 +2517,7 @@ const App: React.FC = () => {
 
           {activePanel === 'properties' && (
              <motion.div 
+               key="panel-properties-overlay"
                initial={{ opacity: 0 }}
                animate={{ opacity: 1 }}
                exit={{ opacity: 0 }}
@@ -2490,6 +2539,8 @@ const App: React.FC = () => {
                     onCommand={executeCommand} 
                     onClose={() => setActivePanel('none')} 
                     onOpenColorSelector={(currentColor, onSelect, title) => setColorSelector({ currentColor, onSelect, title })}
+                    activeLayout={activeTab !== 'model' ? layouts.find(l => l.id === activeTab) : undefined}
+                    onUpdateLayout={(id, upd) => setLayouts(prev => prev.map(l => l.id === id ? { ...l, ...upd } : l))}
                   />
                 </motion.div>
              </motion.div>
@@ -2497,6 +2548,7 @@ const App: React.FC = () => {
 
           {activePanel === 'calculator' && (
             <motion.div 
+              key="panel-calculator-overlay"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -2515,6 +2567,7 @@ const App: React.FC = () => {
 
           {activePanel === 'ctb' && (
             <motion.div 
+              key="panel-ctb-overlay"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -2539,6 +2592,7 @@ const App: React.FC = () => {
 
           {colorSelector && (
             <ColorSelector 
+              key="panel-color-selector"
               isOpen={true}
               title={colorSelector.title}
               currentColor={colorSelector.currentColor}
@@ -2549,6 +2603,7 @@ const App: React.FC = () => {
 
           {activePanel === 'drafting' && (
             <motion.div 
+              key="panel-drafting-overlay"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -2567,6 +2622,7 @@ const App: React.FC = () => {
 
           {activePanel === 'file' && (
             <motion.div 
+              key="panel-file-overlay"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -2585,6 +2641,7 @@ const App: React.FC = () => {
 
           {activePanel === 'drawing_props' && (
             <motion.div 
+              key="panel-props-overlay"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -2617,6 +2674,7 @@ const App: React.FC = () => {
 
           {activePanel === 'help' && (
             <motion.div 
+              key="panel-help-overlay"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -2635,6 +2693,7 @@ const App: React.FC = () => {
 
           {activePanel === 'about' && (
             <motion.div 
+              key="panel-about-overlay"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -2653,6 +2712,7 @@ const App: React.FC = () => {
 
           {activePanel === 'privacy' && (
             <motion.div 
+              key="panel-privacy-overlay"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -2671,6 +2731,7 @@ const App: React.FC = () => {
 
           {activePanel === 'new_file' && (
             <motion.div 
+              key="panel-new-overlay"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -2706,6 +2767,7 @@ const App: React.FC = () => {
 
           {activePanel === 'linetypes' && (
             <motion.div 
+              key="panel-linetypes-overlay"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -2735,6 +2797,7 @@ const App: React.FC = () => {
 
           {activePanel === 'dimstyle' && (
             <motion.div 
+              key="panel-dimstyle-overlay"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -2753,6 +2816,7 @@ const App: React.FC = () => {
 
           {activePanel === 'mainmenu' && (
             <motion.div 
+              key="panel-main-menu"
               initial={{ y: '-100%', opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: '-100%', opacity: 0 }}
@@ -2829,10 +2893,37 @@ const App: React.FC = () => {
           <button 
             onClick={() => {
               const id = 'layout' + Date.now() + Math.random().toString(36).substr(2, 5);
-              const newLayout = { id, name: 'Layout ' + (layouts.length + 1), paperSize: { width: 297, height: 210 }, viewports: [] };
-              setLayouts([...layouts, newLayout]);
-              setTabViews(prev => ({ ...prev, [id]: { scale: 3, originX: 0, originY: 0 } }));
-              setActiveTab(id);
+              const defaultName = 'Layout ' + (layouts.length + 1);
+              
+              setPromptDialog({
+                title: 'New Layout: Height (mm)',
+                message: 'Enter paper height for the new layout:',
+                initialValue: '210',
+                type: 'prompt',
+                onConfirm: (height) => {
+                  if (!height || isNaN(parseFloat(height))) return;
+                  setPromptDialog({
+                    title: 'New Layout: Width (mm)',
+                    message: 'Enter paper width for the new layout:',
+                    initialValue: '297',
+                    type: 'prompt',
+                    onConfirm: (width) => {
+                      if (width && !isNaN(parseFloat(width))) {
+                        const newLayout = { 
+                          id, 
+                          name: defaultName, 
+                          paperSize: { width: parseFloat(width), height: parseFloat(height) }, 
+                          viewports: [] 
+                        };
+                        setLayouts(prev => [...prev, newLayout]);
+                        setTabViews(prev => ({ ...prev, [id]: { scale: 3, originX: 0, originY: 0 } }));
+                        setActiveTab(id);
+                        setLogMessage(`LAYOUT_CREATED: ${defaultName} (${width}x${height})`);
+                      }
+                    }
+                  });
+                }
+              });
             }}
             className="h-full px-1.5 text-neutral-500 hover:text-[#00bcd4] transition-all flex items-center border-x border-white/5"
             title="New Layout"
@@ -3114,6 +3205,14 @@ const App: React.FC = () => {
           onChange={setCommandInput} 
         />
       </footer>
+      
+      <GlobalCommandPalette 
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        onSelect={(cmd) => executeCommand(cmd)}
+        commands={COMMAND_LIST}
+      />
+
       <AnimatePresence>
         {loadingFile && (
           <motion.div 
@@ -3178,8 +3277,10 @@ const App: React.FC = () => {
                   onChange={(e) => setPromptValue(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
-                       promptDialog.onConfirm(promptValue);
+                       const val = promptValue;
+                       const cb = promptDialog.onConfirm;
                        setPromptDialog(null);
+                       cb(val);
                     } else if (e.key === 'Escape') {
                        setPromptDialog(null);
                     }
@@ -3193,10 +3294,12 @@ const App: React.FC = () => {
               <div className="flex gap-3">
                  <button onClick={() => setPromptDialog(null)} className="flex-1 py-3 rounded-xl bg-white/5 text-neutral-400 text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-all active:scale-95">Cancel</button>
                  <button 
-                   onClick={() => {
-                     promptDialog.onConfirm(promptValue);
-                     setPromptDialog(null);
-                   }} 
+                                       onClick={() => {
+                      const val = promptValue;
+                      const cb = promptDialog.onConfirm;
+                      setPromptDialog(null);
+                      cb(val);
+                    }} 
                    className="flex-1 py-3 rounded-xl bg-cyan-500 text-black text-[9px] font-black uppercase tracking-widest hover:bg-cyan-400 transition-all active:scale-95"
                  >
                    {promptDialog.type === 'confirm' ? 'Confirm Action' : 'Confirm'}

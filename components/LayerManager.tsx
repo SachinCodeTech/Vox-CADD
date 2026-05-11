@@ -17,7 +17,7 @@ interface LayerManagerProps {
 }
 
 const LINE_WEIGHTS = [
-    "DEFAULT", "0.00", "0.05", "0.09", "0.13", "0.15", "0.18", "0.20", "0.25",
+    "DEFAULT", "0.00 (Hairline)", "0.05", "0.09", "0.13", "0.15", "0.18", "0.20", "0.25",
     "0.30", "0.35", "0.40", "0.50", "0.60", "0.70", "0.80", "1.00", "1.40", "2.00", "2.11"
 ];
 
@@ -169,18 +169,18 @@ const LayerManager: React.FC<LayerManagerProps> = ({
         <button onClick={onClose} className="w-8 h-8 sm:w-6 sm:h-6 flex items-center justify-center hover:bg-white/5 rounded-full text-neutral-600 hover:text-white transition-all"><X size={18} /></button>
       </div>
 
-      <div className="flex-1 overflow-auto bg-[#0a0a0c] scrollbar-thin">
-        <div className="min-w-[800px] sm:min-w-[760px] flex flex-col h-full"> 
+      <div className="flex-1 overflow-auto bg-[#0a0a0c] scrollbar-none">
+        <div className="min-w-[760px] flex flex-col h-full"> 
           {/* Header Row - Sticky inside the horizontal scroll container */}
-          <div className="flex items-center text-[9px] text-neutral-500 font-bold uppercase border-b border-white/5 bg-[#121214] sticky top-0 z-20 select-none shrink-0 shadow-sm">
-              <div className="w-12 text-center py-2.5 shrink-0 border-r border-white/5">Stat</div>
-              <div className="w-40 px-3 py-2.5 shrink-0 border-r border-white/5">Layer Name</div>
-              <div className="w-14 text-center py-2.5 shrink-0 border-r border-white/5">On</div>
-              <div className="w-14 text-center py-2.5 shrink-0 border-r border-white/5">Frz</div>
-              <div className="w-14 text-center py-2.5 shrink-0 border-r border-white/5">Lck</div>
-              <div className="w-14 text-center py-2.5 shrink-0 border-r border-white/5">Plt</div>
-              <div className="w-28 text-center py-2.5 shrink-0 border-r border-white/5">Color</div>
-              <div className="w-48 text-center py-2.5 shrink-0 border-r border-white/5 flex items-center justify-center gap-1">
+          <div className="flex items-center text-[9px] text-neutral-600 font-black uppercase border-b border-white/5 bg-[#121214] sticky top-0 z-20 select-none shrink-0 shadow-sm">
+              <div className="w-10 text-center py-2 shrink-0 border-r border-white/5">Stat</div>
+              <div className="w-40 px-3 py-2 shrink-0 border-r border-white/5">Layer Name</div>
+              <div className="w-12 text-center py-2 shrink-0 border-r border-white/5">On</div>
+              <div className="w-12 text-center py-2 shrink-0 border-r border-white/5">Frz</div>
+              <div className="w-12 text-center py-2 shrink-0 border-r border-white/5">Lck</div>
+              <div className="w-12 text-center py-2 shrink-0 border-r border-white/5">Plt</div>
+              <div className="w-28 text-center py-2 shrink-0 border-r border-white/5">Color</div>
+              <div className="w-44 text-center py-2 shrink-0 border-r border-white/5 flex items-center justify-center gap-1">
                 Line Type
                 <button 
                   onClick={(e) => { e.stopPropagation(); onOpenLineTypes?.(); }}
@@ -190,23 +190,23 @@ const LayerManager: React.FC<LayerManagerProps> = ({
                   <Settings2 size={10} />
                 </button>
               </div>
-              <div className="w-32 text-center py-2.5 shrink-0 border-r border-white/5">Line Weight</div>
-              <div className="w-24 text-center py-2.5 shrink-0 border-r border-white/5">Plot Style</div>
-              <div className="flex-1 py-2.5"></div>
+              <div className="w-32 text-center py-2 shrink-0 border-r border-white/5">Line Weight</div>
+              <div className="w-20 text-center py-2 shrink-0 border-r border-white/5 uppercase tracking-tighter">Style</div>
+              <div className="flex-1 py-2"></div>
           </div>
 
           <div className="flex flex-col">
-            {Object.values(layers).map((layer: LayerConfig) => {
+            {Object.values(layers).map((layer: LayerConfig, i) => {
                 const isActive = activeLayer === layer.id;
                 const isZero = layer.name === '0';
                 return (
                   <div 
-                    key={layer.id}
+                    key={`${layer.id}-${i}`}
                     className={`flex items-center transition-all border-b border-white/[0.03] no-tap group cursor-pointer ${isActive ? 'bg-cyan-500/[0.08]' : 'hover:bg-neutral-800/40'}`}
                     onClick={() => onSetActive(layer.id)}
                   >
                     {/* Status Column */}
-                    <div className="w-12 flex justify-center shrink-0 py-2 border-r border-white/5">
+                    <div className="w-10 flex justify-center shrink-0 py-1 border-r border-white/5">
                         <div 
                             title={isActive ? "Current Layer" : "Click to make current"}
                             className={`w-5 h-5 flex items-center justify-center rounded-full transition-all ${isActive ? 'bg-cyan-500 text-black' : 'bg-neutral-900/50 text-neutral-800 border border-white/5'}`}
@@ -217,7 +217,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({
 
                     {/* Name Column */}
                     <div 
-                        className="w-40 px-3 shrink-0 py-2 border-r border-white/5"
+                        className="w-40 px-3 shrink-0 py-1 border-r border-white/5"
                         onDoubleClick={(e) => handleStartRename(e, layer.id, layer.name)}
                     >
                         {editingId === layer.id ? (
@@ -245,21 +245,21 @@ const LayerManager: React.FC<LayerManagerProps> = ({
                     </div>
 
                     {/* Visibility */}
-                    <div className="w-14 flex justify-center shrink-0 py-2 border-r border-white/5">
+                    <div className="w-12 flex justify-center shrink-0 py-1 border-r border-white/5">
                         <button 
                             title="Turn On/Off"
                             onClick={(e) => { 
                                 e.stopPropagation(); 
                                 onUpdateLayer(layer.id, { visible: !layer.visible }); 
                             }} 
-                            className={`p-1.5 rounded transition-all hover:bg-white/5 ${layer.visible ? 'text-amber-400' : 'text-neutral-700'}`}
+                            className={`p-1 rounded transition-all hover:bg-white/5 ${layer.visible ? 'text-amber-400' : 'text-neutral-700'}`}
                         >
                             {layer.visible ? <Sun size={13} fill="currentColor" /> : <EyeOff size={13} />}
                         </button>
                     </div>
 
                     {/* Freeze */}
-                    <div className="w-14 flex justify-center shrink-0 py-2 border-r border-white/5">
+                    <div className="w-12 flex justify-center shrink-0 py-1 border-r border-white/5">
                         <button 
                             title="Freeze/Thaw"
                             onClick={(e) => { 
@@ -267,7 +267,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({
                                 if (isActive) return;
                                 onUpdateLayer(layer.id, { frozen: !layer.frozen }); 
                             }} 
-                            className={`p-1.5 rounded transition-all hover:bg-white/5 ${layer.frozen ? 'text-blue-400' : 'text-neutral-700'}`}
+                            className={`p-1 rounded transition-all hover:bg-white/5 ${layer.frozen ? 'text-blue-400' : 'text-neutral-700'}`}
                             disabled={isActive}
                         >
                             {layer.frozen ? <Snowflake size={13} strokeWidth={3} /> : <Sun size={12} className="opacity-40 text-neutral-500" />}
@@ -275,25 +275,25 @@ const LayerManager: React.FC<LayerManagerProps> = ({
                     </div>
 
                     {/* Lock */}
-                    <div className="w-14 flex justify-center shrink-0 py-2 border-r border-white/5">
+                    <div className="w-12 flex justify-center shrink-0 py-1 border-r border-white/5">
                         <button 
                             title="Lock/Unlock"
                             onClick={(e) => { e.stopPropagation(); onUpdateLayer(layer.id, { locked: !layer.locked }); }} 
-                            className={`p-1.5 rounded transition-all hover:bg-white/5 ${layer.locked ? 'text-amber-600' : 'text-neutral-500'}`}
+                            className={`p-1 rounded transition-all hover:bg-white/5 ${layer.locked ? 'text-amber-600' : 'text-neutral-500'}`}
                         >
                             {layer.locked ? <Lock size={13} strokeWidth={3} /> : <Unlock size={13} className="opacity-40 text-neutral-500" />}
                         </button>
                     </div>
 
                     {/* Plottable */}
-                    <div className="w-14 flex justify-center shrink-0 py-2 border-r border-white/5">
+                    <div className="w-12 flex justify-center shrink-0 py-1 border-r border-white/5">
                         <button 
                             title="Plot/No Plot"
                             onClick={(e) => { 
                                 e.stopPropagation(); 
                                 onUpdateLayer(layer.id, { plottable: !layer.plottable }); 
                             }} 
-                            className={`p-1.5 rounded transition-all hover:bg-white/5 ${layer.plottable ? 'text-neutral-300' : 'text-red-500'}`}
+                            className={`p-1 rounded transition-all hover:bg-white/5 ${layer.plottable ? 'text-neutral-300' : 'text-red-500'}`}
                         >
                             <div className="relative">
                                 <Printer size={13} />
@@ -307,7 +307,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({
                     </div>
 
                     {/* Color */}
-                    <div className="w-28 flex items-center gap-2 shrink-0 py-2 border-r border-white/5 px-2">
+                    <div className="w-28 flex items-center gap-2 shrink-0 py-1 border-r border-white/5 px-2.5">
                         <div 
                             title="Change Color"
                             className="relative w-6 h-6 rounded-lg border border-white/10 overflow-hidden bg-black cursor-pointer transition-all hover:scale-110 active:scale-95 shrink-0"
@@ -334,7 +334,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({
                     </div>
 
                     {/* Linetype */}
-                    <div className="w-40 px-2 shrink-0 py-2 flex items-center gap-2 border-r border-white/5">
+                    <div className="w-44 px-2 shrink-0 py-1 flex items-center gap-1.5 border-r border-white/5">
                         <div className="flex-1 relative group/select">
                             <select 
                                 value={layer.lineType} 
@@ -354,7 +354,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({
                     </div>
 
                     {/* Weight */}
-                    <div className="w-28 px-2 shrink-0 py-2 border-r border-white/5 flex items-center justify-center">
+                    <div className="w-32 px-3 shrink-0 py-1 border-r border-white/5 flex flex-col items-center justify-center gap-1">
                         <select 
                             value={typeof layer.thickness === 'number' ? layer.thickness.toFixed(2) : layer.thickness} 
                             onClick={e => e.stopPropagation()}
@@ -362,19 +362,25 @@ const LayerManager: React.FC<LayerManagerProps> = ({
                                 const val = e.target.value;
                                 onUpdateLayer(layer.id, { thickness: val === 'DEFAULT' ? 'DEFAULT' : parseFloat(val) });
                             }} 
-                            className="w-full bg-[#0d0d0f]/60 border border-white/5 rounded-lg px-2 py-2 text-[9px] text-neutral-300 outline-none font-mono cursor-pointer appearance-none text-center transition-all hover:border-[#00bcd4]/30 hover:bg-black focus:ring-1 focus:ring-[#00bcd4]/20 shadow-inner"
+                            className="w-full bg-[#0d0d0f]/60 border border-white/5 rounded-lg px-2 py-1.5 text-[9px] text-neutral-300 outline-none font-mono cursor-pointer appearance-none text-center transition-all hover:border-[#00bcd4]/30 hover:bg-black focus:ring-1 focus:ring-[#00bcd4]/20 shadow-inner"
                         >
-                            {LINE_WEIGHTS.map(w => <option key={w} value={w} className="bg-[#121214] text-white py-2">{w}{w !== 'DEFAULT' ? 'mm' : ''}</option>)}
+                            {LINE_WEIGHTS.map((w, idx) => <option key={`${w}-${idx}`} value={w} className="bg-[#121214] text-white py-2">{w}{w !== 'DEFAULT' ? 'mm' : ''}</option>)}
                         </select>
+                        <div className="w-16 h-[2px] bg-white/[0.03] rounded-full overflow-hidden">
+                            <div 
+                                className="h-full bg-cyan-400" 
+                                style={{ width: `${Math.min(100, (parseFloat(String(layer.thickness)) || 0.25) * 40)}%` }}
+                            />
+                        </div>
                     </div>
 
                     {/* Plot Style */}
-                    <div className="w-24 shrink-0 py-2 border-r border-white/5 flex items-center justify-center px-2">
-                        <div className="text-[9px] font-black text-neutral-600 uppercase tracking-widest pl-1">ByColor</div>
+                    <div className="w-20 shrink-0 py-1 border-r border-white/5 flex items-center justify-center px-1">
+                        <div className="text-[8px] font-black text-neutral-700 uppercase tracking-tighter pl-1">ByColor</div>
                     </div>
 
                     {/* Actions */}
-                    <div className="flex-1 px-4 flex justify-end items-center py-2">
+                    <div className="flex-1 px-3 flex justify-end items-center py-1">
                         {!isActive && !isZero && (
                             <button 
                                 title="Delete Layer"

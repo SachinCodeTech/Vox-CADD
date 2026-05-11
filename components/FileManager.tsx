@@ -3,7 +3,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
     FilePlus, FolderOpen, Save, X, 
     Database, Share2, FileCode, CheckCircle2,
-    FileText, Download, Briefcase, Clock, File, Globe
+    FileText, Download, Briefcase, Clock, File, Globe,
+    Search, Edit2
 } from 'lucide-react';
 
 import VoxIcon from './VoxIcon';
@@ -66,11 +67,11 @@ interface RecentFileItemProps {
     current?: boolean;
 }
 
-const RecentFileItem: React.FC<RecentFileItemProps> = ({ name, date, onClick, onDelete, onDownload, current }) => (
+const RecentFileItem: React.FC<RecentFileItemProps> = ({ name, date, onClick, onDelete, onDownload, onRename, current }) => (
     <div className="relative group/item">
         <button 
             onClick={onClick}
-            className={`w-full flex items-center gap-4 p-4 pr-24 rounded-[1.2rem] transition-all group no-tap border ${current ? 'bg-cyan-500/10 border-cyan-500/30' : 'bg-[#121214] border-white/5 hover:bg-neutral-800/50'}`}
+            className={`w-full flex items-center gap-4 p-4 pr-32 rounded-[1.2rem] transition-all group no-tap border ${current ? 'bg-cyan-500/10 border-cyan-500/30' : 'bg-[#121214] border-white/5 hover:bg-neutral-800/50'}`}
         >
             <div className={`w-10 h-10 rounded-[0.8rem] flex items-center justify-center transition-all ${current ? 'bg-cyan-400 text-black' : 'bg-neutral-800 text-neutral-500 group-hover:text-white'}`}>
                 <File size={18} />
@@ -82,11 +83,18 @@ const RecentFileItem: React.FC<RecentFileItemProps> = ({ name, date, onClick, on
                 </div>
             </div>
         </button>
-        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
+        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
             {current && (
-                <div className="px-2 py-1 bg-cyan-400 rounded text-[7px] font-black text-black uppercase tracking-tight shadow-[0_0_10px_rgba(6,182,212,0.3)]">Active</div>
+                <div className="px-2 py-1 bg-cyan-400 rounded text-[7px] font-black text-black uppercase tracking-tight shadow-[0_0_10px_rgba(6,182,212,0.3)] mr-1">Active</div>
             )}
             <div className="flex items-center gap-1 opacity-0 group-hover/item:opacity-100 transition-opacity">
+                <button 
+                    onClick={onRename}
+                    title="Rename"
+                    className="w-7 h-7 flex items-center justify-center rounded-full bg-neutral-800 text-neutral-400 hover:bg-amber-500 hover:text-black transition-all"
+                >
+                    <Edit2 size={13} />
+                </button>
                 <button 
                     onClick={onDownload}
                     title="Download"
@@ -109,6 +117,7 @@ const RecentFileItem: React.FC<RecentFileItemProps> = ({ name, date, onClick, on
 );
 
 const FileManager: React.FC<FileManagerProps> = ({ currentName, recentFiles = [], onAction, onClose }) => {
+    const [searchTerm, setSearchTerm] = useState('');
     const [pos, setPos] = useState({ x: 0, y: 0 });
     const isDragging = useRef(false);
     const dragStart = useRef({ x: 0, y: 0 });
@@ -138,6 +147,10 @@ const FileManager: React.FC<FileManagerProps> = ({ currentName, recentFiles = []
         dragStart.current = { x: clientX - pos.x, y: clientY - pos.y };
     };
 
+    const filteredRecent = recentFiles.filter(f => 
+        f.name.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
     return (
         <div 
             className="relative bg-[#0a0a0c] w-full md:w-[420px] max-w-[95vw] h-full sm:h-auto sm:max-h-[90vh] rounded-[1.5rem] sm:rounded-[2.5rem] shadow-[0_60px_150px_rgba(0,0,0,0.9)] border border-white/10 flex flex-col overflow-hidden select-none font-sans" 
@@ -162,6 +175,28 @@ const FileManager: React.FC<FileManagerProps> = ({ currentName, recentFiles = []
 
             <div className="p-4 sm:p-8 space-y-6 sm:space-y-10 overflow-y-auto max-h-[75vh] scrollbar-none">
                 
+                {/* Search Bar */}
+                <div className="relative group">
+                    <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none text-neutral-600 group-focus-within:text-cyan-500 transition-colors">
+                        <Search size={14} />
+                    </div>
+                    <input 
+                        type="text" 
+                        placeholder="SEARCH RECENT DRAWINGS..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full bg-[#121214] border border-white/5 rounded-xl py-3.5 pl-11 pr-10 text-[10px] font-black uppercase tracking-widest text-white focus:border-cyan-500 focus:outline-none transition-all placeholder:text-neutral-700"
+                    />
+                    {searchTerm && (
+                        <button 
+                            onClick={() => setSearchTerm('')}
+                            className="absolute inset-y-0 right-3 flex items-center text-neutral-600 hover:text-white"
+                        >
+                            <X size={14} />
+                        </button>
+                    )}
+                </div>
+                
                 {/* Storage Actions Section */}
                 <div>
                     <h4 className="text-[10px] font-black text-neutral-600 uppercase tracking-[0.25em] mb-4 px-2 flex justify-between items-center">
@@ -177,30 +212,39 @@ const FileManager: React.FC<FileManagerProps> = ({ currentName, recentFiles = []
                 </div>
 
                 {/* Recent Documents Section */}
-                {recentFiles.length > 0 && (
                 <div>
-                    <h4 className="text-[10px] font-black text-neutral-600 uppercase tracking-[0.25em] mb-4 px-2 flex items-center gap-2">
-                        <Clock size={10} /> Recent Drawings
+                    <h4 className="text-[10px] font-black text-neutral-600 uppercase tracking-[0.25em] mb-4 px-2 flex justify-between items-center">
+                        <span className="flex items-center gap-2"><Clock size={10} /> Recent Drawings</span>
+                        {recentFiles.length > 0 && <span className="text-[7px] text-neutral-500">{filteredRecent.length} of {recentFiles.length}</span>}
                     </h4>
                     <div className="space-y-2">
-                        {recentFiles.map((file, i) => {
-                            const fileName = typeof file === 'string' ? file : file.name;
-                            const fileDate = typeof file === 'string' ? Date.now() : file.date;
-                            return (
-                                <RecentFileItem 
-                                    key={`${fileName}-${i}`} 
-                                    name={fileName} 
-                                    date={fileDate} 
-                                    current={fileName === currentName}
-                                    onClick={() => onAction('openRecent', fileName)}
-                                    onDelete={(e) => { e.stopPropagation(); onAction('deleteRecent', fileName); }}
-                                    onDownload={(e) => { e.stopPropagation(); onAction('downloadRecent', fileName); }}
-                                />
-                            );
-                        })}
+                        {filteredRecent.length > 0 ? (
+                            filteredRecent.map((file, i) => {
+                                const fileName = typeof file === 'string' ? file : file.name;
+                                const fileDate = typeof file === 'string' ? Date.now() : file.date;
+                                return (
+                                    <RecentFileItem 
+                                        key={`${fileName}-${i}`} 
+                                        name={fileName} 
+                                        date={fileDate} 
+                                        current={fileName === currentName}
+                                        onClick={() => onAction('openRecent', fileName)}
+                                        onDelete={(e) => { e.stopPropagation(); onAction('deleteRecent', fileName); }}
+                                        onRename={(e) => { e.stopPropagation(); onAction('rename', fileName); }}
+                                        onDownload={(e) => { e.stopPropagation(); onAction('downloadRecent', fileName); }}
+                                    />
+                                );
+                            })
+                        ) : (
+                            <div className="py-8 border border-dashed border-white/5 rounded-2xl flex flex-col items-center justify-center text-center px-4">
+                               <File size={24} className="text-neutral-800 mb-3" />
+                               <p className="text-[8px] font-black text-neutral-600 uppercase tracking-widest leading-loose">
+                                   {searchTerm ? `No matches for "${searchTerm}"` : 'No recent drawings in local storage'}
+                               </p>
+                            </div>
+                        )}
                     </div>
                 </div>
-                )}
 
                 {/* CAD Export Section */}
                 <div>

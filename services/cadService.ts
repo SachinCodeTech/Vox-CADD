@@ -22,9 +22,45 @@ export const getArcFromBulge = (p1: Point, p2: Point, b: number) => {
     return { centerX, centerY, r: Math.abs(r), startAngle, endAngle, bulgeSign };
 };
 
-export const generateId = (): string => Math.random().toString(36).substr(2, 9);
+let idCounter = 0;
+export const generateId = (): string => {
+    const timestamp = Date.now().toString(36);
+    const counter = (idCounter++).toString(36);
+    const randomPart = Math.random().toString(36).substring(2, 8);
+    const entropy = Math.random().toString(36).substring(2, 5);
+    return `${timestamp}-${counter}-${randomPart}-${entropy}`;
+};
 
 export const distance = (p1: Point, p2: Point) => Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+
+export const calculateDimensionValue = (s: { type: string, dimType?: string, x1: number, y1: number, x2: number, y2: number, cx?: number, cy?: number, angle1?: number, angle2?: number }, dimX: number, dimY: number): number => {
+    if (s.dimType === 'radius') return distance({ x: s.cx ?? s.x1, y: s.cy ?? s.y1 }, { x: s.x2, y: s.y2 });
+    if (s.dimType === 'diameter') return distance({ x: s.cx ?? s.x1, y: s.cy ?? s.y1 }, { x: s.x2, y: s.y2 }) * 2;
+    if (s.dimType === 'aligned') return distance({ x: s.x1, y: s.y1 }, { x: s.x2, y: s.y2 });
+    if (s.dimType === 'linear') {
+        const dx = Math.abs(s.x2 - s.x1);
+        const dy = Math.abs(s.y2 - s.y1);
+        const vdx = Math.abs(dimX - (s.x1 + s.x2) / 2);
+        const vdy = Math.abs(dimY - (s.y1 + s.y2) / 2);
+        return vdx > vdy ? dy : dx;
+    }
+    if (s.dimType === 'ordinate') {
+        const dx = Math.abs(dimX - s.x1);
+        const dy = Math.abs(dimY - s.y1);
+        // Returns the coordinate value of the measured point (x1, y1)
+        // depending on whether the leader was pulled along X or Y
+        return dx > dy ? s.y1 : s.x1;
+    }
+    if (s.dimType === 'angular' || s.dimType === 'arc') {
+        if (s.angle1 !== undefined && s.angle2 !== undefined) {
+            let diff = Math.abs(s.angle2 - s.angle1);
+            if (diff > Math.PI) diff = 2 * Math.PI - diff;
+            if (s.dimType === 'arc') return distance({ x: s.cx ?? s.x1, y: s.cy ?? s.y1 }, { x: s.x2, y: s.y2 }) * diff;
+            return diff;
+        }
+    }
+    return distance({ x: s.x1, y: s.y1 }, { x: s.x2, y: s.y2 });
+};
 export const distSq = (p1: Point, p2: Point) => Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2);
 
 export const calculateArea = (points: Point[]): number => {
@@ -108,6 +144,12 @@ export const hitTestGrip = (p: Point, s: Shape, threshold: number): number => {
             if (isNear(s.x + s.radius * Math.cos(s.endAngle), s.y + s.radius * Math.sin(s.endAngle))) return 2;
             if (isNear(s.x + s.radius * Math.cos((s.startAngle+s.endAngle)/2), s.y + s.radius * Math.sin((s.startAngle+s.endAngle)/2))) return 3;
             break;
+        case 'dimension':
+        case 'leader':
+            if (isNear(s.x1, s.y1)) return 0;
+            if (isNear(s.x2, s.y2)) return 1;
+            if (s.type === 'dimension' && isNear((s as any).dimX, (s as any).dimY)) return 2;
+            break;
     }
     return -1;
 };
@@ -143,6 +185,12 @@ export const modifyShapeByGrip = (s: Shape, gripIndex: number, newP: Point): Sha
             else if (gripIndex === 1) { ns.startAngle = Math.atan2(newP.y - ns.y, newP.x - ns.x); }
             else if (gripIndex === 2) { ns.endAngle = Math.atan2(newP.y - ns.y, newP.x - ns.x); }
             else if (gripIndex === 3) { ns.radius = distance({x: ns.x, y: ns.y}, newP); }
+            break;
+        case 'dimension':
+        case 'leader':
+            if (gripIndex === 0) { ns.x1 = newP.x; ns.y1 = newP.y; }
+            else if (gripIndex === 1) { ns.x2 = newP.x; ns.y2 = newP.y; }
+            else if (gripIndex === 2 && ns.type === 'dimension') { ns.dimX = newP.x; ns.dimY = newP.y; }
             break;
     }
     return ns;
@@ -994,23 +1042,38 @@ export const formatLength = (val: number, settings: AppSettings): string => {
     const isImperial = settings.units === 'imperial';
     
     if (!isImperial) {
-        const precisionPart = settings.precision.split('.')[1];
+        let scaledVal = val;
+        const subtype = settings.unitSubtype || 'mm';
+        if (subtype === 'cm') scaledVal = val / 10;
+        else if (subtype === 'm') scaledVal = val / 1000;
+        else if (subtype === 'km') scaledVal = val / 1000000;
+
+        const precisionPart = settings.precision ? settings.precision.split('.')[1] : '00';
         const prec = precisionPart ? precisionPart.length : 0;
-        const suffix = settings.unitSubtype || 'mm';
-        return val.toFixed(prec) + suffix;
+        return scaledVal.toFixed(prec) + subtype;
     }
 
+    // Imperial
+    const subtype = settings.unitSubtype || 'inches';
+    let baseVal = val;
+    if (subtype === 'feet') baseVal = val / 12;
+    else if (subtype === 'yards') baseVal = val / 36;
+    else if (subtype === 'miles') baseVal = val / 63360;
+
     const format = settings.linearFormat || 'architectural';
-    const absVal = Math.abs(val);
+    const absVal = Math.abs(baseVal);
 
     if (format === 'decimal') {
         const prec = settings.precision ? settings.precision.split('.')[1]?.length : 3;
-        return `${val < 0 ? "-" : ""}${val.toFixed(prec || 3)}"`;
+        const unitSuffix = subtype === 'inches' ? '"' : (subtype === 'feet' ? "'" : ` ${subtype}`);
+        return `${val < 0 ? "-" : ""}${baseVal.toFixed(prec || 3)}${unitSuffix}`;
     }
 
     if (format === 'engineering' || format === 'architectural') {
-        const feet = Math.floor(absVal / 12);
-        const inches = absVal % 12;
+        // Only makes sense if base unit is inches or feet
+        const totalInches = Math.abs(val); // Always use internal inches for feet-inches formatting
+        const feet = Math.floor(totalInches / 12);
+        const inches = totalInches % 12;
         if (format === 'engineering') {
             const prec = settings.precision ? settings.precision.split('.')[1]?.length : 2;
             return `${val < 0 ? "-" : ""}${feet}'${inches.toFixed(prec || 2)}"`;
@@ -1105,6 +1168,41 @@ export const getLineCircleIntersections = (p1: Point, p2: Point, center: Point, 
     if (t1 >= 0 && t1 <= 1) pts.push({ x: p1.x + t1 * dx, y: p1.y + t1 * dy });
     if (t2 >= 0 && t2 <= 1) pts.push({ x: p1.x + t2 * dx, y: p1.y + t2 * dy });
     return pts;
+};
+
+export const getInfiniteLineCircleIntersections = (p1: Point, p2: Point, center: Point, radius: number): Point[] => {
+    const dx = p2.x - p1.x, dy = p2.y - p1.y;
+    const a = dx * dx + dy * dy;
+    const b = 2 * (dx * (p1.x - center.x) + dy * (p1.y - center.y));
+    const c = (p1.x - center.x) * (p1.x - center.x) + (p1.y - center.y) * (p1.y - center.y) - radius * radius;
+    const det = b * b - 4 * a * c;
+    if (det < 0) return [];
+    if (det === 0) {
+        const t = -b / (2 * a);
+        return [{ x: p1.x + t * dx, y: p1.y + t * dy }];
+    }
+    const t1 = (-b + Math.sqrt(det)) / (2 * a);
+    const t2 = (-b - Math.sqrt(det)) / (2 * a);
+    return [{ x: p1.x + t1 * dx, y: p1.y + t1 * dy }, { x: p1.x + t2 * dx, y: p1.y + t2 * dy }];
+};
+
+export const getCircleCircleIntersections = (c1: Point, r1: number, c2: Point, r2: number): Point[] => {
+    const d = distance(c1, c2);
+    if (d > r1 + r2 || d < Math.abs(r1 - r2) || (d === 0 && r1 === r2)) return [];
+    if (d === 0) return [];
+
+    const a = (r1 * r1 - r2 * r2 + d * d) / (2 * d);
+    const hSq = r1 * r1 - a * a;
+    const h = Math.sqrt(Math.max(0, hSq));
+    const x2 = c1.x + a * (c2.x - c1.x) / d;
+    const y2 = c1.y + a * (c2.y - c1.y) / d;
+    
+    if (h < 0.0001) return [{ x: x2, y: y2 }];
+    
+    return [
+        { x: x2 + h * (c2.y - c1.y) / d, y: y2 - h * (c2.x - c1.x) / d },
+        { x: x2 - h * (c2.y - c1.y) / d, y: y2 + h * (c2.x - c1.x) / d }
+    ];
 };
 
 export const getIntersection = (p1: Point, p2: Point, p3: Point, p4: Point, infinite: boolean = false): Point | null => {
@@ -1728,8 +1826,8 @@ const SNAP_PRIORITY: Record<string, number> = {
     'node': 11
 };
 
-export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts: number, trackingPoints: SnapPoint[]): SnapPoint | null => {
-    const threshold = 20 / ts; // Increased threshold for easier snapping
+export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts: number, trackingPoints: SnapPoint[], settings?: any): SnapPoint | null => {
+    const threshold = 20 / ts; 
     const candidates: SnapPoint[] = [];
 
     const addCandidate = (x: number, y: number, type: SnapPoint['type'], lp?: Point) => {
@@ -1740,6 +1838,33 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
     };
 
     const basePoint = trackingPoints.length > 0 ? trackingPoints[trackingPoints.length - 1] : null;
+
+    // Polar Tracking logic
+    if (options.polar && basePoint && settings?.polarTrackingEnabled) {
+        const angles = settings.polarAngles || [90, 45];
+        const v = { x: p.x - basePoint.x, y: p.y - basePoint.y };
+        const dist = Math.sqrt(v.x * v.x + v.y * v.y);
+        
+        if (dist > 1/ts) {
+            const currentAngle = Math.atan2(v.y, v.x) * 180 / Math.PI;
+            const posAngle = (currentAngle + 360) % 360;
+            
+            for (const targetAngle of angles) {
+                // Check multiple quadrants for the same target angle
+                const step = targetAngle;
+                for (let a = 0; a < 360; a += step) {
+                    if (Math.abs(posAngle - a) < 2) { // 2 degree tolerance
+                        const rad = a * Math.PI / 180;
+                        const polarTarget = {
+                            x: basePoint.x + Math.cos(rad) * dist,
+                            y: basePoint.y + Math.sin(rad) * dist
+                        };
+                        addCandidate(polarTarget.x, polarTarget.y, 'polar', basePoint);
+                    }
+                }
+            }
+        }
+    }
 
     // Performance: Spatial filtering - only check shapes within a bounding box around the cursor
     const xMin = p.x - threshold * 5, xMax = p.x + threshold * 5;
@@ -1855,6 +1980,10 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
                     if (pt.bulge && Math.abs(pt.bulge) > 0.0001) {
                         const arc = getArcFromBulge(pt, pt2, pt.bulge);
                         if (options.center) addCandidate(arc.centerX, arc.centerY, 'cen');
+                        if (options.perpendicular && basePoint) {
+                            const angle = Math.atan2(basePoint.y - arc.centerX, basePoint.x - arc.centerY);
+                            addCandidate(arc.centerX + arc.r * Math.cos(angle), arc.centerY + arc.r * Math.sin(angle), 'perp');
+                        }
                         if (options.midpoint) {
                             let sA = arc.startAngle, eA = arc.endAngle;
                             if (pt.bulge > 0 && eA < sA) eA += Math.PI * 2;
@@ -1878,6 +2007,10 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
                         }
                     } else {
                         if (options.midpoint) addCandidate((pt.x + pt2.x) / 2, (pt.y + pt2.y) / 2, 'mid');
+                        if (options.perpendicular && basePoint) {
+                            const perp = projectPointOnLine(basePoint, pt, pt2);
+                            addCandidate(perp.x, perp.y, 'perp');
+                        }
                         if (options.nearest) {
                             const near = projectPointOnLine(p, pt, pt2);
                             const t = ((near.x - pt.x) * (pt2.x - pt.x) + (near.y - pt.y) * (pt2.y - pt.y)) / distSq(pt, pt2);
@@ -1902,6 +2035,13 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
                     for(let i=0; i<4; i++) {
                         const p1 = corners[i], p2 = corners[(i+1)%4];
                         addCandidate((p1.x+p2.x)/2, (p1.y+p2.y)/2, 'mid');
+                    }
+                }
+                if (options.perpendicular && basePoint) {
+                    for(let i=0; i<4; i++) {
+                        const p1 = corners[i], p2 = corners[(i+1)%4];
+                        const perp = projectPointOnLine(basePoint, p1, p2);
+                        addCandidate(perp.x, perp.y, 'perp');
                     }
                 }
                 if (options.center || options.gcenter) addCandidate(s.x + s.width/2, s.y + s.height/2, 'gcen');
@@ -1957,15 +2097,8 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
         for (let i = 0; i < circles.length; i++) {
             for (let j = i + 1; j < circles.length; j++) {
                 const c1 = circles[i], c2 = circles[j];
-                const d = distance(c1, c2);
-                if (d > Math.abs(c1.r - c2.r) && d < c1.r + c2.r) {
-                    const a = (c1.r * c1.r - c2.r * c2.r + d * d) / (2 * d);
-                    const h = Math.sqrt(c1.r * c1.r - a * a);
-                    const x2 = c1.x + a * (c2.x - c1.x) / d;
-                    const y2 = c1.y + a * (c2.y - c1.y) / d;
-                    addCandidate(x2 + h * (c2.y - c1.y) / d, y2 - h * (c2.x - c1.x) / d, 'int');
-                    addCandidate(x2 - h * (c2.y - c1.y) / d, y2 + h * (c2.x - c1.x) / d, 'int');
-                }
+                const inters = getCircleCircleIntersections(c1, c1.r, c2, c2.r);
+                inters.forEach(it => addCandidate(it.x, it.y, 'int'));
             }
         }
     }
@@ -2154,6 +2287,89 @@ export const chamferLines = (s1: LineShape, s2: LineShape, dist1: number, dist2:
         l2: { ...s2, x2: newEnd2.x, y2: newEnd2.y },
         chamfer
     };
+};
+
+export const joinShapes = (shapes: Shape[]): Shape[] => {
+    if (shapes.length === 0) return [];
+    
+    // Filtering for joinable types: lines and plines (and eventually arcs if supported)
+    const joinable = shapes.filter(s => s.type === 'line' || s.type === 'pline');
+    const others = shapes.filter(s => s.type !== 'line' && s.type !== 'pline');
+    
+    if (joinable.length < 2) return shapes;
+
+    const results: Shape[] = [...others];
+    let working = [...joinable];
+
+    while (working.length > 0) {
+        let current = working.shift()!;
+        let merged = true;
+
+        while (merged) {
+            merged = false;
+            for (let i = 0; i < working.length; i++) {
+                const other = working[i];
+                const mergeResult = attemptMerge(current, other);
+                if (mergeResult) {
+                    current = mergeResult;
+                    working.splice(i, 1);
+                    merged = true;
+                    break;
+                }
+            }
+        }
+        results.push(current);
+    }
+
+    return results;
+};
+
+const attemptMerge = (s1: Shape, s2: Shape): Shape | null => {
+    const tolerance = 0.001;
+    
+    const getEndPoints = (s: Shape): { p1: Point, p2: Point } => {
+        if (s.type === 'line') return { p1: { x: s.x1, y: s.y1 }, p2: { x: s.x2, y: s.y2 } };
+        const pts = (s as PolyShape).points;
+        return { p1: pts[0], p2: pts[pts.length - 1] };
+    };
+
+    const e1 = getEndPoints(s1);
+    const e2 = getEndPoints(s2);
+
+    const matches = (a: Point, b: Point) => distance(a, b) < tolerance;
+
+    let p1Match = matches(e1.p2, e2.p1);
+    let p2Match = matches(e1.p2, e2.p2);
+    let p3Match = matches(e1.p1, e2.p1);
+    let p4Match = matches(e1.p1, e2.p2);
+
+    if (!p1Match && !p2Match && !p3Match && !p4Match) return null;
+
+    // To merge, they should also be collinear if they are lines
+    // We'll be more permissive for now and just merge points into a pline
+    
+    const pts1 = s1.type === 'line' ? [e1.p1, e1.p2] : [...(s1 as PolyShape).points];
+    const pts2 = s2.type === 'line' ? [e2.p1, e2.p2] : [...(s2 as PolyShape).points];
+
+    let finalPts: Point[] = [];
+    if (p1Match) finalPts = [...pts1, ...pts2.slice(1)];
+    else if (p2Match) finalPts = [...pts1, ...pts2.reverse().slice(1)];
+    else if (p3Match) finalPts = [...pts1.reverse(), ...pts2.slice(1)];
+    else if (p4Match) finalPts = [...pts2, ...pts1.slice(1)];
+
+    // Check if it's Actually a single line (collinear)
+    if (finalPts.length === 2) {
+        return { ...s1, type: 'line', x1: finalPts[0].x, y1: finalPts[0].y, x2: finalPts[1].x, y2: finalPts[1].y } as LineShape;
+    }
+
+    // Return as pline
+    return {
+        ...s1,
+        id: generateId(),
+        type: 'pline',
+        points: finalPts,
+        closed: matches(finalPts[0], finalPts[finalPts.length - 1])
+    } as PolyShape;
 };
 
 export const filletLines = (s1: LineShape, s2: LineShape, radius: number): { l1: LineShape, l2: LineShape, arc: ArcShape | null } | null => {
