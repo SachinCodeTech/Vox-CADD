@@ -71,15 +71,152 @@ class DXFWriter {
     }
 }
 
+const writeEntity = (
+    writer: DXFWriter, 
+    s: Shape, 
+    ownerHandle: string, 
+    layerConfigs: Record<string, LayerConfig>, 
+    settings: AppSettings
+) => {
+    const layer = (s.layer || "0").toString().toUpperCase();
+    const color = hexToACI(s.color);
+    const weight = mmToDXFLineWeight(s.thickness);
+    
+    const writeCommon = (type: string, subclass: string) => {
+        writer.write(0, type);
+        writer.write(5, writer.nextHandle());
+        writer.write(330, ownerHandle);
+        writer.write(100, "AcDbEntity");
+        writer.write(8, layer);
+        writer.write(62, color);
+        writer.write(370, weight);
+        writer.write(100, subclass);
+    };
+
+    switch (s.type) {
+        case 'line': {
+            const l = s as LineShape;
+            writeCommon("LINE", "AcDbLine");
+            writer.write(10, l.x1); writer.write(20, l.y1); writer.write(30, 0.0);
+            writer.write(11, l.x2); writer.write(21, l.y2); writer.write(31, 0.0);
+            break;
+        }
+        case 'circle': {
+            const c = s as CircleShape;
+            writeCommon("CIRCLE", "AcDbCircle");
+            writer.write(10, c.x); writer.write(20, c.y); writer.write(30, 0.0);
+            writer.write(40, c.radius);
+            break;
+        }
+        case 'pline': {
+            const p = s as PolyShape;
+            writeCommon("LWPOLYLINE", "AcDbPolyline");
+            writer.write(90, p.points.length);
+            writer.write(70, p.closed ? 1 : 0);
+            p.points.forEach(pt => {
+                writer.write(10, pt.x);
+                writer.write(20, pt.y);
+            });
+            break;
+        }
+        case 'text': {
+            const t = s as TextShape;
+            writeCommon("TEXT", "AcDbText");
+            writer.write(10, t.x); writer.write(20, t.y); writer.write(30, 0.0);
+            writer.write(40, t.size);
+            writer.write(1, t.content);
+            writer.write(50, (t.rotation || 0) * 180 / Math.PI);
+            if (t.justification === 'center') {
+                writer.write(72, 1);
+                writer.write(11, t.x); writer.write(21, t.y); writer.write(31, 0);
+            } else if (t.justification === 'right') {
+                writer.write(72, 2);
+                writer.write(11, t.x); writer.write(21, t.y); writer.write(31, 0);
+            }
+            break;
+        }
+        case 'mtext': {
+            const t = s as MTextShape;
+            writeCommon("MTEXT", "AcDbMText");
+            writer.write(10, t.x); writer.write(20, t.y); writer.write(30, 0.0);
+            writer.write(40, t.size);
+            writer.write(41, t.width || 0);
+            writer.write(1, t.content);
+            writer.write(50, (t.rotation || 0) * 180 / Math.PI);
+            break;
+        }
+        case 'arc': {
+            const a = s as ArcShape;
+            writeCommon("ARC", "AcDbCircle");
+            writer.write(100, "AcDbArc");
+            writer.write(10, a.x); writer.write(20, a.y); writer.write(30, 0.0);
+            writer.write(40, a.radius);
+            writer.write(50, (a.startAngle || 0) * 180 / Math.PI);
+            writer.write(51, (a.endAngle || 0) * 180 / Math.PI);
+            break;
+        }
+        case 'rect': {
+            const r = s as RectShape;
+            writeCommon("LWPOLYLINE", "AcDbPolyline");
+            writer.write(90, 4);
+            writer.write(70, 1);
+            writer.write(10, r.x); writer.write(20, r.y);
+            writer.write(10, r.x + r.width); writer.write(20, r.y);
+            writer.write(10, r.x + r.width); writer.write(20, r.y + r.height);
+            writer.write(10, r.x); writer.write(20, r.y + r.height);
+            break;
+        }
+        case 'ellipse': {
+            const e = s as EllipseShape;
+            writeCommon("ELLIPSE", "AcDbEllipse");
+            writer.write(10, e.x); writer.write(20, e.y); writer.write(30, 0.0);
+            // Major axis vector
+            const majorX = e.rx * Math.cos(e.rotation || 0);
+            const majorY = e.rx * Math.sin(e.rotation || 0);
+            writer.write(11, majorX); writer.write(21, majorY); writer.write(31, 0.0);
+            writer.write(40, e.ry / e.rx);
+            writer.write(41, 0.0); // Start parameter
+            writer.write(42, 2 * Math.PI); // End parameter
+            break;
+        }
+        case 'spline': {
+            const sp = s as PolyShape;
+            writeCommon("SPLINE", "AcDbSpline");
+            writer.write(70, 8); // Planar + Closed if applicable
+            writer.write(71, 3); // Degree 3 (Cubic)
+            writer.write(72, 0); // Number of knots
+            writer.write(73, sp.points.length); // Number of control points
+            writer.write(74, 0); // Number of fit points
+            sp.points.forEach(pt => {
+                writer.write(10, pt.x);
+                writer.write(20, pt.y);
+                writer.write(30, 0.0);
+            });
+            break;
+        }
+        case 'block': {
+            const i = s as any;
+            writeCommon("INSERT", "AcDbBlockReference");
+            writer.write(2, i.blockId);
+            writer.write(10, i.x); writer.write(20, i.y); writer.write(30, 0.0);
+            writer.write(41, i.scaleX || 1.0);
+            writer.write(42, i.scaleY || 1.0);
+            writer.write(43, i.scaleZ || 1.0);
+            writer.write(50, (i.rotation || 0) * 180 / Math.PI);
+            break;
+        }
+    }
+};
+
 export const shapesToDXF = (
     shapes: Shape[], 
-    layerConfigs?: Record<string, LayerConfig>, 
-    settings?: AppSettings,
+    layerConfigs: Record<string, LayerConfig> = {}, 
+    settings: AppSettings = {} as any,
     blocks?: Record<string, BlockDefinition>
 ): string => {
     try {
         const writer = new DXFWriter();
-        const baseLayers = { ...(layerConfigs || {}) };
+        const baseLayers = { ...layerConfigs };
     if (!baseLayers['0']) {
         baseLayers['0'] = { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' };
     }
@@ -289,8 +426,18 @@ export const shapesToDXF = (
                 writer.write(30, 0.0);
                 writer.write(3, b.name); writer.write(1, "");
 
-                // Block Entities (simplified, skipping nested blocks for now to avoid complexity)
-                // In a full implementation, we'd recursively write entities here.
+                // Block Entities
+                if (b.shapes && b.shapes.length > 0) {
+                    // Temporarily redirect entities to this block's record handle
+                    const originalGetModelSpaceHandle = (writer as any)._getModelSpaceHandle;
+                    (writer as any)._getCurrentBlockHandle = () => hMap[b.name];
+                    
+                    b.shapes.forEach(bs => {
+                        writeEntity(writer, bs, hMap[b.name], layerConfigs || {}, settings || {} as any);
+                    });
+                    
+                    delete (writer as any)._getCurrentBlockHandle;
+                }
                 
                 writer.write(0, "ENDBLK"); writer.write(5, writer.nextHandle());
                 writer.write(330, hMap[b.name]);
@@ -304,134 +451,7 @@ export const shapesToDXF = (
     writer.section("ENTITIES", () => {
         const hMap = (writer as any)._blockRecordHandlesMap || {};
         shapes.forEach(s => {
-            const layer = (s.layer || "0").toString().toUpperCase();
-            const color = hexToACI(s.color);
-            const weight = mmToDXFLineWeight(s.thickness);
-            
-            const writeCommon = (type: string, subclass: string) => {
-                writer.write(0, type);
-                writer.write(5, writer.nextHandle());
-                writer.write(330, hMap["*MODEL_SPACE"] || "0");
-                writer.write(100, "AcDbEntity");
-                writer.write(8, layer);
-                writer.write(62, color);
-                writer.write(370, weight);
-                writer.write(100, subclass);
-            };
-
-            switch (s.type) {
-                case 'line': {
-                    const l = s as LineShape;
-                    writeCommon("LINE", "AcDbLine");
-                    writer.write(10, l.x1); writer.write(20, l.y1); writer.write(30, 0.0);
-                    writer.write(11, l.x2); writer.write(21, l.y2); writer.write(31, 0.0);
-                    break;
-                }
-                case 'circle': {
-                    const c = s as CircleShape;
-                    writeCommon("CIRCLE", "AcDbCircle");
-                    writer.write(10, c.x); writer.write(20, c.y); writer.write(30, 0.0);
-                    writer.write(40, c.radius);
-                    break;
-                }
-                case 'pline': {
-                    const p = s as PolyShape;
-                    writeCommon("LWPOLYLINE", "AcDbPolyline");
-                    writer.write(90, p.points.length);
-                    writer.write(70, p.closed ? 1 : 0);
-                    p.points.forEach(pt => {
-                        writer.write(10, pt.x);
-                        writer.write(20, pt.y);
-                    });
-                    break;
-                }
-                case 'text': {
-                    const t = s as TextShape;
-                    writeCommon("TEXT", "AcDbText");
-                    writer.write(10, t.x); writer.write(20, t.y); writer.write(30, 0.0);
-                    writer.write(40, t.size);
-                    writer.write(1, t.content);
-                    writer.write(50, (t.rotation || 0) * 180 / Math.PI);
-                    if (t.justification === 'center') {
-                        writer.write(72, 1);
-                        writer.write(11, t.x); writer.write(21, t.y); writer.write(31, 0);
-                    } else if (t.justification === 'right') {
-                        writer.write(72, 2);
-                        writer.write(11, t.x); writer.write(21, t.y); writer.write(31, 0);
-                    }
-                    break;
-                }
-                case 'mtext': {
-                    const t = s as MTextShape;
-                    writeCommon("MTEXT", "AcDbMText");
-                    writer.write(10, t.x); writer.write(20, t.y); writer.write(30, 0.0);
-                    writer.write(40, t.size);
-                    writer.write(41, t.width || 0);
-                    writer.write(1, t.content);
-                    writer.write(50, (t.rotation || 0) * 180 / Math.PI);
-                    break;
-                }
-                case 'arc': {
-                    const a = s as ArcShape;
-                    writeCommon("ARC", "AcDbCircle");
-                    writer.write(100, "AcDbArc");
-                    writer.write(10, a.x); writer.write(20, a.y); writer.write(30, 0.0);
-                    writer.write(40, a.radius);
-                    writer.write(50, (a.startAngle || 0) * 180 / Math.PI);
-                    writer.write(51, (a.endAngle || 0) * 180 / Math.PI);
-                    break;
-                }
-                case 'rect': {
-                    const r = s as RectShape;
-                    writeCommon("LWPOLYLINE", "AcDbPolyline");
-                    writer.write(90, 4);
-                    writer.write(70, 1);
-                    writer.write(10, r.x); writer.write(20, r.y);
-                    writer.write(10, r.x + r.width); writer.write(20, r.y);
-                    writer.write(10, r.x + r.width); writer.write(20, r.y + r.height);
-                    writer.write(10, r.x); writer.write(20, r.y + r.height);
-                    break;
-                }
-                case 'ellipse': {
-                    const e = s as EllipseShape;
-                    writeCommon("ELLIPSE", "AcDbEllipse");
-                    writer.write(10, e.x); writer.write(20, e.y); writer.write(30, 0.0);
-                    // Major axis vector
-                    const majorX = e.rx * Math.cos(e.rotation || 0);
-                    const majorY = e.rx * Math.sin(e.rotation || 0);
-                    writer.write(11, majorX); writer.write(21, majorY); writer.write(31, 0.0);
-                    writer.write(40, e.ry / e.rx);
-                    writer.write(41, 0.0); // Start parameter
-                    writer.write(42, 2 * Math.PI); // End parameter
-                    break;
-                }
-                case 'spline': {
-                    const sp = s as PolyShape;
-                    writeCommon("SPLINE", "AcDbSpline");
-                    writer.write(70, 8); // Planar + Closed if applicable
-                    writer.write(71, 3); // Degree 3 (Cubic)
-                    writer.write(72, 0); // Number of knots
-                    writer.write(73, sp.points.length); // Number of control points
-                    writer.write(74, 0); // Number of fit points
-                    sp.points.forEach(pt => {
-                        writer.write(10, pt.x);
-                        writer.write(20, pt.y);
-                        writer.write(30, 0.0);
-                    });
-                    break;
-                }
-                case 'block': {
-                    const i = s as any;
-                    writeCommon("INSERT", "AcDbBlockReference");
-                    writer.write(2, i.blockId);
-                    writer.write(10, i.x); writer.write(20, i.y); writer.write(30, 0.0);
-                    writer.write(41, i.scaleX || 1.0);
-                    writer.write(42, i.scaleY || 1.0);
-                    writer.write(43, i.scaleZ || 1.0);
-                    writer.write(50, (i.rotation || 0) * 180 / Math.PI);
-                    break;
-                }
-            }
+            writeEntity(writer, s, hMap["*MODEL_SPACE"] || "0", layers, settings);
         });
     });
 
@@ -611,18 +631,16 @@ export const dxfToProject = async (dxfString: string, defaultSettings: AppSettin
 
             switch (entity.type) {
                 case 'LINE':
-                    if (entity.vertices && entity.vertices.length >= 2) {
-                        const v1 = entity.vertices[0];
-                        const v2 = entity.vertices[1];
-                        if (isValid(v1.x) && isValid(v1.y) && isValid(v2.x) && isValid(v2.y)) {
-                            // Filter radiating ghost lines to origin
-                            const is1_0 = Math.abs(v1.x) < 1e-6 && Math.abs(v1.y) < 1e-6;
-                            const is2_0 = Math.abs(v2.x) < 1e-6 && Math.abs(v2.y) < 1e-6;
-                            const d = Math.sqrt((v1.x - v2.x)**2 + (v1.y - v2.y)**2);
-                            if ((is1_0 || is2_0) && d > 1e5 && !(is1_0 && is2_0)) return null;
+                    const v1 = (entity.vertices && entity.vertices[0]) || entity.start || { x: 0, y: 0 };
+                    const v2 = (entity.vertices && entity.vertices[1]) || entity.end || { x: 0, y: 0 };
+                    if (isValid(v1.x) && isValid(v1.y) && isValid(v2.x) && isValid(v2.y)) {
+                        // Filter radiating ghost lines to origin
+                        const is1_0 = Math.abs(v1.x) < 1e-6 && Math.abs(v1.y) < 1e-6;
+                        const is2_0 = Math.abs(v2.x) < 1e-6 && Math.abs(v2.y) < 1e-6;
+                        const d = Math.sqrt((v1.x - v2.x)**2 + (v1.y - v2.y)**2);
+                        if ((is1_0 || is2_0) && d > 1e5 && !(is1_0 && is2_0)) return null;
 
-                            return { id: nextId(), layer, color, thickness, lineType, type: 'line', x1: v1.x - offset.x, y1: v1.y - offset.y, x2: v2.x - offset.x, y2: v2.y - offset.y } as any;
-                        }
+                        return { id: nextId(), layer, color, thickness, lineType, type: 'line', x1: v1.x - offset.x, y1: v1.y - offset.y, x2: v2.x - offset.x, y2: v2.y - offset.y } as any;
                     }
                     break;
                 case 'CIRCLE':

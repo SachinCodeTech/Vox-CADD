@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, FileText, Settings2, Trash2, Plus, Info, ChevronDown, Palette, Edit3 } from 'lucide-react';
+import { X, FileText, Settings2, Trash2, Plus, Info, ChevronDown, Palette, Edit3, Check, Sliders } from 'lucide-react';
+import { motion } from 'motion/react';
 import { AppSettings, CtbFile, CtbPlotStyle, LineType } from '../types';
 import { createVoxCtb, createDefaultCtb, getDefaultLineweights } from '../services/ctbService';
 import { aciColors, hexToRgbStr } from '../services/colorUtils';
@@ -116,282 +117,330 @@ const CtbManager: React.FC<CtbManagerProps> = ({ isOpen, onClose, settings, onUp
 
   return (
     <div 
-      className="relative w-full sm:w-[850px] sm:max-w-[95vw] h-full sm:h-[80vh] sm:max-h-[750px] bg-[#0a0a0c] sm:rounded-[1.5rem] shadow-[0_60px_150px_rgba(0,0,0,0.9)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-300 border border-white/10 select-none font-sans"
+      className="relative w-full sm:w-[1040px] sm:max-w-[98vw] h-full sm:h-[92vh] sm:max-h-[880px] bg-[#0c0c0e]/95 backdrop-blur-3xl sm:rounded-[2.5rem] shadow-[0_100px_250px_rgba(0,0,0,1)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-500 border border-white/10 select-none font-sans"
       style={{ transform: window.innerWidth > 640 ? `translate(${pos.x}px, ${pos.y}px)` : undefined, zIndex: 1100 }}
     >
-      {/* Mobile Tab Switcher */}
-      <div className="md:hidden flex h-14 bg-[#121214] border-b border-white/5 shrink-0">
-          <button 
-            onClick={() => setActiveView('files')}
-            className={`flex-1 h-full text-[9px] font-black uppercase tracking-widest transition-all ${activeView === 'files' ? 'text-cyan-400 border-b-2 border-cyan-400 bg-cyan-400/5' : 'text-neutral-500'}`}
-          >
-            Styles
-          </button>
-          <button 
-            onClick={() => setActiveView('colors')}
-            className={`flex-1 h-full text-[9px] font-black uppercase tracking-widest transition-all ${activeView === 'colors' ? 'text-cyan-400 border-b-2 border-cyan-400 bg-cyan-400/5' : 'text-neutral-500'}`}
-          >
-            Colors
-          </button>
-          <button 
-            onClick={() => setActiveView('edit')}
-            className={`flex-1 h-full text-[9px] font-black uppercase tracking-widest transition-all ${activeView === 'edit' ? 'text-cyan-400 border-b-2 border-cyan-400 bg-cyan-400/5' : 'text-neutral-500'}`}
-          >
-            Settings
-          </button>
-      </div>
-
       {/* Dynamic Header */}
       <div 
-        className="flex justify-between items-center px-4 py-2.5 border-b border-white/5 bg-[#121214] sm:cursor-grab active:sm:cursor-grabbing touch-none shrink-0"
+        className="flex justify-between items-center px-8 py-6 border-b border-white/5 bg-[#0a0a0c] sm:cursor-grab active:sm:cursor-grabbing touch-none shrink-0"
         onMouseDown={e => window.innerWidth > 640 && startDrag(e.clientX, e.clientY)}
       >
-        <div className="flex items-center gap-2.5 pointer-events-none">
-          <div className="w-8 h-8 rounded-none bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center text-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.1)]">
-            <Palette size={16} />
+        <div className="flex items-center gap-5 pointer-events-none">
+          <div className="w-12 h-12 rounded-[1.25rem] bg-[#00bcd4] flex items-center justify-center text-black shadow-[0_0_30px_rgba(0,188,212,0.3)]">
+            <Palette size={24} strokeWidth={2.5} />
           </div>
           <div>
-            <h3 className="text-[10px] font-black text-white uppercase tracking-[0.1em] leading-none">Plot Style Manager</h3>
-            <p className="text-[6px] text-neutral-600 font-bold uppercase tracking-[0.1em] mt-0.5 flex items-center gap-1 leading-none">
-              <FileText size={7} /> STB/CTB CONFIGURATION
-            </p>
+            <h3 className="text-[14px] font-black text-white uppercase tracking-[0.25em] leading-none mb-1.5">Plot Style Manager</h3>
+            <div className="flex items-center gap-2">
+              <span className="text-[8px] text-cyan-400 font-black uppercase tracking-widest bg-cyan-400/10 px-2.5 py-1 rounded-md border border-cyan-400/20">VOX ENGINE ACTIVE</span>
+              {activeCtb && <span className="text-[8px] text-neutral-600 font-bold uppercase tracking-widest">Editing: {activeCtb.name}</span>}
+            </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-            <button onClick={onClose} className="w-7 h-7 flex items-center justify-center hover:bg-white/5 rounded-full text-neutral-600 hover:text-white transition-all"><X size={18} /></button>
+        <div className="flex items-center gap-3">
+            <button onClick={onClose} className="w-10 h-10 flex items-center justify-center bg-white/5 hover:bg-red-500 hover:text-white rounded-xl text-neutral-500 transition-all active:scale-95 group">
+              <X size={20} className="group-hover:rotate-90 transition-transform duration-300" />
+            </button>
         </div>
       </div>
 
       <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
-        {/* Sidebar: Files */}
-        <div className={`${activeView === 'files' ? 'flex' : 'hidden'} md:flex w-full md:w-48 border-b md:border-b-0 md:border-r border-white/5 bg-[#121214]/50 flex-col shrink-0`}>
-          <div className="p-2 space-y-1 flex-1 overflow-y-auto scrollbar-none">
-             <div className="text-[7.5px] font-black text-neutral-700 uppercase tracking-widest px-2 py-2">Available Tables</div>
+        {/* Sidebar: File Catalog */}
+        <div className="w-full md:w-72 border-b md:border-b-0 md:border-r border-white/5 bg-[#08080a] flex flex-col shrink-0">
+          <div className="flex-1 overflow-y-auto p-5 space-y-3 scrollbar-none">
+             <div className="flex items-center gap-3 px-2 pb-4">
+               <span className="text-[9px] font-black text-neutral-700 uppercase tracking-[0.3em]">Style Library</span>
+               <div className="flex-1 h-px bg-white/5" />
+             </div>
              {Object.values(ctbFiles).map(ctb => (
               <div 
                 key={`ctb-file-${ctb.id}`}
-                onClick={() => {
-                  setEditingCtbId(ctb.id);
-                  if (window.innerWidth < 768) setActiveView('colors');
-                }}
-                className={`group flex items-center justify-between p-1.5 rounded-none cursor-pointer transition-all border ${editingCtbId === ctb.id ? 'bg-cyan-500/10 border-cyan-500/30 text-white' : 'bg-black/20 text-neutral-500 border-white/5 hover:border-white/10 hover:text-neutral-400'}`}
+                onClick={() => setEditingCtbId(ctb.id)}
+                className={`group relative p-4 rounded-[1.25rem] cursor-pointer transition-all border-2 ${editingCtbId === ctb.id ? 'bg-cyan-400/10 text-white border-cyan-400/40 shadow-[0_10px_30px_rgba(0,188,212,0.1)]' : 'bg-transparent text-neutral-500 border-white/[0.03] hover:border-white/10 hover:text-neutral-300'}`}
               >
-                 <div className="flex items-center gap-2.5 flex-1 overflow-hidden">
-                    <FileText size={14} className={editingCtbId === ctb.id ? 'text-cyan-400' : 'text-neutral-700'} />
-                    {renamingId === ctb.id ? (
-                      <input 
-                        autoFocus
-                        className="bg-black border border-cyan-500/50 rounded px-1.5 py-0.5 text-[9px] font-black text-white w-full outline-none uppercase"
-                        value={newName}
-                        onChange={e => setNewName(e.target.value)}
-                        onBlur={() => handleRename(ctb.id)}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') handleRename(ctb.id);
-                          if (e.key === 'Escape') setRenamingId(null);
-                        }}
-                        onClick={e => e.stopPropagation()}
-                      />
-                    ) : (
-                      <span className="truncate text-[9px] font-black uppercase tracking-tight">{ctb.name}</span>
+                 <div className="relative z-10 flex items-center justify-between">
+                    <div className="flex items-center gap-4 truncate">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${editingCtbId === ctb.id ? 'bg-cyan-400 text-black shadow-[0_0_15px_rgba(0,188,212,0.5)]' : 'bg-white/5 text-neutral-700'}`}>
+                           <FileText size={18} />
+                        </div>
+                        {renamingId === ctb.id ? (
+                          <input 
+                            autoFocus
+                            className="bg-black/60 border-b-2 border-cyan-500 px-2 py-1 text-[11px] font-black text-white w-full outline-none uppercase"
+                            value={newName}
+                            onChange={e => setNewName(e.target.value)}
+                            onBlur={() => handleRename(ctb.id)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') handleRename(ctb.id);
+                              if (e.key === 'Escape') setRenamingId(null);
+                            }}
+                            onClick={e => e.stopPropagation()}
+                          />
+                        ) : (
+                          <div className="flex flex-col gap-0.5">
+                             <span className="text-[11px] font-black uppercase tracking-tight leading-none">{ctb.name}</span>
+                             <span className="text-[7px] text-neutral-600 font-black uppercase tracking-widest">{ctb.id === 'vox' || ctb.id === 'monochrome' ? 'SYSTEM DEFINED' : `INDEX: ${ctb.id.substring(4,8)}`}</span>
+                          </div>
+                        )}
+                    </div>
+                    {ctb.id !== 'vox' && ctb.id !== 'monochrome' && (
+                       <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); setRenamingId(ctb.id); setNewName(ctb.name); }}
+                            className="p-2 text-neutral-600 hover:text-cyan-400 transition-colors"
+                          >
+                            <Edit3 size={12} />
+                          </button>
+                       </div>
                     )}
                  </div>
-                 {ctb.id !== 'vox' && ctb.id !== 'monochrome' && (
-                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                     <button 
-                       onClick={(e) => { e.stopPropagation(); setRenamingId(ctb.id); setNewName(ctb.name); }}
-                       className="p-1.5 hover:text-cyan-400"
-                     >
-                       <Edit3 size={12} />
-                     </button>
-                     <button 
-                       onClick={(e) => { e.stopPropagation(); handleDeleteCtb(ctb.id); }}
-                       className="p-1.5 hover:text-red-500"
-                     >
-                       <Trash2 size={12} />
-                     </button>
-                   </div>
-                 )}
               </div>
             ))}
           </div>
-          <div className="p-3 bg-[#121214] border-t border-white/5">
+          <div className="p-6 bg-[#0a0a0c]/80 border-t border-white/5">
             <button 
               onClick={handleCreateCtb}
-              className="w-full flex items-center justify-center gap-2 bg-neutral-900 hover:bg-neutral-800 border border-white/5 text-neutral-400 py-2 rounded-none text-[8px] font-black uppercase tracking-widest transition-all active:scale-[0.98]"
+              className="w-full h-12 flex items-center justify-center gap-3 bg-cyan-400/5 hover:bg-cyan-400/10 border border-cyan-400/20 text-cyan-400 rounded-2xl text-[10px] font-black uppercase tracking-[0.25em] transition-all active:scale-95 group"
             >
-              <Plus size={12} /> New Style
+              <Plus size={16} className="group-hover:rotate-90 transition-transform" /> Add Catalog
             </button>
           </div>
         </div>
 
-        {/* Center: ACI Grid */}
-        <div className={`${activeView === 'colors' ? 'flex' : 'hidden'} md:flex w-full md:w-44 border-b md:border-b-0 md:border-r border-white/5 bg-black/40 flex-col shrink-0`}>
-            <div className="p-2 border-b border-white/5 flex justify-between items-center bg-[#121214]/50">
-                <span className="text-[7.5px] font-black text-neutral-600 uppercase tracking-widest">Pen Set</span>
-                <span className="text-[8px] font-mono text-cyan-400 font-bold px-1.5 py-0.5 bg-cyan-900/20 rounded-none">ACI {selectedAci}</span>
+        {/* Center: ACI Matrix */}
+        <div className="w-full md:w-[280px] border-b md:border-b-0 md:border-r border-white/5 bg-[#050507] flex flex-col shrink-0">
+            <div className="p-6 flex flex-col gap-2 border-b border-white/5 bg-white/[0.01]">
+                <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-black text-neutral-700 uppercase tracking-widest">Active ACI Index</span>
+                    <div className="flex items-center gap-2">
+                       <span className="text-[11px] font-black text-cyan-400 font-mono">{selectedAci}</span>
+                    </div>
+                </div>
+                <div className="w-full h-1.5 bg-white/[0.03] rounded-full overflow-hidden mt-1 pt-0.5">
+                    <motion.div 
+                      className="h-full bg-cyan-400" 
+                      animate={{ width: `${(selectedAci/255)*100}%` }}
+                      transition={{ type: 'spring', damping: 20 }}
+                    />
+                </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-1.5 grid grid-cols-6 sm:grid-cols-12 md:grid-cols-4 lg:grid-cols-5 gap-0.5 scrollbar-none content-start bg-[#0a0a0c]">
+            <div className="flex-1 overflow-y-auto p-5 grid grid-cols-8 md:grid-cols-4 gap-3 scrollbar-none content-start bg-gradient-to-b from-[#0a0a0c] to-transparent">
                 {aciColors.map((color, i) => {
-                    const aci = i;
-                    if (aci === 0) return null; // Skip ByBlock index 0 for now
+                    if (i === 0) return null; 
+                    const isSelected = selectedAci === i;
                     return (
                         <button 
-                            key={`ctb-aci-btn-${aci}`}
-                            onClick={() => {
-                              setSelectedAci(aci);
-                              if (window.innerWidth < 768) setActiveView('edit');
-                            }}
-                            className={`aspect-square rounded-none transition-all relative group flex items-center justify-center border shadow-sm ${selectedAci === aci ? 'ring-2 ring-cyan-500 ring-offset-1 ring-offset-black scale-105 z-10' : 'border-white/5 hover:border-white/20'}`}
+                            key={`aci-swatch-${i}`}
+                            onClick={() => setSelectedAci(i)}
+                            className={`aspect-square rounded-[0.8rem] transition-all relative group overflow-hidden border ${isSelected ? 'border-cyan-400 scale-110 shadow-[0_0_20px_rgba(0,188,212,0.3)] z-10' : 'border-white/[0.05] hover:border-white/20'}`}
                             style={{ backgroundColor: color }}
-                            title={`ACI ${aci}: ${hexToRgbStr(color)}`}
                         >
-                            <span className="text-[6px] font-black text-white mix-blend-difference pointer-events-none opacity-0 group-hover:opacity-100">{aci}</span>
+                            <span className="absolute inset-0 flex items-center justify-center text-[7px] font-black text-white mix-blend-difference opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">{i}</span>
+                            {isSelected && <div className="absolute inset-0 border-2 border-black/40 rounded-[0.7rem]" />}
                         </button>
                     )
                 })}
             </div>
         </div>
 
-        {/* Right Area: Detailed Style Editor */}
-        <div className={`${activeView === 'edit' ? 'flex' : 'hidden'} md:flex flex-1 bg-[#0a0a0c] flex-col overflow-hidden`}>
+        {/* Inspector Panel */}
+        <div className="flex-1 overflow-y-auto bg-[#0a0a0c] flex flex-col scrollbar-none">
           {activeCtb && currentStyle ? (
             <>
-              <div className="p-2 sm:p-2.5 bg-[#121214] border-b border-white/5 flex flex-col sm:flex-row items-center justify-between shrink-0 gap-2">
-                 <div className="flex items-center gap-2.5 w-full sm:w-auto">
-                    <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-none border-[2px] border-white/10 shadow-[0_5px_20px_rgba(0,0,0,0.5)] flex flex-col items-center justify-center shrink-0" style={{ backgroundColor: aciColors[selectedAci] }}>
-                        <span className="text-[9px] font-black text-white mix-blend-difference">{selectedAci}</span>
+              <div className="p-8 border-b border-white/5 bg-[#0c0c0e]/80 backdrop-blur-2xl flex items-center justify-between sticky top-0 z-20">
+                 <div className="flex items-center gap-8">
+                    <div 
+                      className="w-20 h-20 rounded-[1.75rem] border-4 border-white/10 shadow-[0_20px_40px_rgba(0,0,0,0.5)] relative flex items-center justify-center overflow-hidden active:scale-95 transition-transform" 
+                      style={{ backgroundColor: aciColors[selectedAci] }}
+                    >
+                        <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent pointer-events-none" />
+                        <span className="text-[24px] font-black text-white mix-blend-difference z-10">{selectedAci}</span>
                     </div>
                     <div className="flex flex-col">
-                        <span className="text-white font-black text-[11px] uppercase tracking-tight">ACI {selectedAci} Configuration</span>
-                        <div className="flex items-center gap-1.5">
-                           <div className="px-1 py-0.5 bg-neutral-900 border border-white/5 rounded-none text-[6px] font-mono text-neutral-500 font-bold uppercase">{hexToRgbStr(aciColors[selectedAci])}</div>
+                        <div className="flex items-center gap-3 mb-1">
+                          <h4 className="text-[18px] font-black text-white uppercase tracking-tight font-mono">ACI {selectedAci}</h4>
+                          <div className="px-2 py-0.5 rounded-md bg-white/5 border border-white/5 text-[8px] font-black text-neutral-500 uppercase tracking-widest">Pen Data</div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                           <span className="text-[10px] font-black text-cyan-400 uppercase tracking-[0.2em]">{hexToRgbStr(aciColors[selectedAci])}</span>
+                           <div className="w-[1.5px] h-3 bg-neutral-800 rounded-full" />
+                           <span className="text-[10px] font-black text-neutral-600 uppercase tracking-widest">Vector Translation Active</span>
                         </div>
                     </div>
                  </div>
                  
                  <button 
-                   onClick={() => onUpdateSettings({ ...settings, activeCtbId: editingCtbId || 'vox' })}
-                   className={`h-7 px-3 rounded-none text-[7px] font-black uppercase tracking-widest transition-all w-full sm:w-auto ${settings.activeCtbId === editingCtbId ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20' : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'}`}
+                  onClick={() => onUpdateSettings({ ...settings, activeCtbId: editingCtbId || 'vox' })}
+                  className={`px-6 py-3 rounded-2xl flex items-center gap-3 transition-all border-2 active:scale-95 ${settings.activeCtbId === editingCtbId ? 'bg-cyan-400 border-cyan-400 text-black shadow-[0_0_25px_rgba(0,188,212,0.3)]' : 'bg-white/5 border-white/10 text-neutral-600 hover:border-cyan-400/50 hover:text-cyan-400'}`}
                  >
-                   {settings.activeCtbId === editingCtbId ? '✓ ACTIVE TABLE' : 'SET AS DEFAULT'}
+                    <Check size={16} strokeWidth={4} />
+                    <span className="text-[10px] font-black uppercase tracking-[0.2em]">
+                        {settings.activeCtbId === editingCtbId ? 'Active Profile' : 'Set as Active'}
+                    </span>
                  </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5 sm:space-y-6 scrollbar-none">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-                    
-                    {/* Plot Color Control */}
-                    <div className="space-y-1">
-                      <label className="text-[7px] font-black text-neutral-600 uppercase tracking-widest px-1">Mapping Behavior</label>
-                      <div 
-                        className="bg-[#121214] border border-white/5 p-2 rounded-none transition-all group hover:border-white/20 hover:bg-neutral-800/20 cursor-pointer"
-                        onClick={() => {
-                          onOpenColorSelector(currentStyle.plotColor === 'useObjectColor' ? aciColors[selectedAci] : currentStyle.plotColor, (color) => {
-                            handleUpdateStyle(selectedAci, { plotColor: color });
-                          }, `Plot Color Map [ACI ${selectedAci}]`);
-                        }}
-                      >
-                        <div className="flex items-center justify-between mb-1.5 px-0.5">
-                            <span className="text-[8px] font-black text-neutral-400 uppercase">Plot Color</span>
-                            <div className="w-4 h-4 rounded-none border border-white/10" style={{ backgroundColor: currentStyle.plotColor === 'useObjectColor' ? aciColors[selectedAci] : currentStyle.plotColor }} />
+              <div className="p-10 space-y-14">
+                 {/* Property Section: Output Color */}
+                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-start">
+                    <div className="space-y-5">
+                        <div className="flex items-center gap-3 px-1 text-neutral-500 group">
+                           <div className="w-2 h-2 rounded-full bg-cyan-500" />
+                           <span className="text-[11px] font-black uppercase tracking-[0.35em]">Plot Output Color</span>
                         </div>
-                        <div className="flex items-center justify-between bg-black/40 rounded-none px-2 py-1.5 border border-white/5">
-                            <span className="text-[7.5px] font-mono text-cyan-400 font-bold">{currentStyle.plotColor === 'useObjectColor' ? 'USE OBJECT COLOR' : currentStyle.plotColor}</span>
-                            <ChevronDown size={10} className="text-neutral-700" />
+                        <div className="p-7 bg-[#0d0d0f] border border-white/5 rounded-[2rem] group hover:border-cyan-400/20 transition-all shadow-2xl">
+                           <div 
+                             className="flex items-center justify-between bg-black/60 p-5 rounded-2xl border border-white/5 mb-5 group/color-btn cursor-pointer active:scale-95 transition-all"
+                             onClick={() => onOpenColorSelector(currentStyle.plotColor === 'useObjectColor' ? aciColors[selectedAci] : currentStyle.plotColor, (color) => {
+                                handleUpdateStyle(selectedAci, { plotColor: color });
+                             }, `MAPPING COLOR [ACI ${selectedAci}]`)}
+                           >
+                                <div className="flex items-center gap-5">
+                                    <div className="w-12 h-12 rounded-xl border-2 border-white/10 shadow-lg" style={{ backgroundColor: currentStyle.plotColor === 'useObjectColor' ? aciColors[selectedAci] : currentStyle.plotColor }} />
+                                    <div className="flex flex-col gap-0.5">
+                                        <span className="text-[11px] font-black text-white uppercase tracking-tight">{currentStyle.plotColor === 'useObjectColor' ? 'Native Object Color' : 'Custom Plot Mapping'}</span>
+                                        <span className="text-[9px] font-mono text-neutral-600 font-bold uppercase tracking-widest">{currentStyle.plotColor === 'useObjectColor' ? 'Dynamic Binding' : currentStyle.plotColor}</span>
+                                    </div>
+                                </div>
+                                <div className="w-10 h-10 rounded-full border border-white/5 flex items-center justify-center text-neutral-700 group-hover/color-btn:text-cyan-400 group-hover/color-btn:bg-cyan-400/10 transition-all">
+                                    <ChevronDown size={20} />
+                                </div>
+                           </div>
+                           <p className="px-2 text-[9px] text-neutral-700 font-bold uppercase tracking-tight leading-relaxed italic opacity-80">Renders all geometry of this ACI index to the specified output color during plot operations.</p>
                         </div>
-                        {currentStyle.plotColor !== 'useObjectColor' && (
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); handleUpdateStyle(selectedAci, { plotColor: 'useObjectColor' }); }}
-                            className="mt-2 w-full text-[7px] font-black text-cyan-500 hover:text-cyan-400 uppercase tracking-widest bg-cyan-500/5 py-1.5 rounded border border-cyan-500/10 transition-all"
-                          >
-                            Reset to Object Color
-                          </button>
-                        )}
-                      </div>
                     </div>
 
-                    {/* Lineweight Control */}
-                    <div className="space-y-1">
-                      <label className="text-[7px] font-black text-neutral-600 uppercase tracking-widest px-1">Pen Dimensions</label>
-                      <div className="bg-[#121214] border border-white/5 p-2 rounded-none">
-                        <div className="flex items-center justify-between mb-1.5 px-0.5">
-                            <span className="text-[8px] font-black text-neutral-400 uppercase">Lineweight</span>
-                            <span className="text-[7px] font-mono text-cyan-400 font-black">ISO_MM</span>
+                    <div className="space-y-5">
+                        <div className="flex items-center gap-3 px-1 text-neutral-500 group">
+                           <div className="w-2 h-2 rounded-full bg-cyan-500" />
+                           <span className="text-[11px] font-black uppercase tracking-[0.35em]">Lineweight Override</span>
                         </div>
-                        <div className="relative">
-                            <select 
-                                value={currentStyle.lineweight}
-                                onChange={(e) => handleUpdateStyle(selectedAci, { lineweight: e.target.value === 'useObjectLineweight' ? 'useObjectLineweight' : parseFloat(e.target.value) })}
-                                className="w-full bg-black/40 border border-white/5 text-cyan-400 text-[8px] font-mono p-1.5 rounded-none outline-none focus:border-cyan-500/30 transition-all appearance-none text-center font-black"
-                            >
-                                <option value="useObjectLineweight">USE OBJECT LINEWEIGHT</option>
-                                {lineweights.map((lw) => (
-                                <option key={`lw-opt-${lw}`} value={lw}>{lw === 0 ? '0.00 (Hairline)' : lw.toFixed(2) + ' mm'}</option>
-                                ))}
-                            </select>
-                            <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
-                                <ChevronDown size={11} className="text-neutral-700" />
-                            </div>
+                        <div className="p-7 bg-[#0d0d0f] border border-white/5 rounded-[2rem] group hover:border-cyan-400/20 transition-all shadow-2xl">
+                           <div className="relative group/select">
+                               <select 
+                                   value={currentStyle.lineweight}
+                                   onChange={(e) => handleUpdateStyle(selectedAci, { lineweight: e.target.value === 'useObjectLineweight' ? 'useObjectLineweight' : parseFloat(e.target.value) })}
+                                   className="w-full bg-black/60 border border-white/5 text-white text-[14px] font-mono p-5 rounded-2xl outline-none appearance-none font-black text-center tracking-[0.2em] hover:border-cyan-400/30 transition-all"
+                               >
+                                   <option value="useObjectLineweight">USE OBJECT WEIGHT</option>
+                                   {lineweights.map((lw) => (
+                                   <option key={`lw-${lw}`} value={lw}>{lw === 0 ? '0.00' : lw.toFixed(2)} MM</option>
+                                   ))}
+                                </select>
+                                <div className="absolute right-6 top-1/2 -translate-y-1/2 text-neutral-700 pointer-events-none group-hover/select:text-cyan-400 transition-colors">
+                                    <ChevronDown size={22} />
+                                </div>
+                           </div>
+                           <div className="mt-6 flex flex-col gap-3">
+                               <div className="flex items-center justify-between text-[8px] font-black text-neutral-700 uppercase tracking-widest px-1">
+                                  <span>HAIRLINE (0.00MM)</span>
+                                  <span>HEAVY (2.11MM)</span>
+                               </div>
+                               <div className="w-full h-2 bg-black/60 rounded-full overflow-hidden border border-white/5 p-0.5">
+                                  <motion.div 
+                                    className="h-full bg-cyan-400 rounded-full shadow-[0_0_15px_rgba(0,188,212,0.5)]" 
+                                    initial={{ width: 0 }}
+                                    animate={{ width: currentStyle.lineweight === 'useObjectLineweight' ? '0%' : `${Math.min(100, (currentStyle.lineweight as number)*45)}%` }}
+                                  />
+                               </div>
+                           </div>
                         </div>
-                      </div>
                     </div>
-                </div>
+                 </div>
 
-                <div className="h-px bg-white/5" />
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                     <div className="space-y-1.5">
-                        <div className="flex justify-between items-center px-0.5">
-                            <label className="text-[7.5px] font-black text-neutral-600 uppercase tracking-widest">Screening (Intensity)</label>
-                            <span className="text-[8px] font-mono text-white font-bold">{currentStyle.screening}%</span>
+                 {/* Property Section: Screening */}
+                 <div className="space-y-6">
+                    <div className="flex items-center justify-between px-2">
+                        <div className="flex items-center gap-3 text-neutral-500 group">
+                           <div className="w-2 h-2 rounded-full bg-cyan-500" />
+                           <span className="text-[11px] font-black uppercase tracking-[0.35em]">Screening Intensity</span>
                         </div>
+                        <div className="flex items-baseline gap-1">
+                            <span className="text-[20px] font-mono text-cyan-400 font-black tracking-tight">{currentStyle.screening}</span>
+                            <span className="text-[10px] font-black text-neutral-700 uppercase">% LEVEL</span>
+                        </div>
+                    </div>
+                    <div className="p-10 bg-[#0d0d0f] border border-white/5 rounded-[2.5rem] shadow-2xl relative overflow-hidden group">
+                        <div className="absolute inset-0 bg-cyan-400 opacity-[0.01] group-hover:opacity-[0.03] transition-opacity pointer-events-none" />
                         <input 
                             type="range" 
                             min="0" max="100" step="5"
                             value={currentStyle.screening}
                             onChange={(e) => handleUpdateStyle(selectedAci, { screening: parseInt(e.target.value) })}
-                            className="w-full h-1 bg-neutral-900 rounded-none appearance-none cursor-pointer accent-cyan-500"
+                            className="w-full h-3 bg-black rounded-full appearance-none cursor-pointer accent-cyan-400 hover:accent-cyan-300 transition-all border border-white/5"
                         />
-                     </div>
-
-                     <div className="flex items-center gap-2.5 bg-yellow-500/5 p-2 rounded-none border border-yellow-500/10">
-                        <Info size={11} className="text-yellow-500 shrink-0" />
-                        <div className="space-y-0">
-                            <span className="text-[6.5px] font-black text-yellow-500 uppercase tracking-widest">Pro Tip</span>
-                            <p className="text-[6.5px] text-neutral-500 font-bold uppercase tracking-wide leading-tight">
-                                Use screening at 50% for background references (XREFs).
-                            </p>
+                        <div className="flex justify-between mt-8 px-2">
+                            {[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map(v => (
+                                <div key={`screen-mark-${v}`} className="flex flex-col items-center gap-3">
+                                    <div className={`w-[2px] rounded-full transition-all duration-500 ${currentStyle.screening >= v ? 'bg-cyan-400 h-4 shadow-[0_0_8px_cyan]' : 'bg-neutral-800 h-2'}`} />
+                                    <span className={`text-[8px] font-black transition-colors duration-500 ${currentStyle.screening >= v ? 'text-white' : 'text-neutral-800'}`}>{v}</span>
+                                </div>
+                            ))}
                         </div>
-                     </div>
-                </div>
+                    </div>
+                 </div>
+
+                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    {[
+                        { label: 'TERMINAL ENDS', icon: <BoxSelect size={14} />, val: 'BUTT/SQUARE' },
+                        { label: 'JOINT TYPE', icon: <Maximize2 size={14} />, val: 'MITER_ANGLE' },
+                        { label: 'FILL ALGORITHM', icon: <Palette size={14} />, val: 'SOLID_SCAN' }
+                    ].map(card => (
+                        <div key={card.label} className="p-6 bg-white/[0.02] border border-white/5 rounded-3xl flex items-center justify-between group hover:bg-white/[0.05] hover:border-cyan-400/20 transition-all cursor-pointer active:scale-95">
+                            <div className="flex flex-col gap-1.5">
+                                <span className="text-[8px] font-black text-neutral-700 uppercase tracking-[0.25em]">{card.label}</span>
+                                <span className="text-[12px] font-black text-neutral-400 uppercase tracking-tight group-hover:text-cyan-400 transition-colors">{card.val}</span>
+                            </div>
+                            <div className="w-10 h-10 rounded-xl bg-black/40 flex items-center justify-center text-neutral-800 group-hover:text-cyan-400 group-hover:bg-cyan-400/10 transition-all border border-white/5 group-hover:border-cyan-400/20">
+                                {card.icon}
+                            </div>
+                        </div>
+                    ))}
+                 </div>
               </div>
             </>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-[#0a0a0c]">
-               <div className="w-16 h-16 rounded-none bg-[#121214] flex items-center justify-center mb-5 border border-white/5 shadow-2xl">
-                  <Palette size={28} className="text-neutral-800" />
+            <div className="flex-1 flex flex-col items-center justify-center p-20 text-center">
+               <div className="w-40 h-40 rounded-[3rem] bg-white/[0.02] flex items-center justify-center mb-10 border-2 border-white/[0.03] group relative">
+                  <div className="absolute inset-0 bg-cyan-400/5 blur-3xl opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <Palette size={80} className="text-neutral-900 group-hover:scale-110 group-hover:text-cyan-400 transition-all duration-1000 relative z-10" />
                </div>
-               <h4 className="text-[11px] font-black text-neutral-400 uppercase tracking-[0.2em] mb-1.5">Select a Plot Style</h4>
-               <p className="text-neutral-600 max-w-[220px] text-[8px] font-bold uppercase tracking-[0.1em] leading-relaxed">
-                 Configure specific color mapping to override how objects render.
+               <h4 className="text-[20px] font-black text-neutral-800 uppercase tracking-[0.5em] mb-6">STANDBY STATE</h4>
+               <p className="max-w-[360px] text-[11px] font-bold uppercase tracking-[0.2em] leading-relaxed text-neutral-700 opacity-60">
+                 PEN DRIVER HAS NOT RECEIVED TARGET CATALOG DATA. PLEASE SELECT A CTB FILE FROM THE LEFT LIBRARY TO BEGIN MAPPING.
                </p>
             </div>
           )}
         </div>
       </div>
 
-      {/* Footer Actions */}
-      <div className="px-4 py-2.5 bg-[#121214] border-t border-white/5 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-            <span className="text-[8px] font-black text-neutral-600 uppercase tracking-widest">Sync Active</span>
+      {/* Persistence Bar */}
+      <div className="px-12 py-8 bg-[#0a0a0c] border-t border-white/5 flex items-center justify-between shrink-0 shadow-[0_-40px_80px_rgba(0,0,0,0.8)] z-30">
+          <div className="flex items-center gap-8">
+             <div className="flex items-center gap-3">
+                <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_15px_rgba(0,188,212,0.8)]" />
+                <span className="text-[10px] font-black text-neutral-700 uppercase tracking-[0.4em]">SYSTEM LINK SECURE</span>
+             </div>
+             <div className="h-5 w-px bg-white/10" />
+             <div className="flex flex-col">
+                <span className="text-[8px] font-black text-neutral-800 uppercase tracking-widest leading-none mb-1">SERVICE_CORE_ID</span>
+                <span className="text-[10px] font-mono text-neutral-600 font-bold uppercase leading-none">VOXCADD_CTB_01.KERNEL</span>
+             </div>
           </div>
-          <button 
-            onClick={onClose}
-            className="bg-cyan-500 hover:bg-cyan-400 text-black px-6 py-2.5 rounded-none text-[9px] font-black uppercase tracking-[0.2em] shadow-xl shadow-cyan-500/10 transition-all active:scale-[0.98]"
-          >
-            Save Manager State
-          </button>
+          <div className="flex items-center gap-8">
+              <button 
+                onClick={onClose}
+                className="text-[11px] font-black uppercase tracking-[0.3em] text-neutral-700 hover:text-white transition-all hover:tracking-[0.4em] active:scale-95"
+              >
+                DISCARD CHANGES
+              </button>
+              <button 
+                onClick={onClose}
+                className="h-14 px-14 rounded-2xl bg-cyan-400 text-black text-[12px] font-black uppercase tracking-[0.3em] shadow-[0_15px_45px_rgba(0,188,212,0.4)] hover:bg-cyan-300 hover:shadow-[0_20px_60px_rgba(0,188,212,0.5)] transition-all active:scale-95"
+              >
+                COMMIT PEN TABLE
+              </button>
+          </div>
       </div>
     </div>
   );

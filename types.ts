@@ -109,7 +109,9 @@ export interface TextShape extends BaseShape {
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
+  strikethrough?: boolean;
   highlight?: boolean;
+  highlightColor?: string;
   fontFamily?: string;
   attachmentPoint?: number;
 }
@@ -129,7 +131,9 @@ export interface MTextShape extends BaseShape {
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
+  strikethrough?: boolean;
   highlight?: boolean;
+  highlightColor?: string;
   fontFamily?: string;
   attachmentPoint?: number;
 }
@@ -388,6 +392,11 @@ export interface AppSettings {
   textSize: number;
   textRotation: number;
   textJustification: TextJustification;
+  textBold?: boolean;
+  textItalic?: boolean;
+  textUnderline?: boolean;
+  textStrikethrough?: boolean;
+  textHighlight?: boolean;
   activeDimStyle: string;
   dimStyles: Record<string, DimensionStyle>;
   ltScale: number;
@@ -396,6 +405,7 @@ export interface AppSettings {
   metadata?: ProjectMetadata;
   activeCtbId?: string;
   ctbFiles?: Record<string, CtbFile>;
+  showCtbInView?: boolean;
 }
 
 export interface VoxProject {

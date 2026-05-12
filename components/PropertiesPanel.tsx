@@ -212,7 +212,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   }
 
   const LINE_WEIGHTS = [
-    "DEFAULT", "0.00 (Hairline)", "0.05", "0.09", "0.13", "0.15", "0.18", "0.20", "0.25",
+    "DEFAULT", "0.00", "0.05", "0.09", "0.13", "0.15", "0.18", "0.20", "0.25",
     "0.30", "0.35", "0.40", "0.50", "0.60", "0.70", "0.80", "1.00", "1.40", "2.00", "2.11"
   ];
 
@@ -624,15 +624,6 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                         </select>
                                         <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-neutral-600 transition-colors group-hover/select:text-[#00bcd4]">
                                             <ChevronDown size={11} />
-                                        </div>
-                                    </div>
-                                    <div className="w-16 flex flex-col items-center gap-1">
-                                        <div className="text-[7px] text-neutral-600 font-black uppercase">Weight</div>
-                                        <div className="w-full h-[3px] bg-white/[0.05] rounded-full overflow-hidden">
-                                            <div 
-                                                className="h-full bg-[#00bcd4]" 
-                                                style={{ width: `${Math.min(100, (parseFloat(String(s.thickness === 'BYLAYER' ? (layers[s.layer]?.thickness || 0.25) : s.thickness)) || 0.25) * 40)}%` }}
-                                            />
                                         </div>
                                     </div>
                                 </div>

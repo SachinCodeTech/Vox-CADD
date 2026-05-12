@@ -17,7 +17,7 @@ interface LayerManagerProps {
 }
 
 const LINE_WEIGHTS = [
-    "DEFAULT", "0.00 (Hairline)", "0.05", "0.09", "0.13", "0.15", "0.18", "0.20", "0.25",
+    "DEFAULT", "0.00 Lightweight", "0.05", "0.09", "0.13", "0.15", "0.18", "0.20", "0.25",
     "0.30", "0.35", "0.40", "0.50", "0.60", "0.70", "0.80", "1.00", "1.40", "2.00", "2.11"
 ];
 
@@ -202,8 +202,11 @@ const LayerManager: React.FC<LayerManagerProps> = ({
                 return (
                   <div 
                     key={`${layer.id}-${i}`}
-                    className={`flex items-center transition-all border-b border-white/[0.03] no-tap group cursor-pointer ${isActive ? 'bg-cyan-500/[0.08]' : 'hover:bg-neutral-800/40'}`}
-                    onClick={() => onSetActive(layer.id)}
+                    className={`flex items-center transition-colors border-b border-white/[0.03] no-tap group cursor-pointer relative 
+                      ${isActive 
+                        ? 'bg-cyan-500/10 shadow-[inset_3px_0_0_#06b6d4,inset_0_1px_0_rgba(255,255,255,0.05),inset_0_-1px_0_rgba(0,0,0,0.1)]' 
+                        : 'hover:bg-white/[0.04]'}`}
+                    onPointerDown={() => onSetActive(layer.id)}
                   >
                     {/* Status Column */}
                     <div className="w-10 flex justify-center shrink-0 py-1 border-r border-white/5">
@@ -340,7 +343,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({
                                 value={layer.lineType} 
                                 onClick={e => e.stopPropagation()}
                                 onChange={e => onUpdateLayer(layer.id, { lineType: e.target.value as LineType })} 
-                                className="w-full bg-[#0d0d0f]/60 border border-white/5 rounded-lg pl-2 pr-6 py-2 text-[9px] text-neutral-300 outline-none uppercase font-black tracking-tight cursor-pointer appearance-none transition-all hover:border-[#00bcd4]/30 hover:bg-black focus:ring-1 focus:ring-[#00bcd4]/20"
+                                className="w-full bg-[#0d0d0f]/60 border border-white/5 rounded-lg pl-2 pr-6 py-2 text-[9px] text-neutral-300 outline-none uppercase font-black tracking-tight cursor-pointer appearance-none transition-all hover:border-white/20 hover:bg-black focus:ring-1 focus:ring-white/10"
                             >
                                 {allLineTypes.map((lt, idx) => <option key={`${lt.value}-${idx}`} value={lt.value} className="bg-[#121214] text-white py-2">{lt.label}</option>)}
                             </select>
@@ -360,18 +363,12 @@ const LayerManager: React.FC<LayerManagerProps> = ({
                             onClick={e => e.stopPropagation()}
                             onChange={e => {
                                 const val = e.target.value;
-                                onUpdateLayer(layer.id, { thickness: val === 'DEFAULT' ? 'DEFAULT' : parseFloat(val) });
+                                onUpdateLayer(layer.id, { thickness: (val === 'DEFAULT' || val === '0.00 Lightweight') ? (val === 'DEFAULT' ? 'DEFAULT' : 0.0) : parseFloat(val) });
                             }} 
-                            className="w-full bg-[#0d0d0f]/60 border border-white/5 rounded-lg px-2 py-1.5 text-[9px] text-neutral-300 outline-none font-mono cursor-pointer appearance-none text-center transition-all hover:border-[#00bcd4]/30 hover:bg-black focus:ring-1 focus:ring-[#00bcd4]/20 shadow-inner"
+                            className="w-full bg-[#0d0d0f]/60 border border-white/5 rounded-lg px-2 py-1.5 text-[9px] text-neutral-300 outline-none font-mono cursor-pointer appearance-none text-center transition-all hover:border-white/20 hover:bg-black focus:ring-1 focus:ring-white/10 shadow-inner"
                         >
-                            {LINE_WEIGHTS.map((w, idx) => <option key={`${w}-${idx}`} value={w} className="bg-[#121214] text-white py-2">{w}{w !== 'DEFAULT' ? 'mm' : ''}</option>)}
+                            {LINE_WEIGHTS.map((w, idx) => <option key={`${w}-${idx}`} value={w} className="bg-[#121214] text-white py-2">{w}{w !== 'DEFAULT' && w !== '0.00 Lightweight' ? 'mm' : ''}</option>)}
                         </select>
-                        <div className="w-16 h-[2px] bg-white/[0.03] rounded-full overflow-hidden">
-                            <div 
-                                className="h-full bg-cyan-400" 
-                                style={{ width: `${Math.min(100, (parseFloat(String(layer.thickness)) || 0.25) * 40)}%` }}
-                            />
-                        </div>
                     </div>
 
                     {/* Plot Style */}

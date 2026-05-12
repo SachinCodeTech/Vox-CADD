@@ -44,7 +44,7 @@ import {
   ArrayCommand, BlockCommand, InsertCommand, FilterCommand, FindCommand, ViewportCommand, LayoutCommand, GripEditCommand, ImportCommand
 } from '../services/commandEngine';
 import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType, BlockDefinition, LayoutDefinition, LayoutViewport, LineTypeDefinition } from '../types';
-import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive, AlertTriangle, Cpu, Move, Copy, Maximize2, FlipHorizontal, Trash2, History, Palette } from 'lucide-react';
+import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive, AlertTriangle, Cpu, Move, Copy, Maximize2, FlipHorizontal, Trash2, History, Palette, Check, Settings2, Terminal } from 'lucide-react';
 
 import VoxIcon from './VoxIcon';
 import ImportSummaryDialog from './ImportSummaryDialog';
@@ -185,6 +185,9 @@ const App: React.FC = () => {
     setFileNameMenuOpen(!fileNameMenuOpen);
     setFileMenuOpen(false);
   };
+  const [ctbFlyoutOpen, setCtbFlyoutOpen] = useState(false);
+  const [layerFlyoutOpen, setLayerFlyoutOpen] = useState(false);
+  const [simplifiedLayerMenu, setSimplifiedLayerMenu] = useState(false);
   const [activeCategory, setActiveCategory] = useState<ToolbarCategory>('Draw');
   const [isViewportActive, setIsViewportActive] = useState(false);
   const [activeViewportId, setActiveViewportId] = useState<string | null>(null);
@@ -850,7 +853,13 @@ const App: React.FC = () => {
                 setLoadingFile(false);
                 return;
             }
-            project = voxToProject(content);
+            try {
+                project = voxToProject(content);
+            } catch (e) {
+                console.warn("VOX parsing failed, trying DXF fallback", e);
+                project = null;
+            }
+            
             // Fallback for DXF-formatted .vox files (legacy or renamed)
             if (!project && (content.trim().startsWith('999') || content.includes('SECTION'))) {
                 project = await dxfToProject(content, settingsRef.current);
@@ -920,7 +929,23 @@ const App: React.FC = () => {
                 setLineTypes(project.lineTypes || { 'continuous': { name: 'continuous', description: 'Solid line', pattern: [] } });
                 setSettings(project.settings);
                 setBlocks(project.blocks || {});
-                setLayouts(project.layouts ? Object.values(project.layouts) : []);
+                setLayouts(() => {
+                    const layoutsArr = project.layouts ? Object.values(project.layouts) : [];
+                    if (layoutsArr.length === 0) {
+                        const defaultLayout = { id: 'layout1', name: 'Layout 1', paperSize: { width: 297, height: 210 }, viewports: [] };
+                        setTabViews(prev => ({ ...prev, model: prev.model || INITIAL_VIEW, layout1: { scale: 3, originX: 0, originY: 0 } }));
+                        return [defaultLayout];
+                    }
+                    const newTabViews: Record<string, ViewState> = { model: tabViews.model || INITIAL_VIEW };
+                    layoutsArr.forEach((l: any) => {
+                        newTabViews[l.id] = { scale: 3, originX: 0, originY: 0 };
+                    });
+                    setTabViews(newTabViews);
+                    return layoutsArr as LayoutDefinition[];
+                });
+                setActiveTab('model'); // Always reset to model on open
+                setIsViewportActive(false);
+                setActiveViewportId(null);
                 setCurrentFileName(fileName);
                 setFileSource(source);
                 updateRecentFiles(fileName);
@@ -1118,6 +1143,16 @@ const App: React.FC = () => {
             commitToHistory();
         }
         break;
+      case 'selectAll': {
+        const allShapes = Object.values(layersRef.current).flat() as Shape[];
+        const selectableIds = allShapes.filter(s => {
+          const conf = layerConfigRef.current[s.layer];
+          return conf && !conf.locked && !conf.frozen && conf.visible;
+        }).map(s => s.id);
+        setSelectedIds(selectableIds);
+        setLogMessage(`SELECTED ${selectableIds.length} OBJECTS`);
+        break;
+      }
       case 'toggleAbout': setActivePanel(activePanel === 'about' ? 'none' : 'about'); break;
       case 'togglePrivacy': setActivePanel(activePanel === 'privacy' ? 'none' : 'privacy'); break;
       case 'zoomExtents':
@@ -1643,10 +1678,7 @@ const App: React.FC = () => {
                     break;
                 case 'z':
                     e.preventDefault();
-                    if (e.shiftKey) { 
-                        // Redo logic
-                        handleAction('redo');
-                    }
+                    if (e.shiftKey) handleAction('redo');
                     else handleAction('undo');
                     break;
                 case 'y':
@@ -1654,6 +1686,40 @@ const App: React.FC = () => {
                         e.preventDefault();
                         handleAction('redo');
                     }
+                    break;
+                case 'a':
+                    e.preventDefault();
+                    handleAction('selectAll');
+                    break;
+            }
+        } else {
+            switch(e.key) {
+                case 'F3':
+                    e.preventDefault();
+                    setSettings(prev => ({ ...prev, snap: !prev.snap }));
+                    setLogMessage(settingsRef.current.snap ? "OSNAP_OFF" : "OSNAP_ON");
+                    break;
+                case 'F7':
+                    e.preventDefault();
+                    setSettings(prev => ({ ...prev, grid: !prev.grid }));
+                    setLogMessage(settingsRef.current.grid ? "GRID_OFF" : "GRID_ON");
+                    break;
+                case 'F8':
+                    e.preventDefault();
+                    setSettings(prev => ({ ...prev, ortho: !prev.ortho }));
+                    setLogMessage(settingsRef.current.ortho ? "ORTHO_OFF" : "ORTHO_ON");
+                    break;
+                case 'F10':
+                    e.preventDefault();
+                    setSettings(prev => ({ ...prev, polarTrackingEnabled: !prev.polarTrackingEnabled }));
+                    setLogMessage(settingsRef.current.polarTrackingEnabled ? "POLAR_OFF" : "POLAR_ON");
+                    break;
+                case 'F11':
+                    e.preventDefault();
+                    // OTRACK is essentially tracked by having snap on and hover logic, 
+                    // but we can have a toggle for the acquisition logic if needed.
+                    // For now, let's treat F11 as a UX toggle for tracking visibility.
+                    setLogMessage("OTRACK_TOGGLED");
                     break;
             }
         }
@@ -1690,6 +1756,16 @@ const App: React.FC = () => {
       } else if (e.key === 'Delete' || (e.key === 'Backspace' && !isNavigatingInput())) {
         if (!engineRef.current?.active && selectedIds.length > 0) {
             handleAction('erase');
+        }
+      } else if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 && !isNavigatingInput()) {
+        if (e.key.toLowerCase() === 'z') {
+           e.preventDefault();
+           handleAction('zoomRealTime');
+        } else {
+          const cmdInput = document.getElementById('command-input') as HTMLInputElement;
+          if (cmdInput) {
+            cmdInput.focus();
+          }
         }
       }
     };
@@ -1929,7 +2005,16 @@ const App: React.FC = () => {
       
       setActiveCommandName(cmd.name);
       engineRef.current!.start(cmd);
-      if (args) engineRef.current!.input(args);
+      
+      if (args) {
+          // Robust multi-part argument handling for AI emitted strings like "dim 0,0 500,500" or "l 10,10 20,20 30,30"
+          // We split by spaces but carefully preserve coordinate pairs if they don't have spaces
+          // If the engine fails to consume the whole string at once, we try feeding it parts
+          const inputParts = args.split(/\s+/);
+          inputParts.forEach(part => {
+              if (part.trim()) engineRef.current!.input(part.trim());
+          });
+      }
     } else {
         setLogMessage(`ERR: CMD NOT FOUND [${cmdKey}]`);
         setIsCommandActive(false);
@@ -2212,10 +2297,133 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        <button onClick={() => handleAction('toggleMainMenu')} className="p-2 transition-all text-white no-tap hover:text-cyan-400">
-          <Menu size={18} />
-        </button>
+        <div className="flex items-center gap-4">
+          <div className="relative group/status-toggle">
+            <button 
+              onPointerDown={(e) => {
+                const timer = setTimeout(() => {
+                  if (settings.showCtbInView) {
+                    setCtbFlyoutOpen(true);
+                  } else {
+                    setSimplifiedLayerMenu(true);
+                    setLayerFlyoutOpen(true);
+                  }
+                  if (navigator.vibrate) navigator.vibrate(5);
+                }, 400);
+                const clear = () => clearTimeout(timer);
+                e.currentTarget.addEventListener('pointerup', clear, { once: true });
+                e.currentTarget.addEventListener('pointerleave', clear, { once: true });
+              }}
+              onClick={() => {
+                if(navigator.vibrate) navigator.vibrate(2);
+                setSettings(s => ({ ...s, showCtbInView: !s.showCtbInView }));
+              }}
+              className={`text-[9px] font-black uppercase tracking-widest px-2 h-full flex items-center transition-all ${settings.showCtbInView ? 'text-cyan-400' : 'text-neutral-500 hover:text-cyan-400'}`}
+            >
+              {settings.showCtbInView ? 'CTB' : 'LAYER'}
+            </button>
+            
+            {/* Layer Quick Switch Flyout */}
+            {layerFlyoutOpen && (
+              <>
+                <div className="fixed inset-0 z-[1000]" onClick={() => { setLayerFlyoutOpen(false); setSimplifiedLayerMenu(false); }} />
+                <div className="absolute top-full right-0 mt-2 bg-[#0a0a0c]/98 backdrop-blur-2xl border border-white/10 rounded-2xl p-1 flex flex-col gap-0.5 shadow-[0_20px_40px_rgba(0,0,0,0.5)] z-[1100] min-w-[200px] animate-in slide-in-from-top-2 fade-in duration-200">
+                  <div className="px-3 py-2 border-b border-white/5 mb-1 flex items-center justify-between">
+                    <span className="text-[7px] font-black uppercase text-cyan-400 tracking-widest">{simplifiedLayerMenu ? 'Layer Name Swift' : 'Active Layer'}</span>
+                    <Layers size={10} className="text-neutral-700" />
+                  </div>
+                  <div className="max-h-[300px] overflow-y-auto scrollbar-none">
+                    {Object.values(layerConfig).map(l => (
+                      <button 
+                        key={l.id}
+                        onClick={() => {
+                          handleAction('setActiveLayer', l.id);
+                          setLayerFlyoutOpen(false);
+                          setSimplifiedLayerMenu(false);
+                        }}
+                        className={`w-full text-left px-3 py-2.5 rounded-xl text-[9px] font-bold uppercase transition-all flex items-center justify-between ${settings.activeLayerId === l.id ? 'text-cyan-400 bg-cyan-400/10 shadow-[inner_0_0_10px_rgba(6,182,212,0.1)]' : 'text-neutral-400 hover:text-cyan-400 hover:bg-cyan-400/5'}`}
+                      >
+                        <div className="flex items-center gap-2">
+                           {!simplifiedLayerMenu && <div className="w-2 h-2 rounded-full" style={{ backgroundColor: l.color }} />}
+                           {l.name}
+                        </div>
+                        {settings.activeLayerId === l.id && <Check size={10} />}
+                      </button>
+                    ))}
+                  </div>
+                  {!simplifiedLayerMenu && (
+                    <>
+                      <div className="h-px bg-white/5 my-1" />
+                      <button 
+                        onClick={() => { setActivePanel('none'); handleAction('toggleLayerManager'); setLayerFlyoutOpen(false); }}
+                        className="w-full text-left px-3 py-2.5 rounded-xl text-[9px] font-bold uppercase text-neutral-500 hover:text-cyan-400 hover:bg-cyan-400/5 flex items-center gap-3 transition-all"
+                      >
+                        <Settings2 size={12} className="text-neutral-700" /> Layer Properties...
+                      </button>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+
+            {ctbFlyoutOpen && (
+              <>
+               <div className="fixed inset-0 z-[1000]" onClick={() => setCtbFlyoutOpen(false)} />
+               <div 
+                 className="absolute top-full right-0 mt-2 bg-[#0a0a0c]/98 backdrop-blur-2xl border border-white/10 rounded-2xl p-1 flex flex-col gap-0.5 shadow-[0_20px_40px_rgba(0,0,0,0.5)] z-[1100] min-w-[160px] animate-in slide-in-from-top-2 fade-in duration-200"
+               >
+                 <div className="px-3 py-2 border-b border-white/5 mb-1 flex items-center justify-between">
+                   <span className="text-[7px] font-black uppercase text-cyan-400 tracking-widest">Plot Styles</span>
+                   <FileText size={10} className="text-neutral-700" />
+                 </div>
+                 {['vox.ctb', 'monochrome.ctb'].map(ctb => (
+                   <button 
+                     key={ctb}
+                     onClick={() => {
+                       handleAction('setCtb', ctb.split('.')[0]);
+                       setCtbFlyoutOpen(false);
+                     }}
+                     className={`w-full text-left px-3 py-2.5 rounded-xl text-[9px] font-bold uppercase transition-all flex items-center justify-between ${settings.activeCtbId === ctb.split('.')[0] ? 'text-cyan-400 bg-cyan-400/10 shadow-[inner_0_0_10px_rgba(6,182,212,0.1)]' : 'text-neutral-400 hover:text-cyan-400 hover:bg-cyan-400/5'}`}
+                   >
+                     {ctb}
+                     {settings.activeCtbId === ctb.split('.')[0] && <Check size={10} />}
+                   </button>
+                 ))}
+                 <div className="h-px bg-white/5 my-1" />
+                 <button 
+                   onClick={() => { setActivePanel('none'); handleAction('toggleCtbManager'); setCtbFlyoutOpen(false); }}
+                   className="w-full text-left px-3 py-2.5 rounded-xl text-[9px] font-bold uppercase text-neutral-500 hover:text-cyan-400 hover:bg-cyan-400/5 flex items-center gap-3 transition-all"
+                 >
+                   <Settings2 size={12} className="text-neutral-700" /> Plot Styles...
+                 </button>
+               </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center h-full">
+          {/* Header Layout Tabs */}
+          <div className="flex items-center h-full mr-2 hidden sm:flex max-w-[40vw] overflow-x-auto scrollbar-none">
+            {layouts.map((l, index) => (
+              <button 
+                key={`header-tab-${l.id}`}
+                onClick={() => setActiveTab(l.id)}
+                className={`h-full px-3 text-[8px] font-black uppercase transition-all flex items-center whitespace-nowrap ${activeTab === l.id ? 'text-cyan-400 bg-cyan-400/5' : 'text-neutral-500 hover:text-neutral-300'}`}
+              >
+                {l.name}
+              </button>
+            ))}
+          </div>
+
+          <button onClick={() => handleAction('toggleMainMenu')} className="p-2 transition-all text-white no-tap hover:text-cyan-400">
+            <Menu size={18} />
+          </button>
+        </div>
       </header>
+
+      {/* SUB-HEADER Removed per request to move tabs to top right */}
+      {/* (Previously was TOP TAB BAR) */}
 
       <div className="h-6.5 bg-[#0a0a0c] border-b border-white/5 flex items-center px-4 z-[100] shrink-0 gap-3">
           <div className="relative h-full flex items-center">
@@ -2460,22 +2668,33 @@ const App: React.FC = () => {
                   onClose={() => setActivePanel('none')} 
                   onOpenColorSelector={(currentColor, onSelect, title) => setColorSelector({ currentColor, onSelect, title })}
                   onUpdateLayer={(id, upd) => {
+                    const layerName = layerConfig[id]?.name || id;
                     setLayerConfig(prev => ({...prev, [id]: {...prev[id], ...upd} }));
-                    // If thickness or lineType changed, ensure all objects on that layer are updated if the user wants them to follow
-                    // Actually, the prompt says "changed all objects of respective layer".
-                    // We'll set them to BYLAYER to ensure they follow the layer property.
-                    if (upd.thickness !== undefined || upd.lineType !== undefined) {
-                      setLayers(prev => {
-                        const next = { ...prev };
-                        if (next[id]) {
-                          next[id] = next[id].map(s => {
-                            const newShape = { ...s };
-                            if (upd.thickness !== undefined) newShape.thickness = 'BYLAYER';
-                            if (upd.lineType !== undefined) newShape.lineType = 'bylayer';
-                            return newShape;
+                    
+                    // If visual properties changed, ask if we should apply to all shapes on this layer
+                    if (upd.color !== undefined || upd.thickness !== undefined || upd.lineType !== undefined) {
+                      setPromptDialog({
+                        title: 'Apply Layer Properties',
+                        message: `Would you like to apply these changes to all existing shapes on layer "${layerName}"? (This resets individual overrides)`,
+                        type: 'confirm',
+                        initialValue: '',
+                        onConfirm: () => {
+                          setLayers(prev => {
+                            const next = { ...prev };
+                            if (next[id]) {
+                              next[id] = next[id].map(s => {
+                                const newShape = { ...s };
+                                if (upd.color !== undefined) delete newShape.color;
+                                if (upd.thickness !== undefined) newShape.thickness = 'BYLAYER';
+                                if (upd.lineType !== undefined) newShape.lineType = 'bylayer';
+                                return newShape;
+                              });
+                            }
+                            return next;
                           });
+                          setLogMessage(`LAYER_SYNCCED: ${layerName.toUpperCase()}`);
+                          setTimeout(commitToHistory, 100);
                         }
-                        return next;
                       });
                     }
                   }} 
@@ -2842,7 +3061,12 @@ const App: React.FC = () => {
             initialSettings={{
               size: settings.textSize,
               rotation: settings.textRotation,
-              justification: settings.textJustification as any
+              justification: settings.textJustification as any,
+              bold: settings.textBold,
+              italic: settings.textItalic,
+              underline: settings.textUnderline,
+              strikethrough: settings.textStrikethrough,
+              highlight: settings.textHighlight
             }}
             onSave={(text, props) => {
               // Update app settings for next time
@@ -2854,6 +3078,7 @@ const App: React.FC = () => {
                 textBold: props.bold,
                 textItalic: props.italic,
                 textUnderline: props.underline,
+                textStrikethrough: props.strikethrough,
                 textHighlight: props.highlight,
                 fontFamily: props.fontFamily
               }));
@@ -2880,96 +3105,6 @@ const App: React.FC = () => {
           />
         )}
       </main>
-
-      <div className="h-7 bg-[#0a0a0c] border-t border-white/5 flex items-center shrink-0 cursor-default select-none relative z-[150]">
-        {/* Fixed Model & Add */}
-        <div className="flex items-center h-full shrink-0">
-          <button 
-            onClick={() => setActiveTab('model')} 
-            className={`h-full px-2 text-[9px] font-black uppercase transition-all flex items-center gap-1.5 whitespace-nowrap ${activeTab === 'model' ? 'text-[#00bcd4]' : 'text-neutral-500 hover:text-neutral-300'}`}
-          >
-            <Grid3X3 size={10} /> Model
-          </button>
-          <button 
-            onClick={() => {
-              const id = 'layout' + Date.now() + Math.random().toString(36).substr(2, 5);
-              const defaultName = 'Layout ' + (layouts.length + 1);
-              
-              setPromptDialog({
-                title: 'New Layout: Height (mm)',
-                message: 'Enter paper height for the new layout:',
-                initialValue: '210',
-                type: 'prompt',
-                onConfirm: (height) => {
-                  if (!height || isNaN(parseFloat(height))) return;
-                  setPromptDialog({
-                    title: 'New Layout: Width (mm)',
-                    message: 'Enter paper width for the new layout:',
-                    initialValue: '297',
-                    type: 'prompt',
-                    onConfirm: (width) => {
-                      if (width && !isNaN(parseFloat(width))) {
-                        const newLayout = { 
-                          id, 
-                          name: defaultName, 
-                          paperSize: { width: parseFloat(width), height: parseFloat(height) }, 
-                          viewports: [] 
-                        };
-                        setLayouts(prev => [...prev, newLayout]);
-                        setTabViews(prev => ({ ...prev, [id]: { scale: 3, originX: 0, originY: 0 } }));
-                        setActiveTab(id);
-                        setLogMessage(`LAYOUT_CREATED: ${defaultName} (${width}x${height})`);
-                      }
-                    }
-                  });
-                }
-              });
-            }}
-            className="h-full px-1.5 text-neutral-500 hover:text-[#00bcd4] transition-all flex items-center border-x border-white/5"
-            title="New Layout"
-          >
-            <FilePlus size={11} />
-          </button>
-        </div>
-
-        {/* Scrollable Layout List */}
-        <div className="flex-1 flex items-center h-full overflow-x-auto scrollbar-none gap-px touch-pan-x overscroll-x-contain">
-          {layouts.map((l, index) => (
-            <button 
-              key={`${l.id}-${index}`}
-              draggable
-              onDragStart={() => handleDragStart(l.id)}
-              onDragOver={(e) => { 
-                e.preventDefault(); 
-                // Requirement: listen for drag operations on layout tabs
-                handleDragOverTab(l.id); 
-              }}
-              onDrop={() => setDraggedLayoutId(null)}
-              onClick={() => {
-                if (blockNextClick.current) {
-                  blockNextClick.current = false;
-                  return;
-                }
-                if (longPressTimer.current) {
-                  clearTimeout(longPressTimer.current);
-                  longPressTimer.current = null;
-                }
-                setActiveTab(l.id);
-              }} 
-              onMouseDown={(e) => handleLayoutLongPress(e, l.id)}
-              onMouseUp={cancelLongPress}
-              onMouseLeave={cancelLongPress}
-              onTouchStart={(e) => handleLayoutLongPress(e, l.id)}
-              onTouchMove={cancelLongPress}
-              onTouchEnd={cancelLongPress}
-              onTouchCancel={cancelLongPress}
-              className={`h-full px-2.5 text-[9px] font-black uppercase transition-all flex items-center gap-1 whitespace-nowrap group relative ${activeTab === l.id ? 'text-[#00bcd4] bg-white/5 border-b-[1.5px] border-[#00bcd4]' : 'text-neutral-500 hover:text-neutral-300'}`}
-            >
-              <Layers2 size={9} /> {l.name}
-            </button>
-          ))}
-        </div>
-      </div>
 
       {objectContextMenu && (
         <>
@@ -3134,6 +3269,54 @@ const App: React.FC = () => {
         </>
       )}
 
+      {/* History Panel (Slidable) */}
+      <div 
+        id="command-history-panel"
+        className="fixed bottom-[100px] sm:bottom-[60px] left-1/2 -translate-x-1/2 w-[95%] sm:w-[600px] bg-black/95 backdrop-blur-3xl border border-white/10 rounded-2xl overflow-hidden shadow-[0_40px_100px_rgba(0,0,0,0.8)] z-[200] transition-all duration-500 flex flex-col"
+        style={{ height: '0px', opacity: 0 }}
+      >
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/10 bg-white/5 shrink-0">
+          <div className="flex items-center gap-2">
+            <History size={12} className="text-cyan-500" />
+            <span className="text-[9px] font-black uppercase text-neutral-400 tracking-widest">Command History</span>
+          </div>
+          <button 
+            onClick={() => {
+              const el = document.getElementById('command-history-panel');
+              if (el) { el.style.height = '0px'; el.style.opacity = '0'; }
+            }}
+            className="text-neutral-600 hover:text-white transition-colors"
+          >
+            <X size={14} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-2 scrollbar-none font-mono">
+          {commandHistory.length === 0 ? (
+            <div className="flex flex-col items-center justify-center p-8 opacity-20">
+              <Terminal size={40} className="mb-4" />
+              <span className="text-[10px] font-black uppercase">No active history buffer</span>
+            </div>
+          ) : (
+            commandHistory.map((msg, i) => {
+              const isCommand = msg.startsWith("> ");
+              const isAi = msg.startsWith("AI: ") || msg.includes("PRINCIPAL ARCHITECT");
+              return (
+                <div 
+                  key={`history-${i}`} 
+                  className={`p-3 rounded-xl border-l-4 text-[10px] font-bold uppercase transition-all ${
+                    isCommand ? 'bg-cyan-500/5 border-cyan-500 text-cyan-400' :
+                    isAi ? 'bg-indigo-500/5 border-indigo-500 text-indigo-400' :
+                    'bg-white/5 border-neutral-700 text-neutral-500'
+                  }`}
+                >
+                  {msg}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
       <footer className="bg-black shrink-0 pb-[env(safe-area-inset-bottom)]">
         <Toolbar 
             category={activeCategory} 
@@ -3176,7 +3359,7 @@ const App: React.FC = () => {
                 { role: 'model', parts: [{ text: JSON.stringify({ explanation: res.text, commands: res.commands }) }] }
               ].slice(-10)); // Keep last 5 rounds
 
-              if (res.commands.length) {
+              if (res.commands && res.commands.length) {
                 res.commands.forEach(c => executeCommand(c)); 
                 setLastAiCommandTime(Date.now());
               }
@@ -3197,6 +3380,14 @@ const App: React.FC = () => {
           }} 
           isAiThinking={isAiThinking}
           onLiveToggle={handleLiveToggle} 
+          onToggleHistory={() => {
+            const el = document.getElementById('command-history-panel');
+            if (el) {
+              const isHidden = el.style.height === '0px' || !el.style.height;
+              el.style.height = isHidden ? '200px' : '0px';
+              el.style.opacity = isHidden ? '1' : '0';
+            }
+          }}
           isLiveActive={isLiveActive} 
           isCommandActive={isCommandActive} 
           prompt={commandPrompt} 

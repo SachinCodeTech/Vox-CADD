@@ -2489,6 +2489,7 @@ export class MTextCommand implements CADCommand {
                             bold: props?.bold,
                             italic: props?.italic,
                             underline: props?.underline,
+                            strikethrough: props?.strikethrough,
                             highlight: props?.highlight,
                             fontFamily: props?.fontFamily,
                             content 

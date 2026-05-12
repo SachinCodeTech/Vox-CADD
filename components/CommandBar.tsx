@@ -6,6 +6,7 @@ interface CommandBarProps {
   onCommand: (cmd: string) => void;
   onAiQuery: (prompt: string, attachment?: string | null) => Promise<void>;
   onLiveToggle: () => void;
+  onToggleHistory?: () => void;
   isLiveActive: boolean;
   isCommandActive: boolean;
   isAiThinking?: boolean;
@@ -67,7 +68,7 @@ export const COMMAND_LIST = [
 ];
 
 const CommandBar: React.FC<CommandBarProps> = ({ 
-  onCommand, onAiQuery, onLiveToggle, isLiveActive, isCommandActive, isAiThinking,
+  onCommand, onAiQuery, onLiveToggle, onToggleHistory, isLiveActive, isCommandActive, isAiThinking,
   prompt, history, value, onChange
 }) => {
   const [activeTab, setActiveTab] = useState<'cli' | 'ai' | null>(null);
@@ -92,7 +93,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
     const search = value.trim().toUpperCase();
     if (!search) return [];
     return COMMAND_LIST.filter(c => 
-      c.cmd.startsWith(search) || (c.alias && c.alias.startsWith(search))
+      c.cmd.includes(search) || (c.alias && c.alias.startsWith(search))
     ).slice(0, 8);
   }, [value, activeTab]);
 
@@ -116,6 +117,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
         onAiQuery(trimmed, attachment);
         setAttachment(null);
         onChange('');
+        setHistIdx(-1);
     }
   };
 
@@ -137,7 +139,12 @@ const CommandBar: React.FC<CommandBarProps> = ({
           if (target) {
             onChange(target.cmd);
             setSuggestionIdx(-1);
+            setShowSuggestions(false);
           }
+          return;
+      } else if (e.key === 'Escape') {
+          setShowSuggestions(false);
+          setSuggestionIdx(-1);
           return;
       }
     }
@@ -148,6 +155,8 @@ const CommandBar: React.FC<CommandBarProps> = ({
         if (next >= 0) {
             setHistIdx(next);
             onChange(inputHistory[inputHistory.length - 1 - next]);
+            setShowSuggestions(false);
+            setSuggestionIdx(-1);
         }
     } else if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -158,7 +167,10 @@ const CommandBar: React.FC<CommandBarProps> = ({
         } else {
             onChange('');
         }
-    } else if (e.key === ' ' && value.trim()) {
+        setShowSuggestions(false);
+        setSuggestionIdx(-1);
+    }
+ else if (e.key === ' ' && value.trim()) {
         // CAD specific: Spacebar acts as Enter to complete commands
         e.preventDefault();
         handleSubmit();
@@ -258,8 +270,8 @@ const CommandBar: React.FC<CommandBarProps> = ({
                 <span className="text-[8px] font-mono text-cyan-500/50 uppercase">Ready // v1.0.5</span>
             </div>
             <button 
-              onClick={() => setHistoryHeight(isHistoryOpen ? 0 : 150)} 
-              className={`w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-xl transition-all no-tap ${isHistoryOpen ? 'text-cyan-400 bg-cyan-400/10' : 'text-neutral-800 hover:text-neutral-600 bg-white/5'}`}
+              onClick={() => onToggleHistory ? onToggleHistory() : setHistoryHeight(isHistoryOpen ? 0 : 150)} 
+              className={`w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-xl transition-all no-tap ${isHistoryOpen || (onToggleHistory && document.getElementById('command-history-panel')?.style.height !== '0px') ? 'text-cyan-400 bg-cyan-400/10' : 'text-neutral-800 hover:text-neutral-600 bg-white/5'}`}
             >
               <History size={16} />
             </button>

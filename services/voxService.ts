@@ -76,7 +76,13 @@ export const voxToProject = (voxString: string): VoxProject | null => {
   if (!voxString) return null;
   
   try {
-    let jsonStr = voxString.trim();
+    const trimmed = voxString.trim();
+    // If it looks like a DXF, don't try to parse it as VOX JSON
+    if (trimmed.startsWith('999') || trimmed.includes('SECTION\nHEADER') || trimmed.includes('SECTION\r\nHEADER')) {
+      return null;
+    }
+
+    let jsonStr = trimmed;
     
     // Attempt to isolate the main JSON object if there's trailing or leading garbage
     const firstBrace = jsonStr.indexOf('{');
@@ -84,8 +90,8 @@ export const voxToProject = (voxString: string): VoxProject | null => {
     
     if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
       jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
-    } else {
-      // If it doesn't look like a JSON object, don't even try to parse it
+    } else if (!jsonStr.startsWith('{')) {
+      // If it doesn't look like a JSON object at all, skip
       return null;
     }
 

@@ -1,7 +1,7 @@
 
 import React, { useRef, useEffect, useState, useCallback, useMemo, useImperativeHandle, forwardRef } from 'react';
 import { Shape, ViewState, AppSettings, SnapPoint, LayerConfig, Point, MTextShape, BlockDefinition, LayoutDefinition, LineTypeDefinition, LineType, CtbFile } from '../types';
-import { hitTestShape, findBestSnap, formatLength, formatAngle, formatDimensionValue, calculateDimensionValue, getShapesInRect, getShapeBounds, isRectIntersecting, formatDualLength, isShapeClosed, isPointInsideShape, getPolylineOffsetPoints, calculateShapeLength, distance, getAllShapesBounds } from '../services/cadService';
+import { hitTestShape, findBestSnap, formatLength, formatAngle, formatDimensionValue, calculateDimensionValue, getShapesInRect, getShapeBounds, isRectIntersecting, formatDualLength, isShapeClosed, isPointInsideShape, getPolylineOffsetPoints, calculateShapeLength, distance, getAllShapesBounds, projectPointOnLine } from '../services/cadService';
 import { resolveShapeProperties, resolveColor, resolveLineWeight, resolveLineType } from '../services/propertyService';
 
 interface CADCanvasProps {
@@ -245,18 +245,26 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
 
       const s = findBestSnap(wp, allRenderable, settings.snapOptions, ts, tps, settings);
 
-      // Acquire logic: if hover over a snap point for 600ms, add to tracking
-      if (s && s.type !== 'polar' && s.type !== 'near') {
+      // Acquire logic: if hover over a snap point for 500ms, toggle tracking
+      if (s && ['end', 'mid', 'cen', 'quad', 'int', 'node', 'gcen'].includes(s.type)) {
           if (lastAcquireTime.current === 0) {
               lastAcquireTime.current = Date.now();
-          } else if (Date.now() - lastAcquireTime.current > 600) {
-              const alreadyAcquired = trackingPoints.current.some(tp => distance(tp, s) < 5/ts);
-              if (!alreadyAcquired) {
-                  trackingPoints.current.push(s);
-                  if (navigator.vibrate) navigator.vibrate(10);
-                  if (setLogMessage) setLogMessage(`ACQUIRED_POINT: ${s.type.toUpperCase()}`);
+          } else if (lastAcquireTime.current > 0 && Date.now() - lastAcquireTime.current > 500) {
+              const matchIdx = trackingPoints.current.findIndex(tp => distance(tp, s) < 5/ts);
+              if (matchIdx !== -1) {
+                  // Release point
+                  trackingPoints.current.splice(matchIdx, 1);
+                  if (navigator.vibrate) navigator.vibrate([10, 50, 10]);
+                  if (setLogMessage) setLogMessage(`RELEASED_POINT: ${s.type.toUpperCase()}`);
+              } else {
+                  // Acquire point
+                  if (trackingPoints.current.length < 8) { // Safety limit
+                      trackingPoints.current.push(s);
+                      if (navigator.vibrate) navigator.vibrate(10);
+                      if (setLogMessage) setLogMessage(`ACQUIRED_POINT: ${s.type.toUpperCase()}`);
+                  }
               }
-              lastAcquireTime.current = -1; // Mark as acquired for this hover
+              lastAcquireTime.current = -1; // Mark as processed for this hover
           }
       } else {
           lastAcquireTime.current = 0;
@@ -469,7 +477,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           }
           drawShape(ctx, s, ts);
       });
-      if (activeSnapRef.current) drawSnapMarker(ctx, activeSnapRef.current, ts);
+      if (activeSnapRef.current) drawSnapMarker(ctx, activeSnapRef.current, ts, w, h);
       if (isCommandActive && previewShapes) previewShapes.forEach(s => drawShape(ctx, s, ts));
       
       visibleShapes.filter(s => selectedIds.includes(s.id)).forEach(s => drawGrips(ctx, s, ts));
@@ -513,40 +521,55 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       drawUCS(ctx, w, h);
     }
 
-    // Tracking markers & Alignment Lines
+    // Tracking markers & Alignment Lines (OTRACK)
     if (isCommandActive && trackingPoints.current.length > 0) {
         ctx.save();
         ctx.setTransform(ts, 0, 0, -ts, w/2 + view.originX, h/2 + view.originY);
         
-        ctx.lineWidth = 0.5/ts;
-        ctx.setLineDash([5/ts, 5/ts]);
+        ctx.lineWidth = 0.8/ts;
+        ctx.setLineDash([6/ts, 6/ts]);
         
         trackingPoints.current.forEach(tp => {
-            // Draw marker (more subtle cross)
-            ctx.strokeStyle = "rgba(0, 188, 212, 0.4)";
-            const size = 4/ts;
+            // Draw OTRACK marker (Small cyan +)
+            ctx.strokeStyle = "#22d3ee";
+            const size = 3/ts;
             ctx.beginPath();
             ctx.moveTo(tp.x - size, tp.y); ctx.lineTo(tp.x + size, tp.y);
             ctx.moveTo(tp.x, tp.y - size); ctx.lineTo(tp.x, tp.y + size);
             ctx.stroke();
 
-            // Draw alignment line to cursor if snapped to polar from this point
-            if (activeSnapRef.current?.type === 'polar' && activeSnapRef.current.lastPoint && 
-                Math.abs(activeSnapRef.current.lastPoint.x - tp.x) < 0.01 && Math.abs(activeSnapRef.current.lastPoint.y - tp.y) < 0.01) {
-                ctx.beginPath();
-                ctx.strokeStyle = "rgba(0, 188, 212, 0.3)";
-                ctx.moveTo(tp.x, tp.y);
-                ctx.lineTo(activeSnapRef.current.x, activeSnapRef.current.y);
-                ctx.stroke();
-            } else if (activeSnapRef.current?.type === 'int') {
-                // If snapped to an intersection of tracking lines, draw lines to both points
-                ctx.beginPath();
-                ctx.strokeStyle = "rgba(0, 188, 212, 0.3)";
-                ctx.moveTo(tp.x, tp.y);
-                if (Math.abs(tp.x - activeSnapRef.current.x) < 0.01 || Math.abs(tp.y - activeSnapRef.current.y) < 0.01) {
-                    ctx.lineTo(activeSnapRef.current.x, activeSnapRef.current.y);
-                    ctx.stroke();
+            // Draw full alignment lines if they intersect with cursor projected onto them
+            // This makes it feel much more like AutoCAD
+            const drawInfinite = (p1: Point, p2: Point) => {
+                const proj = projectPointOnLine(worldCursorRef.current, p1, p2);
+                if (distance(worldCursorRef.current, proj) < 20/ts) {
+                    ctx.beginPath();
+                    ctx.strokeStyle = "rgba(34, 211, 238, 0.4)";
+                    // Calculate ends of line based on viewport visibility or just large enough
+                    const dx = p2.x - p1.x, dy = p2.y - p1.y;
+                    const len = Math.sqrt(dx*dx + dy*dy);
+                    if (len > 0) {
+                        const ux = dx/len, uy = dy/len;
+                        ctx.moveTo(tp.x - ux * 10000, tp.y - uy * 10000);
+                        ctx.lineTo(tp.x + ux * 10000, tp.y + uy * 10000);
+                        ctx.stroke();
+                    }
                 }
+            };
+
+            // H/V
+            drawInfinite(tp, { x: tp.x + 1, y: tp.y });
+            drawInfinite(tp, { x: tp.x, y: tp.y + 1 });
+
+            // Polar
+            if (settings.polarTrackingEnabled) {
+                (settings.polarAngles || [45, 90]).forEach(ang => {
+                    const step = ang;
+                    for (let a = 0; a < 360; a += step) {
+                        const r = a * Math.PI / 180;
+                        drawInfinite(tp, { x: tp.x + Math.cos(r), y: tp.y + Math.sin(r) });
+                    }
+                });
             }
         });
         ctx.restore();
@@ -708,7 +731,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     if ((s.type === 'text' || s.type === 'mtext') && s.size * ts < 2) return;
 
     // Resolve properties correctly using the new property service
-    const activeCtb = settings.activeCtbId && settings.ctbFiles ? settings.ctbFiles[settings.activeCtbId] : undefined;
+    const activeCtb = settings.showCtbInView && settings.activeCtbId && settings.ctbFiles ? settings.ctbFiles[settings.activeCtbId] : undefined;
     const resolved = resolveShapeProperties(
         s,
         layerConfig,
@@ -1439,8 +1462,12 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                     if (align.h === 'center') hx -= tw/2;
                     else if (align.h === 'right') hx -= tw;
                     ctx.save();
-                    ctx.fillStyle = 'rgba(0, 188, 212, 0.2)';
-                    ctx.fillRect(hx - 2, ly - textSize * 0.8, tw + 4, textSize * 1.1);
+                    // Custom highlighter color support
+                    const hColor = (s as any).highlightColor || 'rgba(254, 240, 138, 0.9)';
+                    ctx.fillStyle = hColor;
+                    
+                    // Slightly larger box for better coverage
+                    ctx.fillRect(hx - 2, ly - textSize * 0.85, tw + 4, textSize * 1.2);
                     ctx.restore();
                 }
                 
@@ -1451,7 +1478,15 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                     let ux = xOffset;
                     if (align.h === 'center') ux -= tw/2;
                     else if (align.h === 'right') ux -= tw;
-                    ctx.fillRect(ux, ly + textSize * 0.1, tw, textSize/10);
+                    ctx.fillRect(ux, ly + textSize * 0.15, tw, Math.max(1, textSize/12));
+                }
+
+                if ((s as any).strikethrough) {
+                    const tw = ctx.measureText(line).width;
+                    let sx = xOffset;
+                    if (align.h === 'center') sx -= tw/2;
+                    else if (align.h === 'right') sx -= tw;
+                    ctx.fillRect(sx, ly - textSize * 0.3, tw, Math.max(1, textSize/12));
                 }
             });
         } else {
@@ -1463,8 +1498,14 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                 if (align.h === 'center') hx -= tw/2;
                 else if (align.h === 'right') hx -= tw;
                 ctx.save();
-                ctx.fillStyle = 'rgba(0, 188, 212, 0.2)';
-                ctx.fillRect(hx - 2, -textSize * 0.4, tw + 4, textSize * 0.8);
+                const hColor = (s as any).highlightColor || 'rgba(255, 235, 59, 0.45)';
+                ctx.fillStyle = hColor;
+                if (hColor.startsWith('#')) {
+                    ctx.globalAlpha = 0.45;
+                }
+                ctx.shadowBlur = 4;
+                ctx.shadowColor = hColor;
+                ctx.fillRect(hx - 2, -textSize * 0.35, tw + 4, textSize * 0.75);
                 ctx.restore();
             }
             ctx.fillText(content, 0, 0);
@@ -1473,7 +1514,14 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                 let ux = 0;
                 if (align.h === 'center') ux -= tw/2;
                 else if (align.h === 'right') ux -= tw;
-                ctx.fillRect(ux, textSize * 0.1, tw, textSize/10);
+                ctx.fillRect(ux, textSize * 0.15, tw, Math.max(1, textSize/12));
+            }
+            if ((s as any).strikethrough) {
+                const tw = ctx.measureText(content).width;
+                let sx = 0;
+                if (align.h === 'center') sx -= tw/2;
+                else if (align.h === 'right') sx -= tw;
+                ctx.fillRect(sx, -textSize * 0.3, tw, Math.max(1, textSize/12));
             }
         }
         ctx.restore(); break;
@@ -1849,7 +1897,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     ctx.restore();
   };
 
-  const drawSnapMarker = (ctx: CanvasRenderingContext2D, snap: SnapPoint, ts: number) => {
+  const drawSnapMarker = (ctx: CanvasRenderingContext2D, snap: SnapPoint, ts: number, w: number, h: number) => {
     ctx.save();
     const { x, y, type } = snap;
     const size = 12 / ts; 
@@ -1924,6 +1972,51 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         ctx.rect(x - size, y - size, size * 2, size * 2);
     }
     ctx.stroke();
+
+    // Draw Tooltip Label
+    if (activeTab === 'model' || isViewportActive) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset for text to be upright and constant size
+      const screenX = (x * ts) + w/2 + view.originX;
+      const screenY = (-y * ts) + h/2 + view.originY;
+      
+      ctx.fillStyle = "#ffffff";
+      ctx.shadowBlur = 4;
+      ctx.shadowColor = "rgba(0,0,0,0.5)";
+      ctx.font = "bold 11px Inter, sans-serif";
+      const label = type.toUpperCase();
+      const metrics = ctx.measureText(label);
+      
+      const padding = 6;
+      const labelW = metrics.width + padding * 2;
+      const labelH = 18;
+      const labelX = screenX + 15;
+      const labelY = screenY - 10;
+
+      ctx.fillStyle = "rgba(40, 40, 45, 0.85)";
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
+      ctx.lineWidth = 1;
+      
+      // Draw rounded rect background
+      const r = 4;
+      ctx.beginPath();
+      ctx.moveTo(labelX + r, labelY);
+      ctx.lineTo(labelX + labelW - r, labelY);
+      ctx.quadraticCurveTo(labelX + labelW, labelY, labelX + labelW, labelY + r);
+      ctx.lineTo(labelX + labelW, labelY + labelH - r);
+      ctx.quadraticCurveTo(labelX + labelW, labelY + labelH, labelX + labelW - r, labelY + labelH);
+      ctx.lineTo(labelX + r, labelY + labelH);
+      ctx.quadraticCurveTo(labelX, labelY + labelH, labelX, labelY + labelH - r);
+      ctx.lineTo(labelX, labelY + r);
+      ctx.quadraticCurveTo(labelX, labelY, labelX + r, labelY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = "#22d3ee"; // Cyan text
+      ctx.fillText(label, labelX + padding, labelY + 13);
+    }
+
     ctx.restore();
   };
 
@@ -2030,7 +2123,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         if (e.button === 1 || e.button === 2 || activeCommandName === 'PAN') {
             setIsPanning(true);
         } else if (e.button === 0) {
-            if (activeCommandName === 'ZOOM') {
+            if (activeCommandName === 'ZOOM' || activeCommandName === 'ZOOM_RT') {
                 const wp = screenToWorld(x, y);
                 if (onClick) onClick(wp.x, wp.y, !!activeSnapRef.current, e.shiftKey);
             }

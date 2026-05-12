@@ -297,6 +297,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
             <ToolCircleBtn onClick={() => onSettingChange({ ...settings, showHUD: !settings.showHUD })} icon={<Monitor />} label="HUD" active={settings.showHUD} />
             <ToolCircleBtn onClick={() => onSettingChange({ ...settings, showLineWeights: !settings.showLineWeights })} icon={<Weight />} label="L-WEIGHT" active={settings.showLineWeights} />
             <ToolCircleBtn onClick={() => onAction('toggleLayers')} icon={<Layers2 />} label="LAYERS" active={activePanel === 'layers'} />
+            <ToolCircleBtn onClick={() => onSettingChange({ ...settings, showCtbInView: !settings.showCtbInView })} icon={<Zap />} label="SHOW CTB" active={settings.showCtbInView} />
             <ToolCircleBtn onClick={() => onAction('toggleProperties')} icon={<Settings2 />} label="PROPS" active={activePanel === 'properties'} />
             <ToolCircleBtn onClick={() => onAction('toggleDraftingSettings')} icon={<Sliders />} label="DRAFT" active={activePanel === 'drafting'} />
             <ToolCircleBtn onClick={() => onAction('toggleCalculator')} icon={<Calculator />} label="CALC" active={activePanel === 'calculator'} />

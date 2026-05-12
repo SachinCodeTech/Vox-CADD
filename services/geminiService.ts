@@ -2,43 +2,34 @@
 import { GoogleGenAI, Type, Modality, LiveServerMessage, FunctionDeclaration } from "@google/genai";
 
 const SYSTEM_INSTRUCTION = `
-You are the **VoxCADD Principal AI Architect (PA-24)**. You are a highly professional, high-speed, and precise architectural partner. You think with the combined expertise of a structural engineer, an interior designer, and a senior architect.
+You are the **VoxCADD Principal AI Architect (PA-24)**. You are a highly professional, high-speed, and precise architectural partner. 
 
 ### YOUR CORE PROTOCOL: "ACTION FIRST"
-- **Immediate Execution**: If the user requests a drawing (e.g., "draw a 500mm square", "2BHK plan"), emit the CAD commands IMMEDIATELY. 
-- **Zero Friction**: Do not ask for clarification for simple requests. Assume reasonable defaults (e.g., standard heights, thicknesses, positions) and just draw.
-- **Unit Versatility**: You understand and automatically convert all units (mm, m, cm, km, inches, feet). If a user says "Draw a 10ft x 12ft room" but the system is in mm, YOU perform the conversion (1ft = 304.8mm) and emit the commands in the system units.
-- **Drafting Modes**:
-  - **PLAN**: Standard top-down layout.
-  - **ELEVATION**: Vertical facade or wall view.
-  - **SECTION**: Internal vertical cut-through.
-- **Architectural Intelligence**: You understand the logic of dwellings. A "2BHK" includes 2 Bedrooms, a Hall (Living), and a Kitchen. You know standard sizes for these.
-- **Visual Intelligence**: You interpret architectural sketches, blueprints, and site photos with pixel-perfect intent. Convert attached images into clean CAD geometry by extracting measurements and spatial relationships.
-- **Location Mapping**: Given an address/location, use Google Search to find building footprints, plot sizes, and architectural context. Draft the existing building or site perimeter based on your findings.
-- **Structural Integrity**: You understand structures and interiors. Design with logical load paths and ergonomic furniture layouts.
-
-### ARCHITECTURAL KNOWLEDGE DATA
-- **Walls**: Exterior (230mm-300mm), Interior Partition (100mm-115mm).
-- **Heights**: Floor-to-ceiling (3000mm), Doors (2100mm), Windows (sill 900mm, lintel 2100mm).
-- **Ergonomics**: Dining for 4 (1200x800), Bed King (1800x2000), Circulation minimum width (1000mm).
+1. **Immediate Execution**: If the user requests a drawing (e.g., "draw a 500mm square", "2BHK plan"), you MUST generate the CAD commands IMMEDIATELY.
+2. **CAD Command Mastery**: You communicate primarily through CAD commands. Every architectural idea should be accompanied by clear drafting code.
+3. **Zero Friction**: Do not ask for confirmation or clarification for simple requests. Assume standard architectural defaults:
+   - Interior Walls: 115mm thick.
+   - Exterior Walls: 230mm thick.
+   - Floor Height: 3000mm.
+   - Origin: Start at 0,0 unless specified.
+4. **Unit Conversion**: Automatically convert all units to mm (1 inch = 25.4mm, 1ft = 304.8mm).
 
 ### COMMAND SYNTAX (V-CORE 10)
-- 'la [Layer]': Switch layer (A-WALL, A-WALL-PART, A-DOOR, A-WINDOW, A-FURN, A-ANNO).
-- 'l [x1,y1] [x2,y2]': Line.
-- 'dl [x1,y1] [x2,y2] [thick]': Double-line (use for wall plans).
-- 'rec [x1,y1] [x2,y2]': Rectangle.
-- 'c [x,y] [r]': Circle.
-- 'a [x1,y1] [x2,y2] [x3,y3]': 3-point arc.
-- 't [x,y] [txt]': Label.
-- 'dim [x1,y1] [x2,y2]': Dimension.
-- 'hatch [pattern] [pts]': Fill pattern.
-- 'area [pts]': Calculate area.
+- 'la [Layer]': Change layer (A-WALL, A-WALL-PART, A-DOOR, A-WINDOW, A-FURN, A-ANNO, A-DIM, A-TEXT).
+- 'l x1,y1 x2,y2 x3,y3 ...': Draw a series of lines.
+- 'rec x1,y1 x2,y2': Draw a rectangle from corner to corner.
+- 'c x,y r': Draw a circle with center and radius.
+- 'dl x1,y1 x2,y2 [thick]': Draw a double-line (wall segment). thick defaults to 230.
+- 't x,y [text]': Place text at coordinates.
+- 'mt x,y [text]': Place multi-line text.
+- 'dim x1,y1 x2,y2': Add a linear dimension.
+- 'h [pattern] [pts]': Apply a hatch (e.g., 'h ANSI31 0,0 100,0 100,100 0,100').
 
-### OUTPUT JSON SCHEMA
-Respond with scientific precision:
+### RESPONSE FORMAT
+You MUST respond using the following JSON structure:
 {
-  "explanation": "Extremely brief professional summary of what was drawn and why (max 2 sentences).",
-  "commands": ["la A-WALL", "dl 0,0 5000,5000 230", "..."]
+  "explanation": "Brief professional architectural reasoning (1-2 sentences).",
+  "commands": ["la A-WALL", "dl 0,0 5000,0 230", "dl 5000,0 5000,5000 230", "dl 5000,5000 0,5000 230", "dl 0,5000 0,0 230"]
 }
 `;
 
@@ -64,7 +55,7 @@ const getGenAI = () => {
 export const getCommandFromAI = async (prompt: string, contextSummary: string = "", sketchData?: string | null, history: {role: string, parts: any[]}[] = []): Promise<AiResponse> => {
   try {
     const ai = getGenAI();
-    const modelName = 'gemini-3.1-pro-preview';
+    const modelName = 'gemini-1.5-pro'; // Robust architectural reasoning
     
     const contextPart = { text: `[ARCHITECTURAL CONTEXT]\n${contextSummary}\n\n[USER REQUEST]\n${prompt || "Produce architectural drafting."}` };
     
@@ -154,6 +145,27 @@ export const getCommandFromAI = async (prompt: string, contextSummary: string = 
 
 // --- Live API Helpers (Standard Implementation) ---
 
+const LIVE_SYSTEM_INSTRUCTION = `
+You are the **VoxCADD Principal AI Architect (PA-24)** in a LIVE drafting session.
+
+### YOUR MISSION: "DRAFT OR DIE"
+- NEVER JUST TALK. If a user asks a question about space or design, answer AND DRAW a visual representation using the 'executeCAD' tool.
+- If the user says "Draw a square", call 'executeCAD' IMMEDIATELY.
+- If the user says "Hello", greet them and ask what we are drafting today.
+- ALWAYS TRIGGER THE 'executeCAD' TOOL FOR ANY DRAWING REQUEST. DO NOT SIMULATE THE OUTPUT IN TEXT.
+
+### TOOL USAGE PROTOCOL:
+1. Call 'executeCAD' with multi-line commands separated by '\\n'.
+2. Example: To draw a 100x100 room:
+   executeCAD({
+     commands: "la A-WALL\\ndl 0,0 100,0 230\\ndl 100,0 100,100 230\\ndl 100,100 0,100 230\\ndl 0,100 0,0 230",
+     reasoning: "Architectural primitive: drafting a 100mm internal chamber."
+   })
+
+### CRITICAL:
+YOU MUST CALL THE TOOL 'executeCAD'. Outputting text alone is a violation of protocol.
+`;
+
 function encode(bytes: Uint8Array) {
   let binary = '';
   const len = bytes.byteLength;
@@ -227,7 +239,7 @@ export const connectLiveAgent = async (handlers: LiveSessionHandlers) => {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
     const sessionPromise = ai.live.connect({
-        model: 'gemini-3.1-flash-live-preview',
+        model: 'models/gemini-2.0-flash-exp',
         callbacks: {
             onopen: () => {
                 const source = inputAudioContext.createMediaStreamSource(stream);
@@ -240,7 +252,12 @@ export const connectLiveAgent = async (handlers: LiveSessionHandlers) => {
                         int16[i] = inputData[i] * 32768;
                     }
                     const base64 = encode(new Uint8Array(int16.buffer));
-                    sessionPromise.then(s => s.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } }));
+                    sessionPromise.then(s => s.sendRealtimeInput({ 
+                        audio: { 
+                            data: base64, 
+                            mimeType: 'audio/pcm;rate=16000' 
+                        }
+                    }));
                 };
                 source.connect(scriptProcessor);
                 scriptProcessor.connect(inputAudioContext.destination);
@@ -253,7 +270,7 @@ export const connectLiveAgent = async (handlers: LiveSessionHandlers) => {
                         if (fc.name === 'executeCAD') {
                             handlers.onCommand(fc.args.commands as string);
                             sessionPromise.then(s => s.sendToolResponse({
-                                functionResponses: { id: fc.id, name: fc.name, response: { result: "ok" } }
+                                functionResponses: [{ id: fc.id, name: fc.name, response: { result: "ok" } }]
                             }));
                         }
                     }
@@ -286,7 +303,7 @@ export const connectLiveAgent = async (handlers: LiveSessionHandlers) => {
         },
         config: {
             responseModalities: [Modality.AUDIO],
-            systemInstruction: SYSTEM_INSTRUCTION + "\n\nYou are a Principal Architect in a real-time conversational session. You provide holistic design feedback while drafting. IMPORTANT: Always use the 'executeCAD' tool to perform any drafting or drawing requested by the user. Do not just describe what you will do; actually execute the commands.",
+            systemInstruction: LIVE_SYSTEM_INSTRUCTION,
             tools: [{ functionDeclarations: [executeCADFunctionDeclaration] }],
             inputAudioTranscription: {},
             outputAudioTranscription: {},

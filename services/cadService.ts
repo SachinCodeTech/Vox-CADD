@@ -1409,7 +1409,8 @@ export const getShapeSegments = (s: Shape): { p1: Point, p2: Point }[] => {
 };
 
 export const resolvePointInput = (input: string, lastPoint: Point | null, settings: AppSettings, currentCursor?: Point): Point | null => {
-    const text = input.trim().toLowerCase();
+    // Clean input from common AI-generated enclosures like [] or ()
+    let text = input.trim().toLowerCase().replace(/[\[\]\(\)]/g, '');
     if (text === "") return null;
 
     const isImperial = settings.units === 'imperial';
@@ -1837,44 +1838,68 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
         }
     };
 
-    const basePoint = trackingPoints.length > 0 ? trackingPoints[trackingPoints.length - 1] : null;
+    const polarTrackingActive = options.polar && settings?.polarTrackingEnabled;
+    const polarAngles = settings?.polarAngles || [90, 45];
 
-    // Polar Tracking logic
-    if (options.polar && basePoint && settings?.polarTrackingEnabled) {
-        const angles = settings.polarAngles || [90, 45];
-        const v = { x: p.x - basePoint.x, y: p.y - basePoint.y };
-        const dist = Math.sqrt(v.x * v.x + v.y * v.y);
-        
-        if (dist > 1/ts) {
-            const currentAngle = Math.atan2(v.y, v.x) * 180 / Math.PI;
-            const posAngle = (currentAngle + 360) % 360;
-            
-            for (const targetAngle of angles) {
-                // Check multiple quadrants for the same target angle
-                const step = targetAngle;
+    // --- 1. TRACKING LINES & ALIGNMENT ---
+    // Horizontal, Vertical and Polar alignment from ALL tracking points
+    const trackingLines: { p1: Point, p2: Point }[] = [];
+    
+    trackingPoints.forEach(tp => {
+        // Horizontal
+        trackingLines.push({ p1: tp, p2: { x: tp.x + 100000, y: tp.y } });
+        trackingLines.push({ p1: tp, p2: { x: tp.x - 100000, y: tp.y } });
+        // Vertical
+        trackingLines.push({ p1: tp, p2: { x: tp.x, y: tp.y + 100000 } });
+        trackingLines.push({ p1: tp, p2: { x: tp.x, y: tp.y - 100000 } });
+
+        if (polarTrackingActive) {
+            polarAngles.forEach(ang => {
+                const step = ang;
                 for (let a = 0; a < 360; a += step) {
-                    if (Math.abs(posAngle - a) < 2) { // 2 degree tolerance
-                        const rad = a * Math.PI / 180;
-                        const polarTarget = {
-                            x: basePoint.x + Math.cos(rad) * dist,
-                            y: basePoint.y + Math.sin(rad) * dist
-                        };
-                        addCandidate(polarTarget.x, polarTarget.y, 'polar', basePoint);
-                    }
+                    const rad = a * Math.PI / 180;
+                    trackingLines.push({ 
+                        p1: tp, 
+                        p2: { x: tp.x + Math.cos(rad) * 100000, y: tp.y + Math.sin(rad) * 100000 } 
+                    });
+                }
+            });
+        }
+    });
+
+    // Check snapping to these tracking lines
+    trackingLines.forEach(line => {
+        const proj = projectPointOnLine(p, line.p1, line.p2);
+        if (distance(p, proj) < threshold) {
+            addCandidate(proj.x, proj.y, 'polar', line.p1);
+        }
+    });
+
+    // Check intersections between tracking lines
+    for (let i = 0; i < trackingLines.length; i++) {
+        for (let j = i + 1; j < trackingLines.length; j++) {
+            const l1 = trackingLines[i], l2 = trackingLines[j];
+            const inter = getIntersection(l1.p1, l1.p2, l2.p1, l2.p2, true);
+            if (inter) {
+                // Only consider intersections near the cursor
+                if (distance(p, inter) < threshold) {
+                    addCandidate(inter.x, inter.y, 'int');
                 }
             }
         }
     }
 
-    // Performance: Spatial filtering - only check shapes within a bounding box around the cursor
+    // --- 2. OBJECT SNAPS ---
+    // Performance: Spatial filtering
     const xMin = p.x - threshold * 5, xMax = p.x + threshold * 5;
     const yMin = p.y - threshold * 5, yMax = p.y + threshold * 5;
 
     const nearbyShapes = shapes.filter(s => {
         const b = getShapeBounds(s);
-        // For extension/apparent intersection, we might need a larger box, but let's start with this
         return !(b.xMax < xMin - 500/ts || b.xMin > xMax + 500/ts || b.yMax < yMin - 500/ts || b.yMin > yMax + 500/ts);
     });
+
+    const basePoint = trackingPoints.length > 0 ? trackingPoints[trackingPoints.length - 1] : null;
 
     nearbyShapes.forEach(s => {
         switch (s.type) {
@@ -2057,7 +2082,7 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
         }
     });
 
-    // 2. Intersection Snaps
+    // --- 3. INTERSECTIONS ---
     if (options.intersection || options.appint) {
         const segments: { p1: Point, p2: Point, id: string }[] = [];
         const circles: { x: number, y: number, r: number, id: string }[] = [];
@@ -2065,7 +2090,6 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
         nearbyShapes.forEach(s => {
             if (s.type === 'circle') {
                 circles.push({ x: s.x, y: s.y, r: s.radius, id: s.id });
-                // Also add small segments for approximate if needed, but geometric is better
             } else {
                 getShapeSegments(s).forEach(seg => segments.push({ ...seg, id: s.id }));
             }
@@ -2103,62 +2127,7 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
         }
     }
 
-    // 3. Polar & Alignment Tracking
-    if (options.polar) {
-        trackingPoints.forEach(tp => {
-            const dx = p.x - tp.x;
-            const dy = p.y - tp.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            
-            if (dist > threshold) {
-                const angle = Math.atan2(dy, dx);
-                const degree = (angle * 180 / Math.PI + 360) % 360;
-                
-                // Snaps to: 0, 90, 180, 270 (Tracking) + 45 intervals (Polar)
-                const majorAngles = [0, 90, 180, 270];
-                const polarStep = 45;
-                
-                // Check major alignment first
-                let nearestDegree = Math.round(degree / 90) * 90;
-                let angleDiff = Math.min(Math.abs(degree - nearestDegree), Math.abs(degree - (nearestDegree + 360)), Math.abs(degree - (nearestDegree - 360)));
-                
-                if (angleDiff > 2) {
-                    // Try polar increments
-                    nearestDegree = Math.round(degree / polarStep) * polarStep;
-                    angleDiff = Math.min(Math.abs(degree - nearestDegree), Math.abs(degree - (nearestDegree + 360)), Math.abs(degree - (nearestDegree - 360)));
-                }
-
-                if (angleDiff < 3) {
-                    const nearestAngle = nearestDegree * Math.PI / 180;
-                    addCandidate(tp.x + dist * Math.cos(nearestAngle), tp.y + dist * Math.sin(nearestAngle), 'polar', tp);
-                }
-            }
-        });
-
-        // 4. Intersection of Tracking Lines (Advanced)
-        if (trackingPoints.length >= 2) {
-            for (let i = 0; i < trackingPoints.length; i++) {
-                for (let j = i + 1; j < trackingPoints.length; j++) {
-                    const p1 = trackingPoints[i];
-                    const p2 = trackingPoints[j];
-                    
-                    // Simple ortho intersections for now
-                    const intersections = [
-                        { x: p1.x, y: p2.y },
-                        { x: p2.x, y: p1.y }
-                    ];
-                    
-                    intersections.forEach(ipt => {
-                        const d = Math.sqrt((p.x - ipt.x)**2 + (p.y - ipt.y)**2);
-                        if (d < threshold) {
-                            candidates.push({ x: ipt.x, y: ipt.y, type: 'int', lastPoint: p1 });
-                        }
-                    });
-                }
-            }
-        }
-    }
-
+    // --- 4. FINALIZE ---
     if (candidates.length === 0) return null;
 
     // Priority sorting: Highest priority first, then closest distance
