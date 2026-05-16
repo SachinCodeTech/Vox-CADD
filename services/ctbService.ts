@@ -25,7 +25,7 @@ export const createDefaultCtb = (): CtbFile => {
 export const createVoxCtb = (): CtbFile => {
   const styles: Record<number, CtbPlotStyle> = {};
   
-  // Standard vox.ctb behavior: use object values
+  // Standard VoxCadd.ctb behavior: use object values
   for (let i = 1; i <= 255; i++) {
     styles[i] = {
       color: i,
@@ -37,9 +37,9 @@ export const createVoxCtb = (): CtbFile => {
   }
   
   return {
-    id: 'vox',
-    name: 'vox.ctb',
-    description: 'Use object colors and lineweights',
+    id: 'voxcadd',
+    name: 'VoxCadd.ctb',
+    description: 'Standard VoxCADD Plot Style',
     styles
   };
 };

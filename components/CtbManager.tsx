@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, FileText, Settings2, Trash2, Plus, Info, ChevronDown, Palette, Edit3, Check, Sliders } from 'lucide-react';
+import { X, FileText, Plus, ChevronDown, Palette, Check, BoxSelect, Maximize2, Zap, Edit3, Trash2 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { AppSettings, CtbFile, CtbPlotStyle, LineType } from '../types';
-import { createVoxCtb, createDefaultCtb, getDefaultLineweights } from '../services/ctbService';
+import { AppSettings, CtbFile, CtbPlotStyle } from '../types';
+import { createVoxCtb, getDefaultLineweights } from '../services/ctbService';
 import { aciColors, hexToRgbStr } from '../services/colorUtils';
 
 interface CtbManagerProps {
@@ -14,21 +14,30 @@ interface CtbManagerProps {
 }
 
 const CtbManager: React.FC<CtbManagerProps> = ({ isOpen, onClose, settings, onUpdateSettings, onOpenColorSelector }) => {
-  const [editingCtbId, setEditingCtbId] = useState<string | null>(settings.activeCtbId || 'vox');
-  const [selectedAci, setSelectedAci] = useState<number>(1);
-  const [activeView, setActiveView] = useState<'files' | 'colors' | 'edit'>('colors');
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [newName, setNewName] = useState("");
+  const [editingCtbId, setEditingCtbId] = useState<string | null>(settings.activeCtbId || 'voxcadd');
+  const [selectedAcis, setSelectedAcis] = useState<number[]>([1]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterModified, setFilterModified] = useState(false);
   const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [renamingCtbId, setRenamingCtbId] = useState<string | null>(null);
+  const [renamingValue, setRenamingValue] = useState("");
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
 
+  const [activeTab, setActiveTab] = useState<'catalogs' | 'matrix' | 'editor'>('matrix');
+
   useEffect(() => {
-    // Sync editing ID if active CTB changes
     if (settings.activeCtbId && !editingCtbId) {
       setEditingCtbId(settings.activeCtbId);
     }
-  }, [settings.activeCtbId]);
+  }, [settings.activeCtbId, editingCtbId]);
+
+  // Auto-switch to editor tab when selection changes on mobile
+  useEffect(() => {
+    if (window.innerWidth < 768 && selectedAcis.length > 0) {
+      setActiveTab('editor');
+    }
+  }, [selectedAcis]);
 
   useEffect(() => {
     const handleMove = (e: MouseEvent | TouchEvent) => {
@@ -69,329 +78,504 @@ const CtbManager: React.FC<CtbManagerProps> = ({ isOpen, onClose, settings, onUp
     const newFiles = { ...ctbFiles, [id]: file };
     onUpdateSettings({ ...settings, ctbFiles: newFiles, activeCtbId: id });
     setEditingCtbId(id);
-    setRenamingId(id);
-    setNewName("New Plot Style.ctb");
+    setRenamingCtbId(id);
+    setRenamingValue(file.name);
   };
 
-  const handleRename = (id: string) => {
-    if (!newName.trim()) {
-      setRenamingId(null);
+  const handleRenameCtb = (id: string) => {
+    if (!renamingValue.trim()) {
+      setRenamingCtbId(null);
       return;
     }
-    const currentName = ctbFiles[id]?.name;
-    const filename = newName.trim().toLowerCase().endsWith('.ctb') ? newName.trim() : newName.trim() + '.ctb';
-    
-    if (filename === currentName) {
-      setRenamingId(null);
-      return;
-    }
-
-    const updated = { ...ctbFiles };
-    updated[id] = { ...updated[id], name: filename };
-    onUpdateSettings({ ...settings, ctbFiles: updated });
-    setRenamingId(null);
-  };
-
-  const handleDeleteCtb = (id: string) => {
-    if (id === 'vox' || id === 'monochrome') return;
-    
     const newFiles = { ...ctbFiles };
-    delete newFiles[id];
-    let nextActive = settings.activeCtbId;
-    if (nextActive === id) nextActive = 'vox';
-    
-    onUpdateSettings({ ...settings, ctbFiles: newFiles, activeCtbId: nextActive });
-    if (editingCtbId === id) setEditingCtbId(nextActive);
+    let fileName = renamingValue.trim();
+    if (!fileName.toLowerCase().endsWith('.ctb')) {
+      fileName += '.ctb';
+    }
+    newFiles[id] = { ...newFiles[id], name: fileName };
+    onUpdateSettings({ ...settings, ctbFiles: newFiles });
+    setRenamingCtbId(null);
   };
 
-  const handleUpdateStyle = (aci: number, updates: Partial<CtbPlotStyle>) => {
+  const handleDeleteCtb = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (id === 'voxcadd' || id === 'monochrome') return;
+    const { [id]: _, ...newFiles } = ctbFiles;
+    onUpdateSettings({ 
+      ...settings, 
+      ctbFiles: newFiles, 
+      activeCtbId: settings.activeCtbId === id ? 'monochrome' : settings.activeCtbId 
+    });
+    if (editingCtbId === id) setEditingCtbId('monochrome');
+  };
+
+  const handleUpdateStyle = (aciOrAcis: number | number[], updates: Partial<CtbPlotStyle>) => {
     if (!editingCtbId || !activeCtb) return;
     
-    const newStyles = { ...activeCtb.styles, [aci]: { ...activeCtb.styles[aci], ...updates } };
+    const acis = Array.isArray(aciOrAcis) ? aciOrAcis : [aciOrAcis];
+    const newStyles = { ...activeCtb.styles };
+    
+    acis.forEach(aci => {
+      newStyles[aci] = { ...newStyles[aci], ...updates };
+    });
+
     const newCtb = { ...activeCtb, styles: newStyles };
     onUpdateSettings({ ...settings, ctbFiles: { ...ctbFiles, [editingCtbId]: newCtb } });
   };
 
+  const toggleAciSelection = (aci: number, isMulti: boolean) => {
+    if (isMulti) {
+      setSelectedAcis(prev => 
+        prev.includes(aci) ? prev.filter(a => a !== aci) : [...prev, aci]
+      );
+    } else {
+      setSelectedAcis([aci]);
+    }
+  };
+
   const lineweights = getDefaultLineweights();
-  const currentStyle = activeCtb?.styles[selectedAci];
+  
+  const filteredAcis = aciColors.map((c, i) => i).filter(i => {
+    if (i === 0) return false;
+    if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        if (!i.toString().includes(q) && !aciColors[i].toLowerCase().includes(q)) return false;
+    }
+    if (filterModified && activeCtb) {
+      const s = activeCtb.styles[i];
+      const isDefault = s.plotColor === 'useObjectColor' && s.lineweight === 'useObjectLineweight' && s.screening === 100;
+      if (isDefault) return false;
+    }
+    return true;
+  });
+
+  const jumpToColor = (aci: number) => {
+    const el = document.getElementById(`aci-swatch-${aci}`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setSelectedAcis([aci]);
+  };
+
+  const isMultiSelecting = selectedAcis.length > 1;
+  const firstAci = selectedAcis[0] || 1;
+  const currentStyle = activeCtb?.styles[firstAci];
 
   return (
     <div 
-      className="relative w-full sm:w-[1040px] sm:max-w-[98vw] h-full sm:h-[92vh] sm:max-h-[880px] bg-[#0c0c0e]/95 backdrop-blur-3xl sm:rounded-[2.5rem] shadow-[0_100px_250px_rgba(0,0,0,1)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-500 border border-white/10 select-none font-sans"
+      className="relative w-full sm:w-[940px] sm:max-w-[98vw] h-full sm:h-[82vh] sm:max-h-[720px] bg-[#0c0c0e]/98 backdrop-blur-3xl sm:rounded-2xl shadow-[0_60px_150px_rgba(0,0,0,1)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-500 border border-white/10 select-none font-sans"
       style={{ transform: window.innerWidth > 640 ? `translate(${pos.x}px, ${pos.y}px)` : undefined, zIndex: 1100 }}
     >
-      {/* Dynamic Header */}
       <div 
-        className="flex justify-between items-center px-8 py-6 border-b border-white/5 bg-[#0a0a0c] sm:cursor-grab active:sm:cursor-grabbing touch-none shrink-0"
+        className="flex justify-between items-center px-4 py-2.5 border-b border-white/5 bg-[#0a0a0c] sm:cursor-grab active:sm:cursor-grabbing touch-none shrink-0"
         onMouseDown={e => window.innerWidth > 640 && startDrag(e.clientX, e.clientY)}
       >
-        <div className="flex items-center gap-5 pointer-events-none">
-          <div className="w-12 h-12 rounded-[1.25rem] bg-[#00bcd4] flex items-center justify-center text-black shadow-[0_0_30px_rgba(0,188,212,0.3)]">
-            <Palette size={24} strokeWidth={2.5} />
+        <div className="flex items-center gap-3 pointer-events-none">
+          <div className="w-8 h-8 rounded-lg bg-cyan-400 flex items-center justify-center text-black shadow-[0_0_15px_rgba(0,188,212,0.2)]">
+            <Palette size={16} strokeWidth={3} />
           </div>
           <div>
-            <h3 className="text-[14px] font-black text-white uppercase tracking-[0.25em] leading-none mb-1.5">Plot Style Manager</h3>
-            <div className="flex items-center gap-2">
-              <span className="text-[8px] text-cyan-400 font-black uppercase tracking-widest bg-cyan-400/10 px-2.5 py-1 rounded-md border border-cyan-400/20">VOX ENGINE ACTIVE</span>
-              {activeCtb && <span className="text-[8px] text-neutral-600 font-bold uppercase tracking-widest">Editing: {activeCtb.name}</span>}
+            <h3 className="text-[10px] font-black text-white uppercase tracking-[0.2em] leading-none mb-0.5">Plot Style Manager</h3>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[6px] text-cyan-400 font-black uppercase tracking-widest opacity-80">v1.2.4</span>
+              {activeCtb && <span className="text-[6px] text-neutral-700 font-bold uppercase tracking-widest truncate max-w-[120px]">{activeCtb.name}</span>}
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-            <button onClick={onClose} className="w-10 h-10 flex items-center justify-center bg-white/5 hover:bg-red-500 hover:text-white rounded-xl text-neutral-500 transition-all active:scale-95 group">
-              <X size={20} className="group-hover:rotate-90 transition-transform duration-300" />
+        <div className="flex items-center gap-2">
+            <button 
+              onClick={() => onUpdateSettings({ ...settings, showCtbInView: !settings.showCtbInView })}
+              className={`px-3 py-1.5 rounded-lg text-[7.5px] font-black uppercase tracking-widest border transition-all active:scale-95 flex items-center gap-2 ${settings.showCtbInView ? 'bg-cyan-400 text-black border-cyan-400' : 'bg-white/5 text-neutral-500 border-white/10 hover:border-cyan-400/30'}`}
+            >
+              <Zap size={11} fill={settings.showCtbInView ? "currentColor" : "none"} />
+              {settings.showCtbInView ? 'CTB ENABLED' : 'CTB BYPASS'}
+            </button>
+            <button onClick={onClose} className="w-8 h-8 flex items-center justify-center bg-white/5 hover:bg-neutral-800 rounded-lg text-neutral-500 transition-all active:scale-95">
+              <X size={16} />
             </button>
         </div>
       </div>
 
+      {/* Mobile Tab Navigation */}
+      <div className="flex md:hidden items-center border-b border-white/5 bg-[#0a0a0c] shrink-0">
+        {[
+          { id: 'catalogs', label: 'Catalog', icon: <FileText size={12} /> },
+          { id: 'matrix', label: 'Matrix', icon: <Palette size={12} /> },
+          { id: 'editor', label: 'Styles', icon: <Maximize2 size={12} /> }
+        ].map(tab => (
+          <button 
+            key={tab.id} 
+            onClick={() => setActiveTab(tab.id as any)}
+            className={`flex-1 py-3 flex flex-col items-center gap-1 transition-all border-b-2 ${activeTab === tab.id ? 'border-cyan-400 text-white bg-white/5' : 'border-transparent text-neutral-600'}`}
+          >
+            {tab.icon}
+            <span className="text-[7px] font-black uppercase tracking-widest">{tab.label}</span>
+          </button>
+        ))}
+      </div>
+
       <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
         {/* Sidebar: File Catalog */}
-        <div className="w-full md:w-72 border-b md:border-b-0 md:border-r border-white/5 bg-[#08080a] flex flex-col shrink-0">
-          <div className="flex-1 overflow-y-auto p-5 space-y-3 scrollbar-none">
-             <div className="flex items-center gap-3 px-2 pb-4">
-               <span className="text-[9px] font-black text-neutral-700 uppercase tracking-[0.3em]">Style Library</span>
+        <div className={`${activeTab === 'catalogs' ? 'flex' : 'hidden'} md:flex w-full md:w-52 border-b md:border-b-0 md:border-r border-white/5 bg-[#08080a] flex-col shrink-0`}>
+          <div className="flex-1 overflow-y-auto p-3 space-y-1 scrollbar-none">
+             <div className="flex items-center gap-2 px-1 pb-1.5">
+               <span className="text-[7px] font-black text-neutral-800 uppercase tracking-[0.2em]">Catalogs</span>
                <div className="flex-1 h-px bg-white/5" />
              </div>
              {Object.values(ctbFiles).map(ctb => (
-              <div 
-                key={`ctb-file-${ctb.id}`}
-                onClick={() => setEditingCtbId(ctb.id)}
-                className={`group relative p-4 rounded-[1.25rem] cursor-pointer transition-all border-2 ${editingCtbId === ctb.id ? 'bg-cyan-400/10 text-white border-cyan-400/40 shadow-[0_10px_30px_rgba(0,188,212,0.1)]' : 'bg-transparent text-neutral-500 border-white/[0.03] hover:border-white/10 hover:text-neutral-300'}`}
-              >
-                 <div className="relative z-10 flex items-center justify-between">
-                    <div className="flex items-center gap-4 truncate">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${editingCtbId === ctb.id ? 'bg-cyan-400 text-black shadow-[0_0_15px_rgba(0,188,212,0.5)]' : 'bg-white/5 text-neutral-700'}`}>
-                           <FileText size={18} />
-                        </div>
-                        {renamingId === ctb.id ? (
-                          <input 
-                            autoFocus
-                            className="bg-black/60 border-b-2 border-cyan-500 px-2 py-1 text-[11px] font-black text-white w-full outline-none uppercase"
-                            value={newName}
-                            onChange={e => setNewName(e.target.value)}
-                            onBlur={() => handleRename(ctb.id)}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') handleRename(ctb.id);
-                              if (e.key === 'Escape') setRenamingId(null);
-                            }}
-                            onClick={e => e.stopPropagation()}
-                          />
-                        ) : (
-                          <div className="flex flex-col gap-0.5">
-                             <span className="text-[11px] font-black uppercase tracking-tight leading-none">{ctb.name}</span>
-                             <span className="text-[7px] text-neutral-600 font-black uppercase tracking-widest">{ctb.id === 'vox' || ctb.id === 'monochrome' ? 'SYSTEM DEFINED' : `INDEX: ${ctb.id.substring(4,8)}`}</span>
-                          </div>
-                        )}
+                <div key={`ctb-item-${ctb.id}`} className="group relative">
+                  {renamingCtbId === ctb.id ? (
+                    <div className="flex items-center gap-1 p-1 bg-cyan-400/5 border border-cyan-400/20 rounded-lg">
+                       <input 
+                         autoFocus
+                         className="flex-1 bg-transparent border-none text-[9px] font-black text-white uppercase outline-none px-1"
+                         value={renamingValue}
+                         onChange={e => setRenamingValue(e.target.value)}
+                         onKeyDown={e => e.key === 'Enter' && handleRenameCtb(ctb.id)}
+                         onBlur={() => handleRenameCtb(ctb.id)}
+                       />
+                       <button onClick={() => handleRenameCtb(ctb.id)} className="text-cyan-400 p-1 hover:bg-cyan-400/20 rounded">
+                          <Check size={10} />
+                       </button>
                     </div>
-                    {ctb.id !== 'vox' && ctb.id !== 'monochrome' && (
-                       <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  ) : (
+                    <div className="flex items-center gap-1">
+                      <button 
+                        onClick={() => setEditingCtbId(ctb.id)}
+                        className={`flex-1 relative p-2 rounded-lg text-left transition-all border ${editingCtbId === ctb.id ? 'bg-cyan-400/10 text-white border-cyan-400/20' : 'bg-transparent text-neutral-600 border-transparent hover:bg-white/[0.01] hover:text-neutral-400'}`}
+                      >
+                          <div className="flex items-center gap-2.5 truncate">
+                              <div className={`w-6 h-6 rounded-md flex items-center justify-center transition-all ${editingCtbId === ctb.id ? 'bg-cyan-400 text-black' : 'bg-white/5 text-neutral-800'}`}>
+                                <FileText size={11} />
+                              </div>
+                              <span className="text-[9px] font-black uppercase tracking-tight truncate flex-1">{ctb.name}</span>
+                          </div>
+                      </button>
+                      <div className={`flex flex-col gap-1 overflow-hidden transition-all duration-300 ${editingCtbId === ctb.id ? 'w-6 opacity-100' : 'w-0 opacity-0'}`}>
+                        {ctb.id !== 'voxcadd' && ctb.id !== 'monochrome' && (
                           <button 
-                            onClick={(e) => { e.stopPropagation(); setRenamingId(ctb.id); setNewName(ctb.name); }}
-                            className="p-2 text-neutral-600 hover:text-cyan-400 transition-colors"
+                            onClick={(e) => { e.stopPropagation(); setRenamingCtbId(ctb.id); setRenamingValue(ctb.name); }}
+                            className="w-6 h-6 flex items-center justify-center bg-white/5 hover:bg-white/10 text-neutral-700 hover:text-cyan-400 rounded-md transition-colors shadow-sm"
                           >
-                            <Edit3 size={12} />
+                            <Edit3 size={10} />
                           </button>
-                       </div>
-                    )}
-                 </div>
-              </div>
-            ))}
+                        )}
+                        {ctb.id !== 'voxcadd' && ctb.id !== 'monochrome' && (
+                          <button 
+                            onClick={(e) => handleDeleteCtb(ctb.id, e)}
+                            className="w-6 h-6 flex items-center justify-center bg-white/5 hover:bg-red-500/20 text-neutral-700 hover:text-red-400 rounded-md transition-colors"
+                          >
+                            <Trash2 size={10} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+             ))}
           </div>
-          <div className="p-6 bg-[#0a0a0c]/80 border-t border-white/5">
+          <div className="p-3 bg-[#0a0a0c]/80 border-t border-white/5">
             <button 
               onClick={handleCreateCtb}
-              className="w-full h-12 flex items-center justify-center gap-3 bg-cyan-400/5 hover:bg-cyan-400/10 border border-cyan-400/20 text-cyan-400 rounded-2xl text-[10px] font-black uppercase tracking-[0.25em] transition-all active:scale-95 group"
+              className="w-full h-8 flex items-center justify-center gap-2 bg-white/5 hover:bg-cyan-400/10 border border-white/5 hover:border-cyan-400/20 text-neutral-600 hover:text-cyan-400 rounded-lg text-[8px] font-black uppercase tracking-[0.1em] transition-all active:scale-95"
             >
-              <Plus size={16} className="group-hover:rotate-90 transition-transform" /> Add Catalog
+              <Plus size={12} /> New Profile
             </button>
           </div>
         </div>
 
         {/* Center: ACI Matrix */}
-        <div className="w-full md:w-[280px] border-b md:border-b-0 md:border-r border-white/5 bg-[#050507] flex flex-col shrink-0">
-            <div className="p-6 flex flex-col gap-2 border-b border-white/5 bg-white/[0.01]">
+        <div className={`${activeTab === 'matrix' ? 'flex' : 'hidden'} md:flex w-full md:w-[240px] border-b md:border-b-0 md:border-r border-white/5 bg-[#050507] flex-col shrink-0`}>
+            <div className="p-3 flex flex-col gap-2 border-b border-white/5 bg-white/[0.01]">
                 <div className="flex items-center justify-between">
-                    <span className="text-[9px] font-black text-neutral-700 uppercase tracking-widest">Active ACI Index</span>
+                    <span className="text-[7px] font-black text-neutral-700 uppercase tracking-widest">
+                       {isMultiSelecting ? `${selectedAcis.length} SELECTED` : `ACI INDEX ${firstAci}`}
+                    </span>
                     <div className="flex items-center gap-2">
-                       <span className="text-[11px] font-black text-cyan-400 font-mono">{selectedAci}</span>
+                        <button 
+                            onClick={() => setFilterModified(!filterModified)}
+                            className={`text-[6px] font-black uppercase px-2 py-0.5 rounded border transition-all ${filterModified ? 'bg-cyan-400 text-black border-cyan-400 shadow-[0_0_8px_rgba(0,188,212,0.3)]' : 'bg-transparent border-white/10 text-neutral-700'}`}
+                        >
+                            DIFFS
+                        </button>
                     </div>
                 </div>
-                <div className="w-full h-1.5 bg-white/[0.03] rounded-full overflow-hidden mt-1 pt-0.5">
-                    <motion.div 
-                      className="h-full bg-cyan-400" 
-                      animate={{ width: `${(selectedAci/255)*100}%` }}
-                      transition={{ type: 'spring', damping: 20 }}
+                <div className="relative group">
+                    <input 
+                      type="text"
+                      placeholder="SEARCH COLORS..."
+                      className="w-full bg-black/60 border border-white/5 rounded px-2.5 py-1 text-[8px] font-black text-white outline-none focus:border-cyan-400/30 transition-all placeholder:text-neutral-900"
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
                     />
                 </div>
+                <div className="flex items-center gap-1 overflow-x-auto scrollbar-none pb-1">
+                    {[1, 7, 8, 250, 255].map(aci => (
+                        <button 
+                            key={`jump-${aci}`}
+                            onClick={() => jumpToColor(aci)}
+                            className="shrink-0 px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 text-[6px] font-bold text-neutral-500 uppercase border border-white/5"
+                        >
+                            #{aci}
+                        </button>
+                    ))}
+                </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-5 grid grid-cols-8 md:grid-cols-4 gap-3 scrollbar-none content-start bg-gradient-to-b from-[#0a0a0c] to-transparent">
-                {aciColors.map((color, i) => {
-                    if (i === 0) return null; 
-                    const isSelected = selectedAci === i;
+            <div className="flex-1 overflow-y-auto p-3 grid grid-cols-10 md:grid-cols-5 gap-1.5 scrollbar-none content-start">
+                {filteredAcis.map((i) => {
+                    const color = aciColors[i];
+                    const isSelected = selectedAcis.includes(i);
+                    const isModified = activeCtb && (
+                      activeCtb.styles[i].plotColor !== 'useObjectColor' || 
+                      activeCtb.styles[i].lineweight !== 'useObjectLineweight' || 
+                      activeCtb.styles[i].screening !== 100
+                    );
+
                     return (
                         <button 
                             key={`aci-swatch-${i}`}
-                            onClick={() => setSelectedAci(i)}
-                            className={`aspect-square rounded-[0.8rem] transition-all relative group overflow-hidden border ${isSelected ? 'border-cyan-400 scale-110 shadow-[0_0_20px_rgba(0,188,212,0.3)] z-10' : 'border-white/[0.05] hover:border-white/20'}`}
+                            onClick={(e) => toggleAciSelection(i, e.shiftKey || e.metaKey || e.ctrlKey)}
+                            className={`aspect-square rounded-md transition-all relative group overflow-hidden border-2 ${isSelected ? 'border-cyan-400 scale-105 shadow-[0_0_10px_rgba(0,188,212,0.4)] z-10' : 'border-white/[0.03] hover:border-white/10'}`}
                             style={{ backgroundColor: color }}
                         >
-                            <span className="absolute inset-0 flex items-center justify-center text-[7px] font-black text-white mix-blend-difference opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">{i}</span>
-                            {isSelected && <div className="absolute inset-0 border-2 border-black/40 rounded-[0.7rem]" />}
+                            <span className="absolute inset-0 flex items-center justify-center text-[6px] font-black text-white mix-blend-difference opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">{i}</span>
+                            {isModified && !isSelected && <div className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full bg-cyan-400" />}
+                            {isSelected && <div className="absolute inset-0 border border-black/30 rounded-sm" />}
                         </button>
                     )
                 })}
             </div>
         </div>
 
-        {/* Inspector Panel */}
-        <div className="flex-1 overflow-y-auto bg-[#0a0a0c] flex flex-col scrollbar-none">
+        <div className={`${activeTab === 'editor' ? 'flex' : 'hidden md:flex'} flex-1 overflow-y-auto bg-[#0a0a0c] flex-col scrollbar-none`}>
           {activeCtb && currentStyle ? (
             <>
-              <div className="p-8 border-b border-white/5 bg-[#0c0c0e]/80 backdrop-blur-2xl flex items-center justify-between sticky top-0 z-20">
-                 <div className="flex items-center gap-8">
+              <div className="px-4 py-2 border-b border-white/5 bg-[#0c0c0e]/90 backdrop-blur-3xl flex items-center justify-between sticky top-0 z-20">
+                 <div className="flex items-center gap-3">
                     <div 
-                      className="w-20 h-20 rounded-[1.75rem] border-4 border-white/10 shadow-[0_20px_40px_rgba(0,0,0,0.5)] relative flex items-center justify-center overflow-hidden active:scale-95 transition-transform" 
-                      style={{ backgroundColor: aciColors[selectedAci] }}
+                      className="w-9 h-9 rounded-lg border border-white/10 shadow-lg relative flex items-center justify-center overflow-hidden" 
+                      style={{ backgroundColor: isMultiSelecting ? 'transparent' : aciColors[firstAci] }}
                     >
-                        <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent pointer-events-none" />
-                        <span className="text-[24px] font-black text-white mix-blend-difference z-10">{selectedAci}</span>
+                        {isMultiSelecting ? (
+                           <div className="grid grid-cols-2 gap-[1px] p-0.5 bg-neutral-950 w-full h-full opacity-40">
+                              {selectedAcis.slice(0, 4).map(a => (
+                                <div key={`prev-${a}`} className="w-full h-full" style={{ backgroundColor: aciColors[a] }} />
+                              ))}
+                           </div>
+                        ) : (
+                          <>
+                            <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent pointer-events-none" />
+                            <span className="text-[11px] font-black text-white mix-blend-difference z-10">{firstAci}</span>
+                          </>
+                        )}
                     </div>
                     <div className="flex flex-col">
-                        <div className="flex items-center gap-3 mb-1">
-                          <h4 className="text-[18px] font-black text-white uppercase tracking-tight font-mono">ACI {selectedAci}</h4>
-                          <div className="px-2 py-0.5 rounded-md bg-white/5 border border-white/5 text-[8px] font-black text-neutral-500 uppercase tracking-widest">Pen Data</div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-[11px] font-black text-white uppercase tracking-tight">
+                            {isMultiSelecting ? `${selectedAcis.length} SELECTED` : `COLOR ${firstAci}`}
+                          </h4>
+                          <span className="text-[5px] font-black text-cyan-400/60 uppercase tracking-widest border border-cyan-400/10 px-1 rounded">
+                            {isMultiSelecting ? 'BATCH' : 'PEN'}
+                          </span>
                         </div>
-                        <div className="flex items-center gap-4">
-                           <span className="text-[10px] font-black text-cyan-400 uppercase tracking-[0.2em]">{hexToRgbStr(aciColors[selectedAci])}</span>
-                           <div className="w-[1.5px] h-3 bg-neutral-800 rounded-full" />
-                           <span className="text-[10px] font-black text-neutral-600 uppercase tracking-widest">Vector Translation Active</span>
-                        </div>
+                        <span className="text-[6.5px] font-black text-neutral-700 uppercase tracking-widest">
+                          {isMultiSelecting ? 'Global style alignment active' : hexToRgbStr(aciColors[firstAci])}
+                        </span>
                     </div>
                  </div>
                  
                  <button 
                   onClick={() => onUpdateSettings({ ...settings, activeCtbId: editingCtbId || 'vox' })}
-                  className={`px-6 py-3 rounded-2xl flex items-center gap-3 transition-all border-2 active:scale-95 ${settings.activeCtbId === editingCtbId ? 'bg-cyan-400 border-cyan-400 text-black shadow-[0_0_25px_rgba(0,188,212,0.3)]' : 'bg-white/5 border-white/10 text-neutral-600 hover:border-cyan-400/50 hover:text-cyan-400'}`}
+                  className={`px-3 h-7.5 rounded-lg flex items-center gap-2 transition-all border active:scale-95 ${settings.activeCtbId === editingCtbId ? 'bg-cyan-400 border-cyan-400 text-black shadow-[0_0_15px_rgba(34,211,238,0.25)]' : 'bg-white/5 border-white/5 text-neutral-700 hover:text-white'}`}
                  >
-                    <Check size={16} strokeWidth={4} />
-                    <span className="text-[10px] font-black uppercase tracking-[0.2em]">
-                        {settings.activeCtbId === editingCtbId ? 'Active Profile' : 'Set as Active'}
+                    <Check size={10} strokeWidth={4} />
+                    <span className="text-[7px] font-black uppercase tracking-widest">
+                        {settings.activeCtbId === editingCtbId ? 'ACTIVE' : 'SELECT'}
                     </span>
                  </button>
               </div>
 
-              <div className="p-10 space-y-14">
-                 {/* Property Section: Output Color */}
-                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-start">
-                    <div className="space-y-5">
-                        <div className="flex items-center gap-3 px-1 text-neutral-500 group">
-                           <div className="w-2 h-2 rounded-full bg-cyan-500" />
-                           <span className="text-[11px] font-black uppercase tracking-[0.35em]">Plot Output Color</span>
+              <div className="p-4 space-y-5">
+                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+                    <div className="space-y-2.5">
+                        <div className="flex items-center justify-between px-0.5">
+                            <div className="flex items-center gap-2 text-neutral-600">
+                               <div className="w-1.5 h-1.5 rounded-full bg-cyan-500" />
+                               <span className="text-[8.5px] font-black uppercase tracking-[0.15em]">Mapping Output</span>
+                            </div>
+                            <div className="flex gap-1">
+                                {[1, 2, 3, 4, 5, 6, 7, 8].map(aci => (
+                                    <button 
+                                        key={`quick-color-${aci}`}
+                                        onClick={() => handleUpdateStyle(selectedAcis, { plotColor: aciColors[aci] })}
+                                        className="w-3.5 h-3.5 rounded-full border border-white/10 hover:scale-125 transition-transform"
+                                        style={{ backgroundColor: aciColors[aci] }}
+                                        title={`Map to ACI ${aci}`}
+                                    />
+                                ))}
+                            </div>
                         </div>
-                        <div className="p-7 bg-[#0d0d0f] border border-white/5 rounded-[2rem] group hover:border-cyan-400/20 transition-all shadow-2xl">
+                        <div className="p-3 bg-[#0d0d0f] border border-white/5 rounded-xl block transition-all shadow-lg hover:border-white/10">
                            <div 
-                             className="flex items-center justify-between bg-black/60 p-5 rounded-2xl border border-white/5 mb-5 group/color-btn cursor-pointer active:scale-95 transition-all"
-                             onClick={() => onOpenColorSelector(currentStyle.plotColor === 'useObjectColor' ? aciColors[selectedAci] : currentStyle.plotColor, (color) => {
-                                handleUpdateStyle(selectedAci, { plotColor: color });
-                             }, `MAPPING COLOR [ACI ${selectedAci}]`)}
+                             className="flex items-center justify-between bg-black/50 p-2 rounded-lg border border-white/5 mb-2.5 group/color-btn cursor-pointer active:scale-95 transition-all"
+                             onClick={() => onOpenColorSelector(currentStyle.plotColor === 'useObjectColor' ? aciColors[firstAci] : currentStyle.plotColor, (color) => {
+                                handleUpdateStyle(selectedAcis, { plotColor: color });
+                             }, `MAPPING COLOR [${selectedAcis.length} ITEMS]`)}
                            >
-                                <div className="flex items-center gap-5">
-                                    <div className="w-12 h-12 rounded-xl border-2 border-white/10 shadow-lg" style={{ backgroundColor: currentStyle.plotColor === 'useObjectColor' ? aciColors[selectedAci] : currentStyle.plotColor }} />
-                                    <div className="flex flex-col gap-0.5">
-                                        <span className="text-[11px] font-black text-white uppercase tracking-tight">{currentStyle.plotColor === 'useObjectColor' ? 'Native Object Color' : 'Custom Plot Mapping'}</span>
-                                        <span className="text-[9px] font-mono text-neutral-600 font-bold uppercase tracking-widest">{currentStyle.plotColor === 'useObjectColor' ? 'Dynamic Binding' : currentStyle.plotColor}</span>
+                                <div className="flex items-center gap-3">
+                                    <div className="w-7 h-7 rounded-md border border-white/10 shadow-lg flex items-center justify-center bg-neutral-950 overflow-hidden">
+                                        {isMultiSelecting ? (
+                                           <div className="grid grid-cols-3 w-full h-full opacity-20">
+                                              <div className="bg-red-500" /> <div className="bg-blue-500" />
+                                              <div className="bg-green-500" /> <div className="bg-yellow-500" />
+                                              <div className="bg-cyan-500" /> <div className="bg-magenta-500" />
+                                           </div>
+                                        ) : (
+                                          <div className="w-full h-full" style={{ backgroundColor: currentStyle.plotColor === 'useObjectColor' ? aciColors[firstAci] : currentStyle.plotColor }} />
+                                        )}
+                                    </div>
+                                    <div className="flex flex-col">
+                                        <span className="text-[9px] font-black text-white uppercase tracking-tight leading-none">
+                                           {currentStyle.plotColor === 'useObjectColor' ? 'By Layer' : 'Custom Map'}
+                                        </span>
+                                        <span className="text-[6.5px] font-mono text-neutral-800 font-bold uppercase tracking-widest mt-0.5">
+                                           {currentStyle.plotColor === 'useObjectColor' ? 'DYNAMIC' : currentStyle.plotColor}
+                                        </span>
                                     </div>
                                 </div>
-                                <div className="w-10 h-10 rounded-full border border-white/5 flex items-center justify-center text-neutral-700 group-hover/color-btn:text-cyan-400 group-hover/color-btn:bg-cyan-400/10 transition-all">
-                                    <ChevronDown size={20} />
+                                <div className="text-neutral-900 group-hover/color-btn:text-cyan-400">
+                                    <ChevronDown size={12} />
                                 </div>
                            </div>
-                           <p className="px-2 text-[9px] text-neutral-700 font-bold uppercase tracking-tight leading-relaxed italic opacity-80">Renders all geometry of this ACI index to the specified output color during plot operations.</p>
+                           <div className="flex items-center justify-between px-0.5">
+                              <p className="text-[6px] text-neutral-900 font-black uppercase tracking-widest italic">Translation Control.</p>
+                              {currentStyle.plotColor !== 'useObjectColor' && (
+                                <button 
+                                  onClick={() => handleUpdateStyle(selectedAcis, { plotColor: 'useObjectColor' })}
+                                  className="text-[6.5px] font-black text-cyan-400 opacity-60 hover:opacity-100 transition-opacity"
+                                >
+                                  BYLAYER
+                                </button>
+                              )}
+                           </div>
                         </div>
                     </div>
 
-                    <div className="space-y-5">
-                        <div className="flex items-center gap-3 px-1 text-neutral-500 group">
-                           <div className="w-2 h-2 rounded-full bg-cyan-500" />
-                           <span className="text-[11px] font-black uppercase tracking-[0.35em]">Lineweight Override</span>
+                    <div className="space-y-2.5">
+                        <div className="flex items-center justify-between px-0.5">
+                            <div className="flex items-center gap-2 text-neutral-600">
+                               <div className="w-1.5 h-1.5 rounded-full bg-cyan-500" />
+                               <span className="text-[8.5px] font-black uppercase tracking-[0.15em]">Lineweight Override</span>
+                            </div>
+                            <div className="flex gap-1.5">
+                                {[0.05, 0.18, 0.35, 0.70].map(lw => (
+                                    <button 
+                                        key={`quick-lw-${lw}`}
+                                        onClick={() => handleUpdateStyle(selectedAcis, { lineweight: lw })}
+                                        className="text-[6.5px] font-black text-neutral-700 hover:text-cyan-400 border border-white/5 hover:border-cyan-400/30 px-1 rounded bg-black/40 transition-all"
+                                    >
+                                        {lw.toFixed(2)}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
-                        <div className="p-7 bg-[#0d0d0f] border border-white/5 rounded-[2rem] group hover:border-cyan-400/20 transition-all shadow-2xl">
+                        <div className="p-3 bg-[#0d0d0f] border border-white/5 rounded-xl transition-all shadow-lg hover:border-white/10">
                            <div className="relative group/select">
                                <select 
                                    value={currentStyle.lineweight}
-                                   onChange={(e) => handleUpdateStyle(selectedAci, { lineweight: e.target.value === 'useObjectLineweight' ? 'useObjectLineweight' : parseFloat(e.target.value) })}
-                                   className="w-full bg-black/60 border border-white/5 text-white text-[14px] font-mono p-5 rounded-2xl outline-none appearance-none font-black text-center tracking-[0.2em] hover:border-cyan-400/30 transition-all"
+                                   onChange={(e) => handleUpdateStyle(selectedAcis, { lineweight: e.target.value === 'useObjectLineweight' ? 'useObjectLineweight' : parseFloat(e.target.value) })}
+                                   className="w-full bg-black/50 border border-white/5 text-white text-[10px] p-2.5 rounded-lg outline-none appearance-none font-black text-center tracking-[0.1em] hover:border-cyan-400/20 transition-all font-mono"
                                >
-                                   <option value="useObjectLineweight">USE OBJECT WEIGHT</option>
+                                   <option value="useObjectLineweight">BY OBJECT</option>
                                    {lineweights.map((lw) => (
-                                   <option key={`lw-${lw}`} value={lw}>{lw === 0 ? '0.00' : lw.toFixed(2)} MM</option>
+                                      <option key={`lw-opt-${lw}`} value={lw}>{lw.toFixed(2)} MM</option>
                                    ))}
                                 </select>
-                                <div className="absolute right-6 top-1/2 -translate-y-1/2 text-neutral-700 pointer-events-none group-hover/select:text-cyan-400 transition-colors">
-                                    <ChevronDown size={22} />
+                                <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-900 pointer-events-none group-hover/select:text-cyan-400 transition-colors">
+                                    <ChevronDown size={14} />
                                 </div>
                            </div>
-                           <div className="mt-6 flex flex-col gap-3">
-                               <div className="flex items-center justify-between text-[8px] font-black text-neutral-700 uppercase tracking-widest px-1">
-                                  <span>HAIRLINE (0.00MM)</span>
-                                  <span>HEAVY (2.11MM)</span>
-                               </div>
-                               <div className="w-full h-2 bg-black/60 rounded-full overflow-hidden border border-white/5 p-0.5">
+                           <div className="mt-2.5 flex flex-col gap-1.5">
+                                <div className="flex items-center justify-between px-0.5">
+                                  <span className="text-[6px] font-black text-neutral-900 uppercase tracking-widest">MIN</span>
+                                  {currentStyle.lineweight !== 'useObjectLineweight' && (
+                                    <button 
+                                      onClick={() => handleUpdateStyle(selectedAcis, { lineweight: 'useObjectLineweight' })}
+                                      className="text-[6.5px] font-black text-cyan-400 opacity-60 hover:opacity-100"
+                                    >
+                                      DEFAULT
+                                    </button>
+                                  )}
+                                  <span className="text-[6px] font-black text-neutral-900 uppercase tracking-widest">MAX</span>
+                                </div>
+                                <div className="w-full h-1 bg-black/60 rounded-full overflow-hidden border border-white/5">
                                   <motion.div 
-                                    className="h-full bg-cyan-400 rounded-full shadow-[0_0_15px_rgba(0,188,212,0.5)]" 
+                                    className="h-full bg-cyan-400 rounded-full" 
                                     initial={{ width: 0 }}
                                     animate={{ width: currentStyle.lineweight === 'useObjectLineweight' ? '0%' : `${Math.min(100, (currentStyle.lineweight as number)*45)}%` }}
                                   />
-                               </div>
+                                </div>
                            </div>
                         </div>
                     </div>
                  </div>
 
-                 {/* Property Section: Screening */}
-                 <div className="space-y-6">
-                    <div className="flex items-center justify-between px-2">
-                        <div className="flex items-center gap-3 text-neutral-500 group">
-                           <div className="w-2 h-2 rounded-full bg-cyan-500" />
-                           <span className="text-[11px] font-black uppercase tracking-[0.35em]">Screening Intensity</span>
+                 <div className="space-y-3.5">
+                    <div className="flex items-center justify-between px-0.5">
+                        <div className="flex items-center gap-2 text-neutral-600">
+                           <div className="w-1.5 h-1.5 rounded-full bg-cyan-500" />
+                           <span className="text-[8.5px] font-black uppercase tracking-[0.15em]">Screening Intensity</span>
                         </div>
-                        <div className="flex items-baseline gap-1">
-                            <span className="text-[20px] font-mono text-cyan-400 font-black tracking-tight">{currentStyle.screening}</span>
-                            <span className="text-[10px] font-black text-neutral-700 uppercase">% LEVEL</span>
+                        <div className="flex items-baseline gap-1 min-w-[40px] justify-end">
+                          <span className="text-[15px] font-mono text-cyan-400 font-black tracking-tight">{currentStyle.screening}</span>
+                          <span className="text-[7.5px] font-black text-neutral-800 uppercase tracking-widest">%</span>
                         </div>
                     </div>
-                    <div className="p-10 bg-[#0d0d0f] border border-white/5 rounded-[2.5rem] shadow-2xl relative overflow-hidden group">
-                        <div className="absolute inset-0 bg-cyan-400 opacity-[0.01] group-hover:opacity-[0.03] transition-opacity pointer-events-none" />
+
+                    {/* Decision Scale: 5% Increments */}
+                    <div className="flex items-center gap-1 overflow-x-auto pb-2 scrollbar-none">
+                        {Array.from({ length: 21 }, (_, i) => i * 5).map(v => (
+                            <button 
+                                key={`screen-btn-${v}`}
+                                onClick={() => handleUpdateStyle(selectedAcis, { screening: v })}
+                                className={`shrink-0 w-8 h-6 flex items-center justify-center text-[7.5px] font-mono font-black rounded border transition-all ${currentStyle.screening === v ? 'bg-cyan-400 text-black border-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.3)]' : 'bg-white/5 text-neutral-700 border-white/5 hover:border-cyan-400/20'}`}
+                            >
+                                {v}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="p-5 bg-[#0d0d0f] border border-white/5 rounded-xl shadow-lg relative overflow-hidden group">
                         <input 
                             type="range" 
                             min="0" max="100" step="5"
                             value={currentStyle.screening}
-                            onChange={(e) => handleUpdateStyle(selectedAci, { screening: parseInt(e.target.value) })}
-                            className="w-full h-3 bg-black rounded-full appearance-none cursor-pointer accent-cyan-400 hover:accent-cyan-300 transition-all border border-white/5"
+                            onChange={(e) => handleUpdateStyle(selectedAcis, { screening: parseInt(e.target.value) })}
+                            className="w-full h-1 bg-black rounded-full appearance-none cursor-pointer accent-cyan-400 hover:accent-cyan-300 transition-all"
                         />
-                        <div className="flex justify-between mt-8 px-2">
-                            {[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map(v => (
-                                <div key={`screen-mark-${v}`} className="flex flex-col items-center gap-3">
-                                    <div className={`w-[2px] rounded-full transition-all duration-500 ${currentStyle.screening >= v ? 'bg-cyan-400 h-4 shadow-[0_0_8px_cyan]' : 'bg-neutral-800 h-2'}`} />
-                                    <span className={`text-[8px] font-black transition-colors duration-500 ${currentStyle.screening >= v ? 'text-white' : 'text-neutral-800'}`}>{v}</span>
+                        <div className="flex justify-between mt-5 px-1 relative h-4">
+                            {Array.from({ length: 11 }, (_, i) => i * 10).map(v => (
+                                <div key={`screen-mark-${v}`} className="flex flex-col items-center gap-1 absolute" style={{ left: `${v}%`, transform: 'translateX(-50%)' }}>
+                                    <div className={`w-[1px] transition-all duration-300 ${currentStyle.screening === v ? 'bg-cyan-400 h-2 shadow-[0_0_5px_cyan]' : 'bg-neutral-900 h-1'}`} />
+                                    {v % 20 === 0 && (
+                                        <span className={`text-[6px] font-black transition-colors duration-300 ${currentStyle.screening === v ? 'text-neutral-300' : 'text-neutral-900'}`}>{v}</span>
+                                    )}
                                 </div>
                             ))}
                         </div>
                     </div>
                  </div>
 
-                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     {[
-                        { label: 'TERMINAL ENDS', icon: <BoxSelect size={14} />, val: 'BUTT/SQUARE' },
-                        { label: 'JOINT TYPE', icon: <Maximize2 size={14} />, val: 'MITER_ANGLE' },
-                        { label: 'FILL ALGORITHM', icon: <Palette size={14} />, val: 'SOLID_SCAN' }
+                        { label: 'TERMINAL', icon: <BoxSelect size={11} />, val: 'BUTT' },
+                        { label: 'JOINT', icon: <Maximize2 size={11} />, val: 'MITER' },
+                        { label: 'ALGO', icon: <Palette size={11} />, val: 'SOLID' }
                     ].map(card => (
-                        <div key={card.label} className="p-6 bg-white/[0.02] border border-white/5 rounded-3xl flex items-center justify-between group hover:bg-white/[0.05] hover:border-cyan-400/20 transition-all cursor-pointer active:scale-95">
-                            <div className="flex flex-col gap-1.5">
-                                <span className="text-[8px] font-black text-neutral-700 uppercase tracking-[0.25em]">{card.label}</span>
-                                <span className="text-[12px] font-black text-neutral-400 uppercase tracking-tight group-hover:text-cyan-400 transition-colors">{card.val}</span>
+                        <div key={card.label} className="p-3 bg-white/[0.01] border border-white/5 rounded-xl flex items-center justify-between group hover:bg-white/[0.02] hover:border-white/10 transition-all cursor-pointer active:scale-95">
+                            <div className="flex flex-col">
+                                <span className="text-[6.5px] font-black text-neutral-800 uppercase tracking-[0.1em]">{card.label}</span>
+                                <span className="text-[9px] font-black text-neutral-600 uppercase group-hover:text-cyan-400 transition-colors mt-0.5">{card.val}</span>
                             </div>
-                            <div className="w-10 h-10 rounded-xl bg-black/40 flex items-center justify-center text-neutral-800 group-hover:text-cyan-400 group-hover:bg-cyan-400/10 transition-all border border-white/5 group-hover:border-cyan-400/20">
+                            <div className="w-7 h-7 rounded-md bg-black/40 flex items-center justify-center text-neutral-800 group-hover:text-cyan-400 transition-all border border-white/5">
                                 {card.icon}
                             </div>
                         </div>
@@ -400,45 +584,36 @@ const CtbManager: React.FC<CtbManagerProps> = ({ isOpen, onClose, settings, onUp
               </div>
             </>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center p-20 text-center">
-               <div className="w-40 h-40 rounded-[3rem] bg-white/[0.02] flex items-center justify-center mb-10 border-2 border-white/[0.03] group relative">
-                  <div className="absolute inset-0 bg-cyan-400/5 blur-3xl opacity-0 group-hover:opacity-100 transition-opacity" />
-                  <Palette size={80} className="text-neutral-900 group-hover:scale-110 group-hover:text-cyan-400 transition-all duration-1000 relative z-10" />
-               </div>
-               <h4 className="text-[20px] font-black text-neutral-800 uppercase tracking-[0.5em] mb-6">STANDBY STATE</h4>
-               <p className="max-w-[360px] text-[11px] font-bold uppercase tracking-[0.2em] leading-relaxed text-neutral-700 opacity-60">
-                 PEN DRIVER HAS NOT RECEIVED TARGET CATALOG DATA. PLEASE SELECT A CTB FILE FROM THE LEFT LIBRARY TO BEGIN MAPPING.
-               </p>
+            <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
+               <Palette className="w-12 h-12 text-white/5 mb-6 animate-pulse" />
+               <h4 className="text-[12px] font-black text-neutral-800 uppercase tracking-[0.25em] mb-2">Style Ready</h4>
+               <p className="text-[9px] text-neutral-900 font-bold uppercase tracking-widest max-w-[200px]">Select a color index from the matrix to configure pen translation parameters.</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* Persistence Bar */}
-      <div className="px-12 py-8 bg-[#0a0a0c] border-t border-white/5 flex items-center justify-between shrink-0 shadow-[0_-40px_80px_rgba(0,0,0,0.8)] z-30">
-          <div className="flex items-center gap-8">
-             <div className="flex items-center gap-3">
-                <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_15px_rgba(0,188,212,0.8)]" />
-                <span className="text-[10px] font-black text-neutral-700 uppercase tracking-[0.4em]">SYSTEM LINK SECURE</span>
+      <div className="px-5 py-3 sm:py-3.5 bg-[#0a0a0c] border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-4 shrink-0 shadow-[0_-15px_45px_rgba(0,0,0,0.8)] z-30">
+          <div className="flex items-center gap-5 w-full sm:w-auto overflow-hidden">
+             <div className="flex items-center gap-2 shrink-0">
+                <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(0,188,212,0.8)]" />
+                <span className="text-[7.5px] font-black text-neutral-800 uppercase tracking-[0.15em] shrink-0">CORE_STABLE</span>
              </div>
-             <div className="h-5 w-px bg-white/10" />
-             <div className="flex flex-col">
-                <span className="text-[8px] font-black text-neutral-800 uppercase tracking-widest leading-none mb-1">SERVICE_CORE_ID</span>
-                <span className="text-[10px] font-mono text-neutral-600 font-bold uppercase leading-none">VOXCADD_CTB_01.KERNEL</span>
-             </div>
+             <div className="h-4 w-px bg-white/5 hidden sm:block shrink-0" />
+             <span className="text-[7.5px] font-mono text-neutral-700 font-bold uppercase tracking-tight truncate">{(activeCtb?.name || 'VOX').replace('.ctb', '').toUpperCase()}.KERNEL</span>
           </div>
-          <div className="flex items-center gap-8">
+          <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
               <button 
                 onClick={onClose}
-                className="text-[11px] font-black uppercase tracking-[0.3em] text-neutral-700 hover:text-white transition-all hover:tracking-[0.4em] active:scale-95"
+                className="text-[8.5px] font-black uppercase tracking-[0.15em] text-neutral-700 hover:text-white transition-all px-4 h-9"
               >
-                DISCARD CHANGES
+                DISCARD
               </button>
               <button 
                 onClick={onClose}
-                className="h-14 px-14 rounded-2xl bg-cyan-400 text-black text-[12px] font-black uppercase tracking-[0.3em] shadow-[0_15px_45px_rgba(0,188,212,0.4)] hover:bg-cyan-300 hover:shadow-[0_20px_60px_rgba(0,188,212,0.5)] transition-all active:scale-95"
+                className="h-9 px-6 sm:px-10 rounded-lg bg-cyan-400 text-black text-[9px] font-black uppercase tracking-[0.15em] shadow-[0_8px_20px_rgba(0,188,212,0.15)] hover:bg-cyan-300 transition-all flex items-center justify-center min-w-[200px] sm:min-w-[180px]"
               >
-                COMMIT PEN TABLE
+                COMMIT PEN MAP
               </button>
           </div>
       </div>

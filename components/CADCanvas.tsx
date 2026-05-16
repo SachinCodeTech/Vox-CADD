@@ -750,9 +750,16 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         baseColor = currentLayerConf?.color || "#FFFFFF";
     }
     
-    let weight = resolved.lineweight;
-    // Special case for double lines
-    if (s.type === 'dline') weight = conf?.thickness || 0.25;
+    // Ensure weight is a number (handles 'DEFAULT' if it leaked through)
+    let weight = typeof resolved.lineweight === 'number' ? resolved.lineweight : 0.25;
+    
+    // Special case for double lines - use inherited weight but handle potential stale data or 'DEFAULT'
+    if (s.type === 'dline') {
+        const dweight = conf?.thickness;
+        if (typeof dweight === 'number') weight = dweight;
+        else if (typeof dweight === 'string' && dweight !== 'DEFAULT') weight = parseFloat(dweight) || 0.25;
+        else weight = 0.25;
+    }
 
     let finalThickness = weight;
     if (settings.showLineWeights) {
@@ -783,8 +790,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     else { 
         ctx.strokeStyle = baseColor; 
         ctx.globalAlpha = resolved.opacity;
-        if (conf?.locked) ctx.globalAlpha *= 0.45; 
-        // Ensure even hairline is visible at any zoom
+        if (conf?.locked) ctx.globalAlpha *= 0.6; // Increased from 0.45 for better visibility        // Ensure even hairline is visible at any zoom
         const minLw = (weight <= 0.001) ? 0.25/ts : 0.6/ts;
         ctx.lineWidth = Math.max(minLw, finalThickness/ts); 
     }
@@ -1225,17 +1231,16 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           if (tAngle > Math.PI/2) tAngle -= Math.PI;
           if (tAngle < -Math.PI/2) tAngle += Math.PI;
           ctx.rotate(tAngle); ctx.scale(1, -1);
-          ctx.font = `bold ${ds.textSize}px "JetBrains Mono", monospace`; 
+          ctx.font = `bold ${ds.textSize}px "JetBrains Mono", "Fira Code", monospace`; 
           ctx.textAlign = 'center'; 
           ctx.textBaseline = 'middle';
           
-          if (ds.textPlacement === 'center') {
-              const metrics = ctx.measureText(dimText);
-              const padX = ds.textSize * 0.4;
-              const padY = ds.textSize * 0.2;
-              ctx.fillStyle = isModel ? "#0a0a0c" : "#ffffff";
-              ctx.fillRect(-metrics.width/2 - padX, -ds.textSize/2 - padY, metrics.width + padX*2, ds.textSize + padY*2);
-          }
+          // Always mask dimension text for better readability against drawing lines
+          const metrics = ctx.measureText(dimText);
+          const padX = ds.textSize * 0.4;
+          const padY = ds.textSize * 0.2;
+          ctx.fillStyle = isModel ? "#0a0a0c" : "#ffffff";
+          ctx.fillRect(-metrics.width/2 - padX, -ds.textSize/2 - padY, metrics.width + padX*2, ds.textSize + padY*2);
 
           ctx.fillStyle = baseColor; 
           ctx.fillText(dimText, 0, 0);
@@ -2415,7 +2420,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     return () => cancelAnimationFrame(anim);
   }, [isAiThinking, lastAiCommandTime, redraw]);
 
-  useEffect(() => { redraw(); }, [redraw, view, isViewportActive, layers, layerConfig, selectedIds, highlightIds, settings, previewShapes]);
+  useEffect(() => { redraw(); }, [redraw, view, isViewportActive, layers, layerConfig, selectedIds, highlightIds, settings, previewShapes, activeTab]);
 
   return (
     <div className="w-full h-full overflow-hidden bg-[#0a0a0c] touch-none">

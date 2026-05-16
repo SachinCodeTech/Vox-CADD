@@ -12,12 +12,12 @@ interface DrawingPropertiesProps {
 }
 
 const PropertySection = ({ title, icon: Icon, children, accent = "cyan" }: { title: string, icon: any, children?: React.ReactNode, accent?: string }) => (
-  <div className="mb-6 last:mb-0">
-    <div className="flex items-center gap-2 mb-3 px-1">
-      <Icon size={14} className={accent === "cyan" ? "text-cyan-500" : "text-amber-500"} />
-      <span className="text-[10px] font-black text-neutral-400 uppercase tracking-[0.15em]">{title}</span>
+  <div className="mb-4 last:mb-0">
+    <div className="flex items-center gap-2 mb-2 px-1">
+      <Icon size={12} className={accent === "cyan" ? "text-cyan-500" : "text-amber-500"} />
+      <span className="text-[9px] font-black text-neutral-500 uppercase tracking-[0.2em]">{title}</span>
     </div>
-    <div className="space-y-3 bg-neutral-900/30 rounded-xl p-4 border border-white/5 shadow-inner">
+    <div className="space-y-2 bg-neutral-950/40 rounded-xl p-3 border border-white/5">
       {children}
     </div>
   </div>
@@ -27,16 +27,16 @@ const InputField = ({ label, value, onChange, placeholder, icon: Icon, isTextAre
   const id = React.useId();
   const InputComponent = isTextArea ? 'textarea' : 'input';
   return (
-    <div className="space-y-1.5">
-      <label htmlFor={id} className="text-[9px] font-bold text-neutral-600 uppercase pl-1 cursor-pointer hover:text-neutral-400 transition-colors uppercase tracking-widest">{label}</label>
+    <div className="space-y-1">
+      <label htmlFor={id} className="text-[8px] font-bold text-neutral-700 uppercase pl-1 cursor-pointer hover:text-neutral-500 transition-colors tracking-widest">{label}</label>
       <div className="relative group">
-        {Icon && <Icon size={12} className={`absolute left-3 ${isTextArea ? 'top-4' : 'top-1/2 -translate-y-1/2'} text-neutral-500 group-focus-within:text-cyan-500 transition-colors pointer-events-none`} />}
+        {Icon && <Icon size={10} className={`absolute left-2.5 ${isTextArea ? 'top-3.5' : 'top-1/2 -translate-y-1/2'} text-neutral-600 group-focus-within:text-amber-500 transition-colors pointer-events-none`} />}
         <InputComponent 
           id={id}
           value={value} 
           onChange={(e) => onChange(e.target.value)} 
           placeholder={placeholder}
-          className={`w-full bg-black/40 border border-neutral-800 rounded-xl py-2.5 ${Icon ? 'pl-9' : 'px-3'} pr-3 text-[11px] text-neutral-200 outline-none focus:border-cyan-600 focus:bg-black/60 hover:border-neutral-700 transition-all font-bold placeholder:text-neutral-800 select-text cursor-text ${isTextArea ? 'min-h-[80px] resize-none py-3' : ''}`}
+          className={`w-full bg-black/40 border border-neutral-900 rounded-lg py-2 ${Icon ? 'pl-8' : 'px-3'} pr-3 text-[10px] text-neutral-300 outline-none focus:border-amber-600/50 focus:bg-black/60 hover:border-neutral-800 transition-all font-bold placeholder:text-neutral-900 select-text cursor-text ${isTextArea ? 'min-h-[60px] resize-none py-2' : ''}`}
         />
       </div>
     </div>
@@ -104,42 +104,42 @@ const DrawingProperties: React.FC<DrawingPropertiesProps> = ({ settings, onConfi
 
   return (
     <div 
-      className="relative bg-[#0a0a0c] w-[340px] max-w-[95vw] border border-white/10 rounded-[2.5rem] shadow-[0_40px_100px_rgba(0,0,0,0.9)] flex flex-col overflow-hidden font-sans"
+      className="relative bg-[#0a0a0c]/95 backdrop-blur-3xl w-[320px] max-w-[95vw] border border-white/10 rounded-3xl shadow-[0_40px_100px_rgba(0,0,0,0.9)] flex flex-col overflow-hidden font-sans"
     >
       <div 
-        className="flex justify-between items-center p-6 border-b border-white/5 bg-white/5 shrink-0"
+        className="flex justify-between items-center px-5 py-4 border-b border-white/5 bg-white/[0.02] shrink-0"
       >
         <div className="flex items-center gap-3 pointer-events-none">
-          <Briefcase size={20} className="text-amber-400" />
+          <Briefcase size={18} className="text-amber-400" />
           <div>
-            <h3 className="text-[12px] font-black text-neutral-100 uppercase tracking-[0.2em]">Project Properties</h3>
-            <p className="text-[8px] text-neutral-500 font-bold uppercase tracking-widest">Metadata Profile</p>
+            <h3 className="text-[11px] font-black text-neutral-200 uppercase tracking-[0.2em]">Project Properties</h3>
+            <p className="text-[7px] text-neutral-600 font-bold uppercase tracking-widest">Metadata Profile</p>
           </div>
         </div>
-        <button onClick={onClose} className="w-10 h-10 flex items-center justify-center hover:bg-white/5 rounded-full text-neutral-500 transition-colors">
-          <X size={24} />
+        <button onClick={onClose} className="w-8 h-8 flex items-center justify-center hover:bg-white/5 rounded-lg text-neutral-600 transition-colors active:scale-90">
+          <X size={18} />
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 scrollbar-none max-h-[60vh]">
+      <div className="flex-1 overflow-y-auto px-5 py-4 scrollbar-none max-h-[55vh]">
         
         {/* Simplified Project Info */}
-        <PropertySection title="General Information" icon={FileText} accent="amber">
+        <PropertySection title="General Context" icon={FileText} accent="amber">
           <InputField 
-            label="Project Title" 
+            label="Project Name" 
             value={localTitle} 
             onChange={(v) => setLocalTitle(v)} 
             placeholder="Drawing1" 
             icon={PenLine} 
           />
           <InputField 
-            label="Architect" 
+            label="Design Lead" 
             value={localMetadata.author || ''} 
             onChange={(v) => setLocalMetadata(prev => ({ ...prev, author: v }))} 
-            placeholder="ARCHITECT NAME" 
+            placeholder="ARCHITECT" 
             icon={User} 
           />
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2">
              <InputField 
                 label="Date" 
                 value={localMetadata.createdAt || ''} 
@@ -154,51 +154,51 @@ const DrawingProperties: React.FC<DrawingPropertiesProps> = ({ settings, onConfi
               />
           </div>
           <InputField 
-            label="Project Revision" 
+            label="Version" 
             value={localMetadata.projectRevision || ''} 
             onChange={(v) => setLocalMetadata(prev => ({ ...prev, projectRevision: v }))} 
             placeholder="e.g. V-1.0.0" 
             icon={ShieldCheck} 
           />
           <InputField 
-            label="Project Description" 
+            label="Project Summary" 
             value={localMetadata.description || ''} 
             onChange={(v) => setLocalMetadata(prev => ({ ...prev, description: v }))} 
-            placeholder="PROJECT NOTES..." 
+            placeholder="NOTES..." 
             icon={PenLine} 
             isTextArea
           />
         </PropertySection>
 
         {/* Live Workspace Status */}
-        <PropertySection title="Drawing Statistics" icon={Activity}>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-black/60 p-4 rounded-xl border border-white/5">
-              <div className="text-[8px] font-black text-neutral-600 uppercase mb-1">Entity Count</div>
-              <div className="text-2xl font-black text-cyan-400 font-mono tracking-tighter">{entityCount}</div>
+        <PropertySection title="Environment Stats" icon={Activity}>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="bg-black/60 p-3 rounded-lg border border-white/5">
+              <div className="text-[7px] font-black text-neutral-700 uppercase mb-0.5">Entities</div>
+              <div className="text-xl font-black text-cyan-400 font-mono tracking-tighter">{entityCount}</div>
             </div>
-            <div className="bg-black/60 p-4 rounded-xl border border-white/5">
-              <div className="text-[8px] font-black text-neutral-600 uppercase mb-1">Current Layer</div>
-              <div className="text-[10px] font-black text-white truncate uppercase tracking-widest mt-2">{settings.currentLayer}</div>
+            <div className="bg-black/60 p-3 rounded-lg border border-white/5">
+              <div className="text-[7px] font-black text-neutral-700 uppercase mb-0.5">Active Layer</div>
+              <div className="text-[9px] font-black text-white truncate uppercase tracking-widest mt-1 opacity-70">{settings.currentLayer}</div>
             </div>
           </div>
         </PropertySection>
 
-        <div className="mt-4 p-5 bg-amber-950/10 rounded-2xl border border-amber-800/20">
-          <div className="flex items-center gap-2 mb-2">
-            <Info size={14} className="text-amber-400" />
-            <span className="text-[10px] font-black text-amber-400 uppercase tracking-widest">Metadata Insight</span>
+        <div className="mt-2 p-4 bg-amber-950/10 rounded-xl border border-amber-800/10">
+          <div className="flex items-center gap-2 mb-1">
+            <Info size={12} className="text-amber-400" />
+            <span className="text-[9px] font-black text-amber-500 uppercase tracking-widest leading-none">Note</span>
           </div>
-          <p className="text-[10px] leading-relaxed text-neutral-400 font-medium">
-            This panel manages high-level architectural metadata. Drafting units and snap settings are accessible via the main drafting dashboard.
+          <p className="text-[9px] leading-relaxed text-neutral-600 font-medium">
+            Drafting units and snap settings are handled via the drafting dashboard.
           </p>
         </div>
       </div>
 
-      <div className="p-6 bg-[#0f0f11] border-t border-neutral-800/50 shrink-0">
+      <div className="px-5 py-4 bg-[#0a0a0c]/50 border-t border-white/5 shrink-0">
         <button 
           onClick={handleConfirm}
-          className="w-full py-4 bg-amber-600 text-black text-[12px] font-black uppercase rounded-2xl shadow-xl shadow-amber-950/20 active:scale-95 transition-all"
+          className="w-full py-3 bg-amber-600 hover:bg-amber-500 text-black text-[11px] font-black uppercase rounded-xl shadow-lg shadow-amber-950/20 active:scale-95 transition-all"
         >
           Confirm Metadata
         </button>

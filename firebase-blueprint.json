@@ -14,15 +14,28 @@
     },
     "FileMetadata": {
       "title": "File Metadata",
-      "description": "Metadata about local CAD files (no file content).",
+      "description": "Metadata about local and cloud CAD files.",
       "type": "object",
       "properties": {
         "fileName": { "type": "string", "description": "Name of the file" },
         "fileSize": { "type": "number", "description": "Size in bytes (approx)" },
         "lastModified": { "type": "string", "format": "date-time", "description": "Last modified date" },
-        "tags": { "type": "array", "items": { "type": "string" }, "description": "Optional user tags" }
+        "tags": { "type": "array", "items": { "type": "string" }, "description": "Optional user tags" },
+        "isSynced": { "type": "boolean", "description": "Whether the file is stored in the cloud" }
       },
       "required": ["fileName", "lastModified"]
+    },
+    "DrawingContent": {
+      "title": "Drawing Content",
+      "description": "The actually geometric data of a drawing.",
+      "type": "object",
+      "properties": {
+        "layers": { "type": "object" },
+        "blocks": { "type": "object" },
+        "settings": { "type": "object" },
+        "layouts": { "type": "array" }
+      },
+      "required": ["layers", "settings"]
     }
   },
   "firestore": {
@@ -32,7 +45,11 @@
     },
     "/users/{userId}/files/{fileId}": {
       "schema": "FileMetadata",
-      "description": "Optional metadata reference for local files."
+      "description": "Metadata for drawings."
+    },
+    "/users/{userId}/drawings/{fileId}": {
+      "schema": "DrawingContent",
+      "description": "Raw drawing content for cloud sync."
     }
   }
 }

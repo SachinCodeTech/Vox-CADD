@@ -27,8 +27,18 @@ service cloud.firestore {
       return data.fileName is string && data.fileName.size() <= 255 &&
              data.lastModified is timestamp &&
              (!data.keys().hasAny(['fileSize']) || data.fileSize is number) &&
+             (!data.keys().hasAny(['isSynced']) || data.isSynced is bool) &&
              (!data.keys().hasAny(['tags']) || (data.tags is list && data.tags.size() <= 20)) &&
              data.keys().hasAll(['fileName', 'lastModified']);
+    }
+
+    // Validation for DrawingContent (Enterprise Hardening)
+    function isValidDrawingContent(data) {
+      return data.layers is map && 
+             data.settings is map &&
+             data.fileName is string && data.fileName.size() <= 255 &&
+             data.lastModified is timestamp &&
+             data.keys().hasAll(['layers', 'settings', 'fileName', 'lastModified']);
     }
 
     // Match patterns
@@ -40,11 +50,20 @@ service cloud.firestore {
 
     match /users/{userId}/files/{fileId} {
       allow get: if isOwner(userId);
-      allow list: if isOwner(userId); // Query enforcer via path variable logic
+      allow list: if isOwner(userId);
       allow create: if isOwner(userId) && isValidId(fileId) && isValidFileMetadata(incoming()) && incoming().lastModified == request.time;
       allow update: if isOwner(userId) && isValidId(fileId) && isValidFileMetadata(incoming()) && 
                     incoming().lastModified == request.time &&
-                    incoming().fileName == existing().fileName; // Immutable filename for existing docs in this logic
+                    incoming().fileName == existing().fileName;
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/drawings/{fileId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(fileId) && isValidDrawingContent(incoming()) && incoming().lastModified == request.time;
+      allow update: if isOwner(userId) && isValidId(fileId) && isValidDrawingContent(incoming()) && 
+                    incoming().lastModified == request.time &&
+                    incoming().fileName == existing().fileName;
       allow delete: if isOwner(userId);
     }
   }

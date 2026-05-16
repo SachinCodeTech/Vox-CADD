@@ -23,6 +23,7 @@ import ColorSelector from './ColorSelector';
 import CtbManager from './CtbManager';
 import LoadingScreen from './LoadingScreen';
 import OfflineIndicator from './OfflineIndicator';
+import { useSession } from './SessionContext';
 import { Share as CapacitorShare } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Capacitor } from '@capacitor/core';
@@ -49,6 +50,7 @@ import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdi
 import VoxIcon from './VoxIcon';
 import ImportSummaryDialog from './ImportSummaryDialog';
 import { storageService } from '../services/storageService';
+import { cloudStorageService } from '../services/cloudStorageService';
 import { trackFileMetadata, syncUserMetadata, onAuthChange, logAppEvent } from '../services/firebaseService';
 
 import { createVoxCtb, createDefaultCtb } from '../services/ctbService';
@@ -77,15 +79,15 @@ const INITIAL_SETTINGS: AppSettings = {
   },
   showHUD: true,
   showLineWeights: true,
-  textSize: 250,
+  textSize: 350,
   textRotation: 0,
   textJustification: 'left',
   activeDimStyle: 'standard',
   dimStyles: {
     'standard': { 
       id: 'standard', name: 'Standard', 
-      arrowSize: 200, textSize: 250, textOffset: 100, 
-      extendLine: 150, offsetLine: 100, precision: 4,
+      arrowSize: 300, textSize: 350, textOffset: 120, 
+      extendLine: 180, offsetLine: 120, precision: 2,
       textPlacement: 'above',
       arrowType: 'closed'
     },
@@ -106,9 +108,10 @@ const INITIAL_SETTINGS: AppSettings = {
     projectRevision: 'V-1.0',
     description: ''
   },
-  activeCtbId: 'vox',
+  activeCtbId: 'voxcadd',
+  showCtbInView: false,
   ctbFiles: {
-    'vox': voxCtb,
+    'voxcadd': voxCtb,
     'monochrome': monoCtb
   }
 };
@@ -138,6 +141,7 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
 };
 
 const App: React.FC = () => {
+  const { user, isAuthenticated } = useSession();
   const [layers, setLayers] = useState<Record<string, Shape[]>>({ '0': [], 'defpoints': [] });
   const [blocks, setBlocks] = useState<Record<string, BlockDefinition>>({});
   const [layouts, setLayouts] = useState<LayoutDefinition[]>([
@@ -432,6 +436,11 @@ const App: React.FC = () => {
       clearTimeout(longPressTimer.current);
       longPressTimer.current = null;
     }
+  };
+
+  const handleLayoutContextMenu = (e: React.MouseEvent, layoutId: string) => {
+    e.preventDefault();
+    setLayoutContextMenu({ x: e.clientX, y: e.clientY, layoutId });
   };
 
   const renameLayout = (id: string) => {
@@ -1129,6 +1138,24 @@ const App: React.FC = () => {
       case 'toggleMainMenu': setActivePanel(activePanel === 'mainmenu' ? 'none' : 'mainmenu'); break;
       case 'toggleDrawingProps': setActivePanel(activePanel === 'drawing_props' ? 'none' : 'drawing_props'); break;
       case 'toggleHelp': setActivePanel(activePanel === 'help' ? 'none' : 'help'); break;
+      case 'setCtb':
+        if (payload) {
+          if (navigator.vibrate) navigator.vibrate(5);
+          setSettings(s => ({ ...s, activeCtbId: payload }));
+          setLogMessage(`CTB_ACTIVE: ${settings.ctbFiles?.[payload]?.name || payload}`);
+        }
+        break;
+      case 'setActiveLayer':
+        if (payload) {
+          if (navigator.vibrate) navigator.vibrate(5);
+          setSettings(s => ({ ...s, currentLayer: payload }));
+          setLayerConfig(prev => ({
+              ...prev,
+              [payload]: { ...prev[payload], visible: true, frozen: false }
+          }));
+          setLogMessage(`LAYER_ACTIVE: ${layerConfig[payload]?.name || payload}`);
+        }
+        break;
       case 'erase':
         if (selectedIds.length > 0) {
             setLayers(prev => {
@@ -1439,7 +1466,14 @@ const App: React.FC = () => {
             updateRecentFiles(currentFileName);
             trackFileMetadata(currentFileName, JSON.stringify(stateToSave).length);
             logAppEvent('file_save', { name: currentFileName });
-            setLogMessage(`SUCCESS: ${currentFileName} SAVED INTERNALLY`);
+            
+            // Auto-sync if authenticated
+            if (isAuthenticated) {
+               await cloudStorageService.saveToCloud(currentFileName.replace(/[^a-zA-Z0-9]/g, '_'), stateToSave);
+               setLogMessage(`SUCCESS: ${currentFileName} SAVED & SYNCED`);
+            } else {
+               setLogMessage(`SUCCESS: ${currentFileName} SAVED LOCALLY`);
+            }
           } catch (e) {
             setLogMessage("ERR: STORAGE_SAVE_FAILED");
           } finally {
@@ -1447,6 +1481,37 @@ const App: React.FC = () => {
             setLoadingStatus("");
           }
         }, 50);
+        break;
+      }
+      case 'syncToCloud': {
+        if (!isAuthenticated) {
+            setLogMessage("ERR: AUTHORIZATION_REQUIRED");
+            return;
+        }
+        setLoadingFile(true);
+        setLoadingStatus("SYNCING TO CLOUD...");
+        try {
+            const data = {
+                layers: JSON.parse(JSON.stringify(layersRef.current)),
+                layerConfig: layerConfigRef.current,
+                settings: settingsRef.current,
+                lineTypes: lineTypesRef.current,
+                blocks: blocksRef.current,
+                layouts: layoutsRef.current,
+                fileName: currentFileName
+            };
+            const success = await cloudStorageService.saveToCloud(currentFileName.replace(/[^a-zA-Z0-9]/g, '_'), data);
+            if (success) {
+                setLogMessage(`CLOUD_SYNC_SUCCESS: ${currentFileName}`);
+            } else {
+                setLogMessage("ERR: CLOUD_SYNC_FAILED");
+            }
+        } catch (e) {
+            setLogMessage("ERR: SYNC_EXCEPTION");
+        } finally {
+            setLoadingFile(false);
+            setLoadingStatus("");
+        }
         break;
       }
       case 'saveAs':
@@ -2333,7 +2398,7 @@ const App: React.FC = () => {
                     <Layers size={10} className="text-neutral-700" />
                   </div>
                   <div className="max-h-[300px] overflow-y-auto scrollbar-none">
-                    {Object.values(layerConfig).map(l => (
+                    {(Object.values(layerConfig) as LayerConfig[]).map(l => (
                       <button 
                         key={l.id}
                         onClick={() => {
@@ -2341,13 +2406,13 @@ const App: React.FC = () => {
                           setLayerFlyoutOpen(false);
                           setSimplifiedLayerMenu(false);
                         }}
-                        className={`w-full text-left px-3 py-2.5 rounded-xl text-[9px] font-bold uppercase transition-all flex items-center justify-between ${settings.activeLayerId === l.id ? 'text-cyan-400 bg-cyan-400/10 shadow-[inner_0_0_10px_rgba(6,182,212,0.1)]' : 'text-neutral-400 hover:text-cyan-400 hover:bg-cyan-400/5'}`}
+                        className={`w-full text-left px-3 py-2.5 rounded-xl text-[9px] font-bold uppercase transition-all flex items-center justify-between ${settings.currentLayer === l.id ? 'text-cyan-400 bg-cyan-400/10 shadow-[inner_0_0_10px_rgba(6,182,212,0.1)]' : 'text-neutral-400 hover:text-cyan-400 hover:bg-cyan-400/5'}`}
                       >
                         <div className="flex items-center gap-2">
                            {!simplifiedLayerMenu && <div className="w-2 h-2 rounded-full" style={{ backgroundColor: l.color }} />}
                            {l.name}
                         </div>
-                        {settings.activeLayerId === l.id && <Check size={10} />}
+                        {settings.currentLayer === l.id && <Check size={10} />}
                       </button>
                     ))}
                   </div>
@@ -2376,17 +2441,17 @@ const App: React.FC = () => {
                    <span className="text-[7px] font-black uppercase text-cyan-400 tracking-widest">Plot Styles</span>
                    <FileText size={10} className="text-neutral-700" />
                  </div>
-                 {['vox.ctb', 'monochrome.ctb'].map(ctb => (
+                 {(Object.values(settings.ctbFiles || {}) as any[]).map((ctb: any) => (
                    <button 
-                     key={ctb}
+                     key={ctb.id}
                      onClick={() => {
-                       handleAction('setCtb', ctb.split('.')[0]);
+                       handleAction('setCtb', ctb.id);
                        setCtbFlyoutOpen(false);
                      }}
-                     className={`w-full text-left px-3 py-2.5 rounded-xl text-[9px] font-bold uppercase transition-all flex items-center justify-between ${settings.activeCtbId === ctb.split('.')[0] ? 'text-cyan-400 bg-cyan-400/10 shadow-[inner_0_0_10px_rgba(6,182,212,0.1)]' : 'text-neutral-400 hover:text-cyan-400 hover:bg-cyan-400/5'}`}
+                     className={`w-full text-left px-3 py-2.5 rounded-xl text-[9px] font-bold uppercase transition-all flex items-center justify-between ${settings.activeCtbId === ctb.id ? 'text-cyan-400 bg-cyan-400/10 shadow-[inner_0_0_10px_rgba(6,182,212,0.1)]' : 'text-neutral-400 hover:text-cyan-400 hover:bg-cyan-400/5'}`}
                    >
-                     {ctb}
-                     {settings.activeCtbId === ctb.split('.')[0] && <Check size={10} />}
+                     {ctb.name}
+                     {settings.activeCtbId === ctb.id && <Check size={10} />}
                    </button>
                  ))}
                  <div className="h-px bg-white/5 my-1" />
@@ -2403,27 +2468,14 @@ const App: React.FC = () => {
         </div>
 
         <div className="flex items-center h-full">
-          {/* Header Layout Tabs */}
-          <div className="flex items-center h-full mr-2 hidden sm:flex max-w-[40vw] overflow-x-auto scrollbar-none">
-            {layouts.map((l, index) => (
-              <button 
-                key={`header-tab-${l.id}`}
-                onClick={() => setActiveTab(l.id)}
-                className={`h-full px-3 text-[8px] font-black uppercase transition-all flex items-center whitespace-nowrap ${activeTab === l.id ? 'text-cyan-400 bg-cyan-400/5' : 'text-neutral-500 hover:text-neutral-300'}`}
-              >
-                {l.name}
-              </button>
-            ))}
-          </div>
-
           <button onClick={() => handleAction('toggleMainMenu')} className="p-2 transition-all text-white no-tap hover:text-cyan-400">
             <Menu size={18} />
           </button>
         </div>
       </header>
 
-      {/* SUB-HEADER Removed per request to move tabs to top right */}
-      {/* (Previously was TOP TAB BAR) */}
+      {/* SUB-HEADER Space */}
+      <div className="h-0.5 bg-[#0a0a0c]" />
 
       <div className="h-6.5 bg-[#0a0a0c] border-b border-white/5 flex items-center px-4 z-[100] shrink-0 gap-3">
           <div className="relative h-full flex items-center">
@@ -3314,6 +3366,97 @@ const App: React.FC = () => {
               );
             })
           )}
+        </div>
+      </div>
+
+      <div className="h-7 bg-[#0a0a0c] border-t border-white/5 flex items-center shrink-0 cursor-default select-none relative z-[150]">
+        {/* Fixed Model & Add */}
+        <div className="flex items-center h-full shrink-0">
+          <button 
+            onClick={() => setActiveTab('model')} 
+            className={`h-full px-2 text-[9px] font-black uppercase transition-all flex items-center gap-1.5 whitespace-nowrap ${activeTab === 'model' ? 'text-cyan-400 bg-cyan-400/5' : 'text-neutral-500 hover:text-neutral-300'}`}
+          >
+            <Grid3X3 size={10} /> Model
+          </button>
+          <button 
+            onClick={() => {
+              const id = 'layout' + Date.now() + Math.random().toString(36).substr(2, 5);
+              const defaultName = 'Layout ' + (layouts.length + 1);
+              
+              setPromptDialog({
+                title: 'New Layout: Height (mm)',
+                message: 'Enter paper height for the new layout:',
+                initialValue: '210',
+                type: 'prompt',
+                onConfirm: (height) => {
+                  if (!height || isNaN(parseFloat(height))) return;
+                  setPromptDialog({
+                    title: 'New Layout: Width (mm)',
+                    message: 'Enter paper width for the new layout:',
+                    initialValue: '297',
+                    type: 'prompt',
+                    onConfirm: (width) => {
+                      if (width && !isNaN(parseFloat(width))) {
+                        const newLayout = { 
+                          id, 
+                          name: defaultName, 
+                          paperSize: { width: parseFloat(width), height: parseFloat(height) }, 
+                          viewports: [] 
+                        };
+                        setLayouts(prev => [...prev, newLayout]);
+                        setTabViews(prev => ({ ...prev, [id]: { scale: 3, originX: 0, originY: 0 } }));
+                        setActiveTab(id);
+                        setLogMessage(`LAYOUT_CREATED: ${defaultName} (${width}x${height})`);
+                      }
+                    }
+                  });
+                }
+              });
+            }}
+            className="h-full px-1.5 text-neutral-500 hover:text-cyan-400 transition-all flex items-center border-x border-white/5"
+            title="New Layout"
+          >
+            <FilePlus size={11} />
+          </button>
+        </div>
+
+        {/* Scrollable Layout List */}
+        <div className="flex-1 flex items-center h-full overflow-x-auto scrollbar-none gap-px touch-pan-x overscroll-x-contain">
+          {layouts.map((l, index) => (
+            <button 
+              key={`${l.id}-${index}`}
+              draggable
+              onDragStart={() => handleDragStart(l.id)}
+              onDragOver={(e) => { 
+                e.preventDefault(); 
+                handleDragOverTab(l.id); 
+              }}
+              onDrop={() => setDraggedLayoutId(null)}
+              onClick={() => {
+                if (blockNextClick.current) {
+                  blockNextClick.current = false;
+                  return;
+                }
+                if (longPressTimer.current) {
+                  clearTimeout(longPressTimer.current);
+                  longPressTimer.current = null;
+                }
+                setActiveTab(l.id);
+              }} 
+              onMouseDown={(e) => handleLayoutLongPress(e, l.id)}
+              onMouseUp={cancelLongPress}
+              onMouseLeave={cancelLongPress}
+              onTouchStart={(e) => handleLayoutLongPress(e, l.id)}
+              onTouchMove={cancelLongPress}
+              onTouchEnd={cancelLongPress}
+              onTouchCancel={cancelLongPress}
+              className={`h-full px-2.5 text-[9px] font-black uppercase transition-all flex items-center gap-1 whitespace-nowrap group relative ${activeTab === l.id ? 'text-cyan-400 bg-cyan-400/5' : 'text-neutral-500 hover:text-neutral-300'}`}
+              onContextMenu={(e) => handleLayoutContextMenu(e, l.id)}
+            >
+              {activeTab === l.id && <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-cyan-400" />}
+              <Layers2 size={9} /> {l.name}
+            </button>
+          ))}
         </div>
       </div>
 

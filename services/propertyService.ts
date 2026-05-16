@@ -86,7 +86,7 @@ export const resolveShapeProperties = (
     if (color.toLowerCase() === 'byblock') color = '#FFFFFF';
 
     // 2. Resolve LineWeight
-    let weight: number | string = shape.thickness !== undefined ? shape.thickness : 'bylayer';
+    let weight: any = shape.thickness !== undefined ? shape.thickness : 'bylayer';
     if (typeof weight === 'string') {
         const wStr = weight.toLowerCase();
         if (wStr === 'bylayer') {
@@ -95,6 +95,17 @@ export const resolveShapeProperties = (
             weight = blockContext.thickness;
         } else {
             weight = 0.25;
+        }
+    }
+    
+    // Final safety check: if it's still a string (e.g. 'DEFAULT' from layer config)
+    if (typeof weight === 'string') {
+        const wStr = weight.toLowerCase();
+        if (wStr === 'default') weight = 0.25;
+        else if (wStr.includes('lightweight')) weight = 0.05;
+        else {
+            const parsed = parseFloat(wStr);
+            weight = isNaN(parsed) ? 0.25 : parsed;
         }
     }
     const lineweight = weight as number;
@@ -122,10 +133,10 @@ export const resolveShapeProperties = (
             if (style.plotColor !== 'useObjectColor') {
                 finalColor = style.plotColor;
             }
-            if (isPlotting && style.lineweight !== 'useObjectLineweight') {
+            if (style.lineweight !== 'useObjectLineweight') {
                 finalLineweight = style.lineweight as number;
             }
-            if (isPlotting && style.lineStyle !== 'useObjectLineStyle') {
+            if (style.lineStyle !== 'useObjectLineStyle') {
                 finalLT = style.lineStyle as any;
             }
         }
@@ -134,6 +145,8 @@ export const resolveShapeProperties = (
     // Adjust for paper space if white
     if (activeTab !== 'model' && (finalColor.toUpperCase() === '#FFFFFF' || finalColor.toUpperCase() === '#FFF' || finalColor.toLowerCase() === 'white')) {
         finalColor = '#111111'; // Plot black on white paper
+    } else if (activeTab === 'model' && (finalColor === '#000000' || finalColor.toLowerCase() === 'black')) {
+        finalColor = '#FFFFFF'; // Show black as white in model space for visibility
     }
 
     return {

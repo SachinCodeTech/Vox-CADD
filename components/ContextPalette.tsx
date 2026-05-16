@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Minus, Square, Circle, PenTool, Type, BoxSelect, 
+  Minus, Square, Circle, PenTool, Type, 
   Move, RotateCw, Scaling, Copy, FlipHorizontal, Scissors, 
   ArrowUpFromLine, CornerDownLeft, Trash2, Maximize, ZoomIn, ZoomOut, 
   RotateCcw, MousePointer2, Clipboard, Ruler, SquareCheck, X, Eraser,

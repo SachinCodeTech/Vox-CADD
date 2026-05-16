@@ -1,48 +1,134 @@
 import { initializeApp, FirebaseApp } from 'firebase/app';
-import { getAuth, onAuthStateChanged, User, Auth } from 'firebase/auth';
-import { getFirestore, doc, setDoc, serverTimestamp, Firestore } from 'firebase/firestore';
+import { getAuth, onAuthStateChanged, User, Auth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { getFirestore, doc, setDoc, serverTimestamp, Firestore, getDocFromServer } from 'firebase/firestore';
 import { getAnalytics, logEvent, isSupported, Analytics } from 'firebase/analytics';
 
-// Attempt to get config from env vars
-const firebaseConfig = {
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
-  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_DATABASE_ID || '(default)',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || '',
-};
+// @ts-ignore
+import firebaseConfig from '../firebase-applet-config.json';
 
-// Check if we have at least a projectId and apiKey to initialize
-const isFirebaseEnabled = !!(firebaseConfig.projectId && firebaseConfig.apiKey);
+// --- Types ---
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
 
-let app: FirebaseApp | null = null;
-let auth: Auth | null = null;
-let db: Firestore | null = null;
-let analytics: Analytics | null = null;
-
-if (isFirebaseEnabled) {
-  try {
-    app = initializeApp(firebaseConfig);
-    auth = getAuth(app);
-    db = getFirestore(app, firebaseConfig.firestoreDatabaseId !== '(default)' ? firebaseConfig.firestoreDatabaseId : undefined);
-
-    // Initialize analytics asynchronously
-    isSupported().then(supported => {
-        if (supported && app) {
-            analytics = getAnalytics(app);
-        }
-    }).catch(() => {});
-  } catch (e) {
-    console.error("Firebase Initialization Error:", e);
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
   }
 }
 
-export { auth, db };
+// --- Initialization ---
+
+let app: FirebaseApp | null = null;
+export let auth: Auth | null = null;
+export let db: Firestore | null = null;
+let analytics: Analytics | null = null;
+
+const initializeFirebase = () => {
+    if (app) return { app, auth, db };
+    
+    // Check if config exists - if not, we can't init
+    if (!firebaseConfig || !firebaseConfig.projectId) {
+        console.warn("Firebase not yet configured.");
+        return { app: null, auth: null, db: null };
+    }
+
+    try {
+        app = initializeApp(firebaseConfig);
+        auth = getAuth(app);
+        db = getFirestore(app);
+        
+        isSupported().then(supported => {
+            if (supported && app) {
+                analytics = getAnalytics(app);
+            }
+        }).catch(() => {});
+
+        // Test connection
+        testConnection();
+    } catch (e) {
+        console.error("Firebase Initialization Error:", e);
+    }
+    
+    return { app, auth, db };
+};
+
+async function testConnection() {
+  const { db } = initializeFirebase();
+  if (!db) return;
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if(error instanceof Error && error.message.includes('the client is offline')) {
+      console.warn("Firebase client is offline. Operations will be queued.");
+    }
+  }
+}
+
+// --- Error Handling ---
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const { auth } = initializeFirebase();
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth?.currentUser?.uid,
+      email: auth?.currentUser?.email,
+      emailVerified: auth?.currentUser?.emailVerified,
+      isAnonymous: auth?.currentUser?.isAnonymous,
+    },
+    operationType,
+    path
+  };
+  const stringifiedError = JSON.stringify(errInfo);
+  console.error('Firestore Error: ', stringifiedError);
+  throw new Error(stringifiedError);
+}
+
+// --- Auth Operations ---
+
+export const loginWithGoogle = async () => {
+    const { auth } = initializeFirebase();
+    if (!auth) throw new Error("Firebase Auth not initialized");
+    const provider = new GoogleAuthProvider();
+    try {
+        const result = await signInWithPopup(auth, provider);
+        return result.user;
+    } catch (error: any) {
+        // Handle specific "user cancelled" error separately to avoid scary console errors
+        if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+            console.log("Login popup closed or cancelled by user selection.");
+        } else {
+            console.error("Login Error:", error);
+        }
+        throw error;
+    }
+};
+
+export const logout = async () => {
+    const { auth } = initializeFirebase();
+    if (auth) await signOut(auth);
+};
+
+// --- Business Logic ---
+
+const { auth: initializedAuth, db: initializedDb } = initializeFirebase();
+auth = initializedAuth;
+db = initializedDb;
 
 export const logAppEvent = (name: string, params?: any) => {
+  if (!analytics) initializeFirebase();
   if (analytics) {
     logEvent(analytics, name, params);
   }
@@ -52,9 +138,11 @@ export const logAppEvent = (name: string, params?: any) => {
  * Syncs lightweight metadata to Firestore for the authenticated user.
  */
 export const syncUserMetadata = async (metadata: { theme?: string; deviceInfo?: string }) => {
+  const { db, auth } = initializeFirebase();
   if (!db || !auth || !auth.currentUser) return;
 
-  const metadataRef = doc(db, 'users', auth.currentUser.uid, 'metadata', 'current');
+  const path = `users/${auth.currentUser.uid}/metadata/current`;
+  const metadataRef = doc(db, path);
   try {
     await setDoc(metadataRef, {
       ...metadata,
@@ -62,18 +150,20 @@ export const syncUserMetadata = async (metadata: { theme?: string; deviceInfo?: 
       lastModified: serverTimestamp()
     }, { merge: true });
   } catch (error) {
-    console.error("Firebase Sync Error (Metadata):", error);
+    handleFirestoreError(error, OperationType.WRITE, path);
   }
 };
 
 /**
- * Optional: Syncs metadata about a local file (no file content).
+ * Syncs metadata about a CAD file.
  */
 export const trackFileMetadata = async (fileName: string, fileSize: number) => {
+  const { db, auth } = initializeFirebase();
   if (!db || !auth || !auth.currentUser) return;
 
   const fileId = fileName.replace(/[^a-zA-Z0-9]/g, '_');
-  const fileRef = doc(db, 'users', auth.currentUser.uid, 'files', fileId);
+  const path = `users/${auth.currentUser.uid}/files/${fileId}`;
+  const fileRef = doc(db, path);
   
   try {
     await setDoc(fileRef, {
@@ -82,11 +172,12 @@ export const trackFileMetadata = async (fileName: string, fileSize: number) => {
       lastModified: serverTimestamp()
     }, { merge: true });
   } catch (error) {
-    console.error("Firebase Sync Error (File Metadata):", error);
+    handleFirestoreError(error, OperationType.WRITE, path);
   }
 };
 
 export const onAuthChange = (callback: (user: User | null) => void) => {
+  const { auth } = initializeFirebase();
   if (auth) {
     return onAuthStateChanged(auth, callback);
   }

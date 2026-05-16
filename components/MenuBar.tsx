@@ -5,9 +5,10 @@ import {
   Settings, Info, HelpCircle, Layout, Grid, 
   Zap, Calculator, Layers, Sliders, Ruler, Target,
   Globe, Cpu, Type, MousePointer2, Settings2, Trash2, FileText, Palette,
-  Mail, MessageSquare, FileCode, XCircle
+  Mail, MessageSquare, FileCode, XCircle, LogIn, LogOut, User as UserIcon, Cloud
 } from 'lucide-react';
 import { UnitType } from '../types';
+import { useSession } from './SessionContext';
 
 import VoxIcon from './VoxIcon';
 
@@ -39,9 +40,66 @@ const SectionHeader = ({ label }: { label: string }) => (
 );
 
 const MenuBar: React.FC<MenuBarProps> = ({ onAction, currentFileName, units }) => {
+  const { user, login, signOut, isAuthenticated } = useSession();
+
   return (
     <div className="flex-1 flex flex-col bg-[#0d0d0d] overflow-y-auto scrollbar-none pb-12 px-6">
       
+      {/* Enterprise Identity Banner */}
+      <div className="mt-4 p-4 bg-[#111] border border-white/5 rounded-2xl mb-2">
+        {!isAuthenticated ? (
+          <div className="flex flex-col gap-3">
+             <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center border border-white/5">
+                   <UserIcon size={20} className="text-neutral-500" />
+                </div>
+                <div>
+                   <div className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Enterprise Sync</div>
+                   <div className="text-[9px] text-neutral-600 font-medium uppercase">Not Authorized</div>
+                </div>
+             </div>
+             <button 
+               onClick={login}
+               className="w-full py-2.5 bg-white text-black text-[9px] font-black uppercase rounded-xl flex items-center justify-center gap-2 hover:bg-neutral-200 transition-all"
+             >
+               <LogIn size={14} /> Authorize with Google
+             </button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+             <div className="flex items-center gap-3">
+                {user?.photoURL ? (
+                  <img src={user.photoURL} className="w-10 h-10 rounded-full border border-cyan-500/50" alt="profile" />
+                ) : (
+                  <div className="w-10 h-10 rounded-full bg-cyan-500/20 flex items-center justify-center border border-cyan-500/50">
+                    <UserIcon size={20} className="text-cyan-500" />
+                  </div>
+                )}
+                <div className="overflow-hidden">
+                   <div className="text-[10px] font-black text-cyan-500 uppercase tracking-widest flex items-center gap-1">
+                     <Cloud size={10} /> Cloud Active
+                   </div>
+                   <div className="text-[11px] text-white font-black truncate">{user?.displayName || user?.email}</div>
+                </div>
+             </div>
+             <div className="flex gap-2">
+                <button 
+                onClick={() => onAction('syncToCloud')}
+                className="flex-1 py-2 bg-neutral-800 text-cyan-400 text-[8px] font-black uppercase rounded-lg flex items-center justify-center gap-2 border border-white/5"
+                >
+                  <Cloud size={12} /> Sync Drawing
+                </button>
+                <button 
+                onClick={signOut}
+                className="px-3 py-2 bg-neutral-900 text-neutral-500 text-[8px] font-black uppercase rounded-lg flex items-center justify-center gap-2 border border-white/5"
+                >
+                  <LogOut size={12} />
+                </button>
+             </div>
+          </div>
+        )}
+      </div>
+
       {/* Workspace Header */}
       <div className="mt-4 p-5 bg-gradient-to-br from-[#1a1a1a] to-[#0a0a0c] border border-white/10 rounded-3xl shadow-2xl">
         <div className="flex items-center gap-3 mb-1">

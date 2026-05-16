@@ -129,6 +129,8 @@ export const hexToACI = (hex: string | undefined): number => {
     const h = hex.toUpperCase();
     if (h === 'BYLAYER') return 256;
     if (h === 'BYBLOCK') return 0;
+    
+    // Exact matches for primary colors first
     if (h === '#FF0000' || h === 'RED') return 1;
     if (h === '#FFFF00' || h === 'YELLOW') return 2;
     if (h === '#00FF00' || h === 'GREEN') return 3;
@@ -137,7 +139,34 @@ export const hexToACI = (hex: string | undefined): number => {
     if (h === '#FF00FF' || h === 'MAGENTA') return 6;
     if (h === '#FFFFFF' || h === 'WHITE') return 7;
     if (h === '#000000' || h === 'BLACK') return 7;
-    return 7;
+
+    // Search full palette
+    const targetHex = h.startsWith('#') ? h : '#FFFFFF';
+    let closestAci = 7;
+    let minDiff = Infinity;
+
+    // Helper to calculate color difference (Euclidean in RGB)
+    const getDiff = (h1: string, h2: string) => {
+        const r1 = parseInt(h1.slice(1, 3), 16);
+        const g1 = parseInt(h1.slice(3, 5), 16);
+        const b1 = parseInt(h1.slice(5, 7), 16);
+        const r2 = parseInt(h2.slice(1, 3), 16);
+        const g2 = parseInt(h2.slice(3, 5), 16);
+        const b2 = parseInt(h2.slice(5, 7), 16);
+        return Math.sqrt((r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2);
+    };
+
+    for (let i = 1; i <= 255; i++) {
+        const color = aciColors[i];
+        if (color === targetHex) return i;
+        const diff = getDiff(targetHex, color);
+        if (diff < minDiff) {
+            minDiff = diff;
+            closestAci = i;
+        }
+    }
+
+    return closestAci;
 };
 
 export const hexToRgbStr = (hex: string): string => {
