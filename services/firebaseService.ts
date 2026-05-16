@@ -38,16 +38,22 @@ let analytics: Analytics | null = null;
 const initializeFirebase = () => {
     if (app) return { app, auth, db };
     
-    // Check if config exists - if not, we can't init
-    if (!firebaseConfig || !firebaseConfig.projectId) {
-        console.warn("Firebase not yet configured.");
+    // Check if config exists and has valid values - if not, we can't init
+    const isValidConfig = firebaseConfig && 
+                         firebaseConfig.apiKey && 
+                         firebaseConfig.projectId && 
+                         firebaseConfig.apiKey !== "" && 
+                         firebaseConfig.projectId !== "";
+
+    if (!isValidConfig) {
+        console.warn("Firebase is not fully configured. Please use the Firebase setup tool in the platform UI.");
         return { app: null, auth: null, db: null };
     }
 
     try {
         app = initializeApp(firebaseConfig);
         auth = getAuth(app);
-        db = getFirestore(app);
+        db = getFirestore(app, firebaseConfig.firestoreDatabaseId || undefined);
         
         isSupported().then(supported => {
             if (supported && app) {
@@ -100,7 +106,9 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 
 export const loginWithGoogle = async () => {
     const { auth } = initializeFirebase();
-    if (!auth) throw new Error("Firebase Auth not initialized");
+    if (!auth) {
+        throw new Error("Firebase is not configured. Please set up Firebase in the platform settings or accept the storage terms if prompted.");
+    }
     const provider = new GoogleAuthProvider();
     try {
         const result = await signInWithPopup(auth, provider);
