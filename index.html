@@ -83,7 +83,41 @@
     </style>
 </head>
 <body>
-    <div id="root"></div>
-<script type="module" src="index.tsx"></script>
+    <div id="root">
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background: #000; color: #00bcd4; font-family: sans-serif;">
+            <div class="loader-spinner"></div>
+            <p style="margin-top: 20px; font-size: 14px; font-weight: bold; letter-spacing: 2px;">VOXCADD_BOOTING...</p>
+            <noscript>
+                <div style="color: #ff5555; text-align: center; margin-top: 20px;">
+                    JavaScript is required to run VoxCADD.
+                </div>
+            </noscript>
+            <script>
+                // Fallback timeout: if JS doesn't load in 10s, show error
+                window.voxBootTimer = setTimeout(() => {
+                    const root = document.getElementById('root');
+                    if (root && root.innerHTML.includes('VOXCADD_BOOTING')) {
+                        root.innerHTML = `
+                            <div style="padding: 40px; color: #ff5555; text-align: center;">
+                                <h3>Engine Failed to Load</h3>
+                                <p>This may be due to a slow connection or a deployment configuration error.</p>
+                                <button onclick="location.reload()" style="background: #00bcd4; color: #000; border: none; padding: 10px 20px; border-radius: 4px; font-weight: bold; cursor: pointer;">REFRESH</button>
+                            </div>
+                        `;
+                    }
+                }, 10000);
+            </script>
+        </div>
+    </div>
+    <script>
+        window.addEventListener('error', function(e) {
+            console.error('GLOBAL_ERR:', e.message, 'at', e.filename, ':', e.lineno);
+            // If it's a script load error, maybe the base path is wrong
+            if (e.target && (e.target.tagName === 'SCRIPT' || e.target.tagName === 'LINK')) {
+                console.error('ASSET_LOAD_FAILED:', e.target.src || e.target.href);
+            }
+        }, true);
+    </script>
+<script type="module" src="/index.tsx"></script>
 </body>
 </html>

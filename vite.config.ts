@@ -6,8 +6,10 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
+    const isProduction = mode === 'production';
+    
     return {
-      base: './',
+      base: isProduction ? './' : '/',
       assetsInclude: ['**/*.wasm'],
       server: {
         port: 3000,
@@ -31,8 +33,8 @@ export default defineConfig(({ mode }) => {
             background_color: '#020617',
             display: 'standalone',
             orientation: 'any',
-            scope: './',
-            start_url: './',
+            scope: isProduction ? './' : '/',
+            start_url: isProduction ? './' : '/',
             icons: [
               {
                 src: 'favicon.svg',
@@ -92,8 +94,9 @@ export default defineConfig(({ mode }) => {
         })
       ],
       define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY || ""),
+        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || ""),
+        'process.env.NODE_ENV': JSON.stringify(mode)
       },
       resolve: {
         alias: {

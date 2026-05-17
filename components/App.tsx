@@ -219,6 +219,11 @@ const App: React.FC = () => {
   }, [logMessage]);
 
   useEffect(() => {
+    // Clear global bootstrap timer from index.html if it exists
+    if ((window as any).voxBootTimer) {
+      clearTimeout((window as any).voxBootTimer);
+    }
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
