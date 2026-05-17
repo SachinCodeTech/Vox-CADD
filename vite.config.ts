@@ -7,9 +7,10 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     const isProduction = mode === 'production';
+    const base = env.VITE_BASE_URL || (isProduction ? '/Vox-CADD/' : '/');
     
     return {
-      base: isProduction ? './' : '/',
+      base: base,
       assetsInclude: ['**/*.wasm'],
       server: {
         port: 3000,
@@ -33,8 +34,8 @@ export default defineConfig(({ mode }) => {
             background_color: '#020617',
             display: 'standalone',
             orientation: 'any',
-            scope: isProduction ? './' : '/',
-            start_url: isProduction ? './' : '/',
+            scope: base,
+            start_url: base,
             icons: [
               {
                 src: 'favicon.svg',
