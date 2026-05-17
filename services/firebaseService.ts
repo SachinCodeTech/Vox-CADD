@@ -188,6 +188,10 @@ export const onAuthChange = (callback: (user: User | null) => void) => {
   const { auth } = initializeFirebase();
   if (auth) {
     return onAuthStateChanged(auth, callback);
+  } else {
+    // If Firebase is not configured, we should still call the callback 
+    // to allow the app to finish its loading state (unauthenticated)
+    callback(null);
+    return () => {};
   }
-  return () => {}; // return no-op
 };

@@ -7,6 +7,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
+      base: './',
       assetsInclude: ['**/*.wasm'],
       server: {
         port: 3000,
@@ -30,8 +31,8 @@ export default defineConfig(({ mode }) => {
             background_color: '#020617',
             display: 'standalone',
             orientation: 'any',
-            scope: '/',
-            start_url: '/',
+            scope: './',
+            start_url: './',
             icons: [
               {
                 src: 'favicon.svg',

@@ -19,10 +19,24 @@ registerSW({
 
 const container = document.getElementById('root');
 if (container) {
-  const root = createRoot(container);
-  root.render(
-    <SessionProvider>
-      <App />
-    </SessionProvider>
-  );
+  try {
+    const root = createRoot(container);
+    root.render(
+      <React.StrictMode>
+        <SessionProvider>
+          <App />
+        </SessionProvider>
+      </React.StrictMode>
+    );
+  } catch (error) {
+    console.error('Failed to render application:', error);
+    // Display a simple error message if rendering fails
+    container.innerHTML = `
+      <div style="padding: 20px; font-family: sans-serif; color: white; background: #111;">
+        <h2>Initialization Failed</h2>
+        <p>There was an error starting the application. Please check the console for details.</p>
+        <pre style="color: #ff5555; overflow: auto; max-width: 100%; font-size: 12px;">${error instanceof Error ? error.message : String(error)}</pre>
+      </div>
+    `;
+  }
 }
