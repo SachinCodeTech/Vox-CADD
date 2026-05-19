@@ -3,8 +3,17 @@ import { getAuth, onAuthStateChanged, User, Auth, GoogleAuthProvider, signInWith
 import { getFirestore, doc, setDoc, serverTimestamp, Firestore, getDocFromServer } from 'firebase/firestore';
 import { getAnalytics, logEvent, isSupported, Analytics } from 'firebase/analytics';
 
-// @ts-ignore
-import firebaseConfig from '../firebase-applet-config.json';
+// --- Configuration ---
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_DATABASE_ID,
+};
 
 // --- Types ---
 export enum OperationType {
