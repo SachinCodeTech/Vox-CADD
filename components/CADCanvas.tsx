@@ -2506,7 +2506,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     e.preventDefault();
     const x = e.clientX, y = e.clientY;
     if (isCommandActive) {
-      onAction?.('enter');
+      onAction?.('commandContextMenu', { x, y });
     } else {
       onObjectContextMenu?.(x, y);
     }
@@ -2527,7 +2527,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
             }}
           >
             {/* Prompt */}
-            {activePrompt && !activePrompt.toLowerCase().includes('specify point') && (
+            {activePrompt && (
               <div className="bg-black/80 backdrop-blur-md border border-white/10 rounded px-2 py-0.5 whitespace-nowrap shadow-xl">
                  <span className="text-[9px] font-mono text-neutral-400 leading-none">{activePrompt.split(':')[0]}</span>
               </div>
@@ -2537,7 +2537,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
             <div className="flex items-center gap-1.5">
                <div className="bg-[#00bcd4]/95 border border-[#00bcd4] rounded px-2 py-0.5 shadow-[0_0_15px_rgba(0,188,212,0.4)] min-w-[40px] flex items-center justify-center">
                   <span className="text-[10px] font-mono text-black font-bold tracking-tight">
-                    {commandInput || "..."}
+                    {commandInput || "SPECIFY_POINT"}
                     {commandInput && <span className="animate-pulse ml-0.5">_</span>}
                   </span>
                </div>

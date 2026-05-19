@@ -45,7 +45,7 @@ import {
   ArrayCommand, BlockCommand, InsertCommand, FilterCommand, FindCommand, ViewportCommand, LayoutCommand, GripEditCommand, ImportCommand
 } from '../services/commandEngine';
 import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType, BlockDefinition, LayoutDefinition, LayoutViewport, LineTypeDefinition, NamedView } from '../types';
-import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive, AlertTriangle, Cpu, Move, Copy, Maximize2, FlipHorizontal, Trash2, History, Palette, Check, Settings2, Terminal, Camera, Zap } from 'lucide-react';
+import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive, AlertTriangle, Cpu, Move, Copy, Maximize2, FlipHorizontal, Trash2, History, Palette, Check, Settings2, Terminal, Camera } from 'lucide-react';
 
 import VoxIcon from './VoxIcon';
 import ImportSummaryDialog from './ImportSummaryDialog';
@@ -206,6 +206,7 @@ const App: React.FC = () => {
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [objectContextMenu, setObjectContextMenu] = useState<{ x: number, y: number } | null>(null);
+  const [commandContextMenu, setCommandContextMenu] = useState<{ x: number, y: number } | null>(null);
   const [commandInput, setCommandInput] = useState('');
   const [isLiveActive, setIsLiveActive] = useState(false);
   const [commandPrompt, setCommandPrompt] = useState<string>("COMMAND:");
@@ -1330,7 +1331,7 @@ const App: React.FC = () => {
         break;
       }
       case 'commandContextMenu': {
-        // No longer used, as right-click now acts as Enter during commands
+        setCommandContextMenu(payload);
         break;
       }
       case 'setUnits': 
@@ -3384,48 +3385,74 @@ const App: React.FC = () => {
               <div className="text-[7px] text-neutral-500 font-mono">{selectedIds.length} ITEMS</div>
             </div>
             
-            <div className="grid grid-cols-2 gap-1 mb-1">
-              <button onClick={() => { executeCommand('m'); setObjectContextMenu(null); }} className="px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-cyan-500/10 hover:text-cyan-400 transition-all font-black uppercase flex flex-col items-center gap-1.5 border border-transparent hover:border-cyan-500/20 active:scale-95">
-                <Move size={14} /> <span>Move</span>
-              </button>
-              <button onClick={() => { executeCommand('co'); setObjectContextMenu(null); }} className="px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-cyan-500/10 hover:text-cyan-400 transition-all font-black uppercase flex flex-col items-center gap-1.5 border border-transparent hover:border-cyan-500/20 active:scale-95">
-                <Copy size={14} /> <span>Copy</span>
-              </button>
-              <button onClick={() => { executeCommand('ro'); setObjectContextMenu(null); }} className="px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-cyan-500/10 hover:text-cyan-400 transition-all font-black uppercase flex flex-col items-center gap-1.5 border border-transparent hover:border-cyan-500/20 active:scale-95">
-                <RotateCw size={14} /> <span>Rotate</span>
-              </button>
-              <button onClick={() => { executeCommand('sc'); setObjectContextMenu(null); }} className="px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-cyan-500/10 hover:text-cyan-400 transition-all font-black uppercase flex flex-col items-center gap-1.5 border border-transparent hover:border-cyan-500/20 active:scale-95">
-                <Maximize2 size={14} /> <span>Scale</span>
-              </button>
+            <button onClick={() => { executeCommand('m'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <Move className="text-cyan-500" size={14} /> Move
+            </button>
+            <button onClick={() => { executeCommand('co'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <Copy className="text-cyan-500" size={14} /> Copy
+            </button>
+            <button onClick={() => { executeCommand('ro'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <RotateCw className="text-cyan-500" size={14} /> Rotate
+            </button>
+            <button onClick={() => { executeCommand('sc'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <Maximize2 className="text-cyan-500" size={14} /> Scale
+            </button>
+            <button onClick={() => { executeCommand('mi'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <FlipHorizontal className="text-cyan-500" size={14} /> Mirror
+            </button>
+            
+            <div className="h-px bg-white/5 my-1" />
+            
+            <button onClick={() => { executeCommand('e'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-red-500/80 hover:bg-red-500 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <Trash2 size={14} /> Erase
+            </button>
+            <button onClick={() => { setSelectedIds([]); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-500 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <X size={14} /> Deselect All
+            </button>
+          </div>
+        </>
+      )}
+
+      {commandContextMenu && (
+        <>
+          <div className="fixed inset-0 z-[1050]" onClick={() => setCommandContextMenu(null)} />
+          <div 
+            className="fixed bg-[#0a0a0c]/98 backdrop-blur-2xl border border-white/10 rounded-2xl p-2 flex flex-col gap-1 shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[1100] animate-in zoom-in-95 fade-in slide-in-from-top-4 duration-200 min-w-[200px]"
+            style={{ 
+              left: Math.max(10, Math.min(commandContextMenu.x, window.innerWidth - 210)), 
+              top: Math.max(10, Math.min(commandContextMenu.y, window.innerHeight - 300))
+            }}
+          >
+            <div className="px-3 py-1.5 border-b border-white/5 mb-1 flex items-center justify-between">
+              <div className="text-[8px] font-black uppercase text-cyan-500 tracking-widest">Command Context</div>
+              <div className="text-[7px] text-neutral-500 font-mono italic">{activeCommandName}</div>
             </div>
-
-            <div className="h-px bg-white/5 my-1 mx-2" />
-
-            <button onClick={() => { executeCommand('join'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center justify-between active:scale-95 group">
-              <div className="flex items-center gap-3"><Weight size={14} className="text-indigo-400" /> Join Entities</div>
-              <span className="text-[7px] text-neutral-600 group-hover:text-neutral-400">J</span>
-            </button>
-            <button onClick={() => { executeCommand('explode'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center justify-between active:scale-95 group">
-              <div className="flex items-center gap-3"><Zap size={14} className="text-orange-400" /> Explode</div>
-              <span className="text-[7px] text-neutral-600 group-hover:text-neutral-400">X</span>
-            </button>
-
-            <div className="h-px bg-white/5 my-1 mx-2" />
             
-            <button onClick={() => { setActivePanel('properties'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
-              <Sliders size={14} className="text-amber-400" /> Quick Properties
+            <button 
+              onClick={() => {
+                setPromptDialog({
+                  title: 'Direct Distance Entry',
+                  message: `Enter distance in current units (${settings.units}/${settings.unitSubtype || 'mm'}):`,
+                  initialValue: '',
+                  type: 'prompt',
+                  onConfirm: (val) => {
+                    if (val) executeCommand(val);
+                  }
+                });
+                setCommandContextMenu(null);
+              }}
+              className="w-full text-left px-3 py-3 rounded-xl text-[10px] text-cyan-400 bg-cyan-400/5 border border-cyan-400/10 hover:bg-cyan-400/10 transition-all font-black uppercase flex items-center gap-3 active:scale-95 shadow-[0_0_15px_rgba(34,211,238,0.1)]"
+            >
+              <Target size={14} /> Enter Distance
             </button>
-            <button onClick={() => { setActivePanel('layers'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
-              <Layers size={14} className="text-blue-400" /> Layer Setup
+
+            <div className="h-px bg-white/5 my-1" />
+
+            <button onClick={() => { executeCommand(''); setCommandContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <Check className="text-emerald-500" size={14} /> Enter (Finish)
             </button>
-            
-            <div className="h-px bg-white/5 my-1 mx-2" />
-            
-            <button onClick={() => { executeCommand('e'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-red-500/80 hover:bg-red-500 hover:text-white transition-all font-black uppercase flex items-center gap-3 active:scale-95">
-              <Trash2 size={14} /> Erase Selection
-            </button>
-            <button onClick={() => { setSelectedIds([]); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-600 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
-              <X size={14} /> Clear Selection
+            <button onClick={() => { handleAction('cancel'); setCommandContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <X className="text-red-500" size={14} /> Cancel (Esc)
             </button>
           </div>
         </>
