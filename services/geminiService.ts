@@ -1,37 +1,7 @@
 
 import { GoogleGenAI, Type, Modality, LiveServerMessage, FunctionDeclaration } from "@google/genai";
 
-const SYSTEM_INSTRUCTION = `
-You are the **VoxCADD Principal AI Architect (PA-24)**. You are a highly professional, high-speed, and precise architectural partner. 
-
-### YOUR CORE PROTOCOL: "ACTION FIRST"
-1. **Immediate Execution**: If the user requests a drawing (e.g., "draw a 500mm square", "2BHK plan"), you MUST generate the CAD commands IMMEDIATELY.
-2. **CAD Command Mastery**: You communicate primarily through CAD commands. Every architectural idea should be accompanied by clear drafting code.
-3. **Zero Friction**: Do not ask for confirmation or clarification for simple requests. Assume standard architectural defaults:
-   - Interior Walls: 115mm thick.
-   - Exterior Walls: 230mm thick.
-   - Floor Height: 3000mm.
-   - Origin: Start at 0,0 unless specified.
-4. **Unit Conversion**: Automatically convert all units to mm (1 inch = 25.4mm, 1ft = 304.8mm).
-
-### COMMAND SYNTAX (V-CORE 10)
-- 'la [Layer]': Change layer (A-WALL, A-WALL-PART, A-DOOR, A-WINDOW, A-FURN, A-ANNO, A-DIM, A-TEXT).
-- 'l x1,y1 x2,y2 x3,y3 ...': Draw a series of lines.
-- 'rec x1,y1 x2,y2': Draw a rectangle from corner to corner.
-- 'c x,y r': Draw a circle with center and radius.
-- 'dl x1,y1 x2,y2 [thick]': Draw a double-line (wall segment). thick defaults to 230.
-- 't x,y [text]': Place text at coordinates.
-- 'mt x,y [text]': Place multi-line text.
-- 'dim x1,y1 x2,y2': Add a linear dimension.
-- 'h [pattern] [pts]': Apply a hatch (e.g., 'h ANSI31 0,0 100,0 100,100 0,100').
-
-### RESPONSE FORMAT
-You MUST respond using the following JSON structure:
-{
-  "explanation": "Brief professional architectural reasoning (1-2 sentences).",
-  "commands": ["la A-WALL", "dl 0,0 5000,0 230", "dl 5000,0 5000,5000 230", "dl 5000,5000 0,5000 230", "dl 0,5000 0,0 230"]
-}
-`;
+// Removed: System Instructions are now managed server-side for "VoxCADD AI Architect" security.
 
 export interface AiResponse {
   text: string | null;
@@ -39,104 +9,28 @@ export interface AiResponse {
   groundingLinks?: { title: string; uri: string }[];
 }
 
-let genAI: GoogleGenAI | null = null;
-
-const getGenAI = () => {
-  if (!genAI) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error("GEMINI_API_KEY environment variable is required");
-    }
-    genAI = new GoogleGenAI({ apiKey });
-  }
-  return genAI;
-};
-
 export const getCommandFromAI = async (prompt: string, contextSummary: string = "", sketchData?: string | null, history: {role: string, parts: any[]}[] = []): Promise<AiResponse> => {
   try {
-    const ai = getGenAI();
-    const modelName = 'gemini-1.5-pro'; // Robust architectural reasoning
-    
-    const contextPart = { text: `[ARCHITECTURAL CONTEXT]\n${contextSummary}\n\n[USER REQUEST]\n${prompt || "Produce architectural drafting."}` };
-    
-    const contents: any[] = history.slice(-6); // Further reduced history to save tokens
-    const userParts: any[] = [contextPart];
+    // VoxCADD Architecture Update: AI processing is now performed on the secure server-side engine.
+    const response = await fetch("/api/gemini/command", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        prompt,
+        contextSummary,
+        sketchData,
+        history
+      })
+    });
 
-    if (sketchData) {
-      const base64Data = sketchData.includes(',') ? sketchData.split(',')[1] : sketchData;
-      userParts.push({
-        inlineData: {
-          mimeType: 'image/png',
-          data: base64Data
-        }
-      });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || "AI Architect Engine Busy");
     }
-    
-    contents.push({ role: 'user', parts: userParts });
 
-    const response = await (async () => {
-      let retries = 0;
-      const maxRetries = 5;
-      const baseDelay = 2000;
-      
-      while (true) {
-        try {
-          return await ai.models.generateContent({
-            model: modelName,
-            contents,
-            config: {
-              systemInstruction: SYSTEM_INSTRUCTION,
-              tools: [{ googleSearch: {} }],
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  explanation: {
-                    type: Type.STRING,
-                    description: "Brief architectural summary."
-                  },
-                  commands: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING },
-                    description: "CAD commands."
-                  }
-                },
-                required: ["explanation", "commands"]
-              },
-              temperature: 0.1
-            }
-          });
-        } catch (err: any) {
-          const errMsg = err?.message || "";
-          const isRateLimit = err?.status === 429 || errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED');
-          
-          if (isRateLimit && retries < maxRetries) {
-            retries++;
-            const delay = baseDelay * Math.pow(2, retries) + Math.random() * 1000;
-            console.warn(`Gemini Rate Limit (429). Retrying in ${Math.round(delay)}ms... (Attempt ${retries}/${maxRetries})`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-            continue;
-          }
-          throw err;
-        }
-      }
-    })();
-
-    // Extract grounding metadata URLs
-    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-    const groundingLinks = chunks?.map((chunk: any) => {
-      if (chunk.web) return { title: chunk.web.title, uri: chunk.web.uri };
-      return null;
-    }).filter((link: any): link is {title: string, uri: string} => link !== null);
-
-    const text = response.text || "{}";
-    const result = JSON.parse(text);
-    
-    return {
-      text: result.explanation || "Drafting complete.",
-      commands: Array.isArray(result.commands) ? result.commands : [],
-      groundingLinks
-    };
+    return await response.json();
   } catch (error: any) {
     console.error("Principal Architect Engine Error:", error);
     return { text: `System Error: ${error.message}`, commands: [] };
@@ -229,7 +123,16 @@ export interface LiveSessionHandlers {
 }
 
 export const connectLiveAgent = async (handlers: LiveSessionHandlers) => {
-    const ai = getGenAI();
+    // Check if API key is present in client side (it shouldn't be for production architecture)
+    const apiKey = (process.env as any).GEMINI_API_KEY;
+    
+    if (!apiKey) {
+      console.warn("Live Agent Proxy: API Key not found in client. Hiding architecture for security. Live agent will requires server-side WS proxy (Coming Soon).");
+      // Silently return for now to avoid crashing, or return a mock interface
+      return Promise.reject(new Error("Live Agent requires secure client-side key for WebSocket. Switch to Voice Architect for server-side processing."));
+    }
+
+    const ai = new GoogleGenAI({ apiKey });
     const inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({sampleRate: 16000});
     const outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({sampleRate: 24000});
     const outputNode = outputAudioContext.createGain();

@@ -420,6 +420,8 @@ const App: React.FC = () => {
     title?: string
   } | null>(null);
   const [isAiThinking, setIsAiThinking] = useState(false);
+  const [aiRecommendation, setAiRecommendation] = useState<string | null>(null);
+  const [prevUnits, setPrevUnits] = useState(settings.units);
   const [lastAiCommandTime, setLastAiCommandTime] = useState(0);
   const [isAppLoading, setIsAppLoading] = useState(true);
   const [layoutContextMenu, setLayoutContextMenu] = useState<{ x: number, y: number, layoutId: string } | null>(null);
@@ -1143,6 +1145,34 @@ const App: React.FC = () => {
       case 'toggleMainMenu': setActivePanel(activePanel === 'mainmenu' ? 'none' : 'mainmenu'); break;
       case 'toggleDrawingProps': setActivePanel(activePanel === 'drawing_props' ? 'none' : 'drawing_props'); break;
       case 'toggleHelp': setActivePanel(activePanel === 'help' ? 'none' : 'help'); break;
+      case 'interpret_sketch': {
+        const triggerSketchInterpretation = async (providedImage?: string) => {
+           setIsAiThinking(true);
+           setLogMessage("INTERPRETING SKETCH...");
+           try {
+             const imgData = providedImage || canvasHandleRef.current?.captureImage();
+             const context = getAiContextSummary() + "\nScreen capture provided. Use the visible lines/sketches to infer geometry.";
+             const res = await getCommandFromAI("Analyze this image as a CAD sketch. Convert the rough visual strokes into precise commands (RECT, LINE, CIRCLE, etc). Maintain relative proportions and align to axes where obvious.", context, imgData);
+             if (res.commands && res.commands.length) {
+                res.commands.forEach(c => executeCommand(c));
+                setLastAiCommandTime(Date.now());
+             }
+             if (res.text) setLogMessage(res.text);
+           } catch (e: any) {
+             setLogMessage(`ERR: ${e.message}`);
+           } finally {
+             setIsAiThinking(false);
+           }
+        };
+        
+        if (payload && typeof payload === 'string' && payload.startsWith('data:image')) {
+            triggerSketchInterpretation(payload);
+        } else {
+            // Default to capture screen
+            triggerSketchInterpretation();
+        }
+        break;
+      }
       case 'setCtb':
         if (payload) {
           if (navigator.vibrate) navigator.vibrate(5);
@@ -1210,22 +1240,22 @@ const App: React.FC = () => {
             const size = canvasHandleRef.current.getCanvasSize();
             targetW = size.width;
             targetH = size.height;
-            ts_scale = settingsRef.current.drawingScale;
+            // Removed ts_scale division - zoom extents should fit model geometry regardless of drawing scale
         }
 
-        if (bounds && targetW && targetH && ts_scale !== undefined) {
+        if (bounds && targetW && targetH) {
             const w = Math.max(0.1, bounds.xMax - bounds.xMin);
             const h = Math.max(0.1, bounds.yMax - bounds.yMin);
             const centerX = (bounds.xMax + bounds.xMin) / 2;
             const centerY = (bounds.yMax + bounds.yMin) / 2;
             
             const padding = 1.1; 
-            const scale = Math.min(targetW / (w * padding * ts_scale), targetH / (h * padding * ts_scale));
+            const scale = Math.min(targetW / (w * padding), targetH / (h * padding));
             
             setView({ 
                 scale, 
-                originX: -centerX * scale * ts_scale, 
-                originY: centerY * scale * ts_scale 
+                originX: -centerX * scale, 
+                originY: centerY * scale 
             });
             setLogMessage(`VOX_Z-${act === 'zoomAll' ? 'A' : 'E'}: [${w.toFixed(1)} x ${h.toFixed(1)}]`);
         } else {
@@ -1809,7 +1839,99 @@ const App: React.FC = () => {
     return () => clearInterval(timer);
   }, [commitToHistory]);
 
-    // Global Escape/Delete Key Handler
+  const getAiContextSummary = useCallback(() => {
+    const totalEntities = (Object.values(layersRef.current).flat() as Shape[]).length;
+    const layerNames = Object.keys(layerConfig).join(', ');
+    const bounds = getAllShapesBounds(Object.values(layersRef.current).flat() as Shape[], blocks);
+    const sketchShapes = (layersRef.current['A-SKETCH'] || []).length;
+    
+    return `
+      Drawing Context:
+      - Units: ${settingsRef.current.units} (${settingsRef.current.unitSubtype})
+      - Active Layer: ${settingsRef.current.currentLayer}
+      - Visible Layers: ${layerNames}
+      - Entity Count: ${totalEntities}
+      - Sketches in 'A-SKETCH': ${sketchShapes}
+      - Extents: Min(${bounds.xMin.toFixed(0)}, ${bounds.yMin.toFixed(0)}), Max(${bounds.xMax.toFixed(0)}, ${bounds.yMax.toFixed(0)})
+      - Viewport: Scale=${view.scale.toFixed(3)}, Origin=(${view.originX.toFixed(0)}, ${view.originY.toFixed(0)})
+      - Cursor: (${engineRef.current?.ctx.lastMousePoint.x.toFixed(0)}, ${engineRef.current?.ctx.lastMousePoint.y.toFixed(0)})
+      - Active Command: ${activeCommandName || 'None'}
+      - Snap Settings: ${settingsRef.current.snapEnabled ? 'ON' : 'OFF'} (Endpoint: ${settingsRef.current.snapEndpoint ? 'Y' : 'N'}, Midpoint: ${settingsRef.current.snapMidpoint ? 'Y' : 'N'}, Center: ${settingsRef.current.snapCenter ? 'Y' : 'N'})
+      - Ortho Mode: ${settingsRef.current.ortho ? 'ON' : 'OFF'}
+      - Polar Tracking: ${settingsRef.current.polarTrackingEnabled ? 'ON' : 'OFF'} (Step: ${settingsRef.current.polarTrackingAngle}°)
+    `.trim();
+  }, [layerConfig, view, activeCommandName, blocks]);
+
+  // Real-time architectural suggestions
+  useEffect(() => {
+    if (!activeCommandName) {
+      setAiRecommendation(null);
+      return;
+    }
+
+    const cmd = activeCommandName.toUpperCase();
+    if (cmd === 'LINE' || cmd === 'PLINE' || cmd === 'DLINE') {
+      setAiRecommendation("Wall Standard: 230mm (Ext) / 115mm (Int)");
+    } else if (cmd === 'RECT' || cmd === 'RECTANGLE') {
+      setAiRecommendation("Master Bedroom: 4500x4000 | Bath: 2400x1500");
+    } else if (cmd === 'CIRCLE') {
+      setAiRecommendation("R: 150 (Circular Column) | 600 (Vent Fan)");
+    } else if (cmd === 'OFFSET') {
+      setAiRecommendation("Offset 230 for walls | 100 for path edge");
+    } else {
+      setAiRecommendation(null);
+    }
+  }, [activeCommandName]);
+
+  // Global Escape/Delete Key Handler
+  useEffect(() => {
+    if (settings.units !== prevUnits) {
+       const factor = (prevUnits === 'mm' && settings.units === 'in') ? 1/25.4 : 
+                      (prevUnits === 'in' && settings.units === 'mm') ? 25.4 : 1;
+       
+       if (factor !== 1) {
+          setPromptDialog({
+            title: `Unit Conversion (${prevUnits} → ${settings.units})`,
+            message: `The drawing units changed. Would you like to rescale all existing geometry by ${factor.toFixed(4)} to maintain physical dimensions?`,
+            initialValue: '',
+            type: 'confirm',
+            onConfirm: () => {
+               handleRescale(factor);
+               setLogMessage(`Auto-Rescaled drawing by ${factor.toFixed(4)} to match new units (${settings.units}).`);
+            }
+          });
+       }
+       setPrevUnits(settings.units);
+    }
+  }, [settings.units]);
+
+  const handleRescale = (factor: number) => {
+     setLayers(prev => {
+        const next = { ...prev };
+        Object.keys(next).forEach(lId => {
+           next[lId] = next[lId].map(shape => rescaleShape(shape, factor));
+        });
+        return next;
+     });
+     commitToHistory();
+  };
+
+  const rescaleShape = (s: Shape, f: number): Shape => {
+      const ns = JSON.parse(JSON.stringify(s));
+      if ('x' in ns) { ns.x *= f; ns.y *= f; }
+      if ('x1' in ns) { ns.x1 *= f; ns.y1 *= f; ns.x2 *= f; ns.y2 *= f; }
+      if ('radius' in ns) ns.radius *= f;
+      if (ns.type === 'circle' && ns.radius) ns.radius *= f;
+      if ('width' in ns) { ns.width *= f; ns.height *= f; }
+      if ('rx' in ns) { ns.rx *= f; ns.ry *= f; }
+      if ('points' in ns && Array.isArray(ns.points)) ns.points = ns.points.map((p: Point) => ({ ...p, x: p.x * f, y: p.y * f, bulge: p.bulge }));
+      if ('points2' in ns && Array.isArray(ns.points2)) ns.points2 = ns.points2.map((p: Point) => ({ ...p, x: p.x * f, y: p.y * f }));
+      if ('fontSize' in ns) ns.fontSize *= f;
+      if ('dimX' in ns) { ns.dimX *= f; ns.dimY *= f; }
+      if ('thickness' in ns && typeof ns.thickness === 'number') ns.thickness *= f;
+      return ns;
+  };
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -1822,6 +1944,20 @@ const App: React.FC = () => {
           handleAction('cancel');
         } else if (selectedIds.length > 0) {
           setSelectedIds([]);
+        }
+      } else if (e.key === 'Tab') {
+        if (engineRef.current?.active && !isNavigatingInput()) {
+            e.preventDefault();
+            // In CAD, Tab usually cycles between fields in dynamic input.
+            // Here we can auto-complete patterns or cycle through common prefixes.
+            if (commandInput && !commandInput.includes(',') && !commandInput.includes('<')) {
+                setCommandInput(commandInput + ',');
+            } else if (commandInput.includes(',')) {
+                // swap or something? For now just append or cycle snap points?
+                // Standard AutoCAD Tab cycles snap points if near multiple.
+                // But if typing, it cycles input fields. 
+                // Let's just help the user type faster.
+            }
         }
       } else if (e.key === 'Delete' || (e.key === 'Backspace' && !isNavigatingInput())) {
         if (!engineRef.current?.active && selectedIds.length > 0) {
@@ -2677,6 +2813,8 @@ const App: React.FC = () => {
             lastAiCommandTime={lastAiCommandTime}
             setLogMessage={setLogMessage}
             onObjectContextMenu={(x, y) => setObjectContextMenu({ x, y })}
+            commandInput={commandInput}
+            aiRecommendation={aiRecommendation}
           />
         </motion.div>
         
@@ -3487,15 +3625,7 @@ const App: React.FC = () => {
             setCommandHistory(prev => [...prev, "> AI: " + q]);
             setLogMessage("CONSULTING PRINCIPAL ARCHITECT..."); 
             
-            // Collect metadata for Gemini
-            const totalEntities = (Object.values(layersRef.current).flat() as Shape[]).length;
-            const context = `
-              Units: ${settingsRef.current.units} (${settingsRef.current.unitSubtype})
-              Active Layer: ${settingsRef.current.currentLayer}
-              Total Entities: ${totalEntities}
-              Viewport: scale=${view.scale}, origin=${view.originX},${view.originY}
-              Last Mouse: ${engineRef.current?.ctx.lastMousePoint.x.toFixed(0)},${engineRef.current?.ctx.lastMousePoint.y.toFixed(0)}
-            `;
+            const context = getAiContextSummary();
 
             try {
               const res = await getCommandFromAI(q, context, sketch, aiConversation.slice(-6)); 
@@ -3538,6 +3668,7 @@ const App: React.FC = () => {
           }}
           isLiveActive={isLiveActive} 
           isCommandActive={isCommandActive} 
+          onAction={handleAction}
           prompt={commandPrompt} 
           history={commandHistory}
           value={commandInput} 

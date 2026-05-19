@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 // Fix: Added missing PolyShape import to satisfy type cast on line 154
 import { Shape, AppSettings, LayerConfig, LineType, Point, LineShape, CircleShape, RectShape, ArcShape, TextShape, MTextShape, LeaderShape, PolyShape, EllipseShape, DonutShape, DimensionShape, DoubleLineShape, LayoutDefinition } from '../types';
 import { X, Sliders, Layers, Target, Maximize2, PenTool, FileEdit, Move, Zap, ChevronDown, ChevronRight, Info, Type, Ruler, Box, Compass, Activity, Hash, Layers2, Square, Copy, Scissors, ExternalLink, RefreshCw, XCircle } from 'lucide-react';
-import { formatLength, parseLength, distance, calculateArea, calculatePolylineLength, formatDualLength, formatDualArea, calculateShapeLength } from '../services/cadService';
+import { formatLength, parseLength, distance, calculateArea, calculatePolylineLength, formatDualLength, formatDualArea, calculateShapeLength, calculateDimensionValue } from '../services/cadService';
 
 const PropertySection = ({ title, icon: Icon, children, defaultOpen = true }: { title: string, icon: any, children?: React.ReactNode, defaultOpen?: boolean }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -374,10 +374,23 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
       }
       case 'dimension': {
         const d = s as DimensionShape;
-        const actualLen = distance({x: d.x1, y: d.y1}, {x: d.x2, y: d.y2});
+        const actualLen = calculateDimensionValue(d, d.dimX, d.dimY);
+        const dimStyles = settings.dimStyles || {};
+        
         return (
           <>
             <PropertyRow label="Dim Type" readOnly><span className="text-[10px] text-neutral-400 font-mono px-3 uppercase">{d.dimType}</span></PropertyRow>
+            <PropertyRow label="Dim Style">
+                <select 
+                    className="w-full bg-[#121214] border border-white/5 text-[11px] text-white font-mono rounded-xl px-4 py-3 outline-none focus:border-[#00bcd4]/50 transition-all uppercase"
+                    value={d.styleId || 'standard'}
+                    onChange={e => handleShapeChange('styleId', e.target.value)}
+                >
+                    {Object.keys(dimStyles).map(sid => (
+                        <option key={sid} value={sid}>{dimStyles[sid].name || sid.toUpperCase()}</option>
+                    ))}
+                </select>
+            </PropertyRow>
             <PropertyRow label="Measured" readOnly><NumericInput value={actualLen} onChange={() => {}} readOnly /></PropertyRow>
             <PropertyRow label="Point 1 X"><NumericInput value={d.x1} onChange={v => handleShapeChange('x1', v)} /></PropertyRow>
             <PropertyRow label="Point 1 Y"><NumericInput value={d.y1} onChange={v => handleShapeChange('y1', v)} /></PropertyRow>

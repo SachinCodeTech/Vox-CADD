@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Bot, Send, Terminal, Mic, MicOff, ChevronUp, ChevronDown, Paperclip, X, Check, History } from 'lucide-react';
+import { Bot, Send, Terminal, Mic, MicOff, ChevronUp, ChevronDown, Paperclip, X, Check, History, Target } from 'lucide-react';
 
 interface CommandBarProps {
   onCommand: (cmd: string) => void;
   onAiQuery: (prompt: string, attachment?: string | null) => Promise<void>;
   onLiveToggle: () => void;
   onToggleHistory?: () => void;
+  onAction?: (type: string, data?: any) => void;
   isLiveActive: boolean;
   isCommandActive: boolean;
   isAiThinking?: boolean;
@@ -67,8 +68,17 @@ export const COMMAND_LIST = [
     { cmd: 'PASTECLIP', alias: 'CV', desc: 'Paste from clipboard' }
 ];
 
+export const AI_PROMPT_SUGGESTIONS = [
+    { label: 'Draw Bedroom', prompt: 'Draw a standard 4.5m x 4m master bedroom with ensuite bath.' },
+    { label: 'Create 2BHK', prompt: 'Design a compact 100sqm 2BHK apartment plan.' },
+    { label: 'Modern Office', prompt: 'Create a modern open-plan office layout for 10 people.' },
+    { label: 'Clean Drawing', prompt: 'Fix all misaligned lines and ensure corners are perfectly closed.' },
+    { label: 'Add Dimensions', prompt: 'Auto-dimension all major room spans and wall lengths.' },
+    { label: 'Extension', prompt: 'Add a 3m wide terrace garden extension to the living area.' }
+];
+
 const CommandBar: React.FC<CommandBarProps> = ({ 
-  onCommand, onAiQuery, onLiveToggle, onToggleHistory, isLiveActive, isCommandActive, isAiThinking,
+  onCommand, onAiQuery, onLiveToggle, onToggleHistory, onAction, isLiveActive, isCommandActive, isAiThinking,
   prompt, history, value, onChange
 }) => {
   const [activeTab, setActiveTab] = useState<'cli' | 'ai' | null>(null);
@@ -89,12 +99,22 @@ const CommandBar: React.FC<CommandBarProps> = ({
   const [histIdx, setHistIdx] = useState(-1);
 
   const suggestions = useMemo(() => {
-    if (!value || activeTab !== 'cli') return [];
-    const search = value.trim().toUpperCase();
-    if (!search) return [];
-    return COMMAND_LIST.filter(c => 
-      c.cmd.includes(search) || (c.alias && c.alias.startsWith(search))
-    ).slice(0, 8);
+    if (!value) return [];
+    
+    if (activeTab === 'cli') {
+        const search = value.trim().toUpperCase();
+        if (!search) return [];
+        return COMMAND_LIST.filter(c => 
+          c.cmd.includes(search) || (c.alias && c.alias.startsWith(search))
+        ).map(c => ({ ...c, type: 'cmd' })).slice(0, 8);
+    } else if (activeTab === 'ai') {
+        const search = value.trim().toLowerCase();
+        if (!search) return AI_PROMPT_SUGGESTIONS.map(s => ({ cmd: s.prompt, label: s.label, type: 'ai' })).slice(0, 5);
+        return AI_PROMPT_SUGGESTIONS.filter(s => 
+          s.label.toLowerCase().includes(search) || s.prompt.toLowerCase().includes(search)
+        ).map(s => ({ cmd: s.prompt, label: s.label, type: 'ai' })).slice(0, 5);
+    }
+    return [];
   }, [value, activeTab]);
 
   const handleSubmit = (e?: React.FormEvent) => {
@@ -285,18 +305,37 @@ const CommandBar: React.FC<CommandBarProps> = ({
             <form onSubmit={handleSubmit} className="flex items-start gap-2 bg-[#0a0a0c] border border-white/10 rounded-xl px-3 min-h-10 focus-within:border-[#00bcd4]/50 transition-all relative">
                 {showSuggestions && suggestions.length > 0 && (
                     <div className="absolute bottom-full left-0 mb-2 w-full bg-[#111] border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,1)] z-[200] overflow-hidden backdrop-blur-xl">
-                        <div className="px-3 py-1.5 border-b border-white/5 bg-white/5">
-                            <span className="text-[7px] font-black text-neutral-600 uppercase tracking-widest">Command Suggestions</span>
+                        <div className="px-3 py-1.5 border-b border-white/5 bg-white/5 flex justify-between items-center">
+                            <span className="text-[7px] font-black text-neutral-600 uppercase tracking-widest">
+                                {activeTab === 'cli' ? 'Cmd Suggestions' : 'Architectural Prompts'}
+                            </span>
+                            {activeTab === 'ai' && <Bot size={10} className="text-indigo-500" />}
                         </div>
-                        {suggestions.map((s, i) => (
+                        {suggestions.map((s: any, i) => (
                             <button 
                               key={`suggestion-${s.cmd}`} 
                               type="button" 
-                              onClick={() => { onChange(s.cmd); onCommand(s.cmd); onChange(''); setShowSuggestions(false); setSuggestionIdx(-1); }} 
-                              className={`w-full px-4 py-3 text-left text-[10px] font-bold border-b border-white/5 uppercase flex justify-between items-center transition-colors ${suggestionIdx === i ? 'bg-cyan-500 text-black' : 'text-neutral-400 hover:bg-white/5'}`}
+                              onClick={() => { 
+                                if (s.type === 'ai') {
+                                    onAiQuery(s.cmd);
+                                } else {
+                                    onChange(s.cmd); onCommand(s.cmd); 
+                                }
+                                onChange(''); 
+                                setShowSuggestions(false); 
+                                setSuggestionIdx(-1); 
+                              }} 
+                              className={`w-full px-4 py-3 text-left text-[10px] font-bold border-b border-white/5 uppercase flex justify-between items-center transition-colors ${suggestionIdx === i ? (s.type === 'ai' ? 'bg-indigo-600 text-white' : 'bg-cyan-500 text-black') : 'text-neutral-400 hover:bg-white/5'}`}
                             >
-                                <span>{s.cmd}</span>
-                                <span className={`text-[8px] font-mono ${suggestionIdx === i ? 'text-black/50' : 'opacity-30'}`}>{s.alias}</span>
+                                <div className="flex flex-col gap-0.5">
+                                    <span className={s.type === 'ai' ? 'text-[9px] lowercase opacity-80 font-normal leading-tight line-clamp-1 max-w-[200px]' : ''}>
+                                        {s.type === 'ai' ? s.cmd : s.cmd}
+                                    </span>
+                                    {s.type === 'ai' && <span className="text-[10px] font-black uppercase tracking-tight">{s.label}</span>}
+                                </div>
+                                <span className={`text-[8px] font-mono ${suggestionIdx === i ? 'opacity-50' : 'opacity-30'}`}>
+                                    {s.type === 'ai' ? 'AI' : s.alias}
+                                </span>
                             </button>
                         ))}
                     </div>
@@ -356,11 +395,74 @@ const CommandBar: React.FC<CommandBarProps> = ({
             </form>
           ) : (
             <form onSubmit={handleSubmit} className={`flex items-end gap-2 bg-[#0a0a0c] border rounded-xl px-3 py-1.5 min-h-10 transition-all ${isAiThinking ? 'border-indigo-500 shadow-[0_0_20px_rgba(99,102,241,0.2)]' : 'border-white/10 focus-within:border-indigo-500/50'}`}>
+                {showSuggestions && suggestions.length > 0 && (
+                    <div className="absolute bottom-full left-0 mb-2 w-full bg-[#111] border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,1)] z-[200] overflow-hidden backdrop-blur-xl">
+                        <div className="px-3 py-1.5 border-b border-white/5 bg-white/5 flex gap-2 items-center">
+                            <Bot size={10} className="text-indigo-500" />
+                            <span className="text-[7px] font-black text-neutral-600 uppercase tracking-widest">Architectural Patterns</span>
+                        </div>
+                        {suggestions.map((s: any, i) => (
+                            <button 
+                              key={`suggestion-ai-${i}`} 
+                              type="button" 
+                              onClick={() => { 
+                                onAiQuery(s.cmd);
+                                onChange(''); 
+                                setShowSuggestions(false); 
+                                setSuggestionIdx(-1); 
+                              }} 
+                              className={`w-full px-4 py-3 text-left border-b border-white/5 transition-colors flex flex-col gap-0.5 ${suggestionIdx === i ? 'bg-indigo-600' : 'hover:bg-white/5'}`}
+                            >
+                                <span className={`text-[10px] font-black uppercase tracking-tight ${suggestionIdx === i ? 'text-white' : 'text-neutral-300'}`}>{s.label}</span>
+                                <span className={`text-[8px] line-clamp-1 ${suggestionIdx === i ? 'text-white/60' : 'text-neutral-600 font-medium'}`}>{s.cmd}</span>
+                            </button>
+                        ))}
+                    </div>
+                )}
                 <div className="flex items-center gap-2 shrink-0 pb-2">
                   <div className="relative">
                     <Bot size={14} className={isAiThinking ? 'text-indigo-400 animate-pulse' : 'text-indigo-500'} />
                     {isAiThinking && <div className="absolute inset-0 bg-indigo-500/20 blur-sm animate-ping rounded-full" />}
                   </div>
+                  {onAction && (
+                    <div className="flex items-center gap-1">
+                      <input 
+                        type="file" 
+                        ref={fileInputRef} 
+                        className="hidden" 
+                        accept="image/*" 
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                             const reader = new FileReader();
+                             reader.onload = (event) => {
+                                const dataUrl = event.target?.result as string;
+                                onAction('interpret_sketch', dataUrl);
+                             };
+                             reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                      <button 
+                        type="button"
+                        disabled={isAiThinking}
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500 hover:text-white transition-all disabled:opacity-30"
+                        title="Upload Rough Sketch"
+                      >
+                        <Paperclip size={12} />
+                      </button>
+                      <button 
+                        type="button"
+                        disabled={isAiThinking}
+                        onClick={() => onAction('interpret_sketch')}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500 hover:text-white transition-all disabled:opacity-30"
+                        title="Capture Component Area"
+                      >
+                        <Target size={12} />
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div className="flex-1 min-w-0 h-full">
                     <textarea 

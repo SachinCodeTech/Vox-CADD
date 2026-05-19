@@ -7,7 +7,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     const isProduction = mode === 'production';
-    const base = env.VITE_BASE_URL || (isProduction ? '/Vox-CADD/' : '/');
+    const base = env.VITE_BASE_URL || (isProduction ? '/voxcadd-professional/' : '/');
     
     return {
       base: base,
@@ -95,8 +95,6 @@ export default defineConfig(({ mode }) => {
         })
       ],
       define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY || ""),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || ""),
         'process.env.NODE_ENV': JSON.stringify(mode)
       },
       resolve: {

@@ -10,7 +10,10 @@ export const createDefaultCtb = (): CtbFile => {
       plotColor: '#000000',
       lineweight: 'useObjectLineweight',
       lineStyle: 'useObjectLineStyle',
-      screening: 100
+      screening: 100,
+      lineEndStyle: 'BUTT',
+      lineJoinStyle: 'MITER',
+      fillStyle: 'SOLID'
     };
   }
   
@@ -32,7 +35,10 @@ export const createVoxCtb = (): CtbFile => {
       plotColor: 'useObjectColor',
       lineweight: 'useObjectLineweight',
       lineStyle: 'useObjectLineStyle',
-      screening: 100
+      screening: 100,
+      lineEndStyle: 'BUTT',
+      lineJoinStyle: 'MITER',
+      fillStyle: 'SOLID'
     };
   }
   

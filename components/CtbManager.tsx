@@ -516,6 +516,55 @@ const CtbManager: React.FC<CtbManagerProps> = ({ isOpen, onClose, settings, onUp
                            </div>
                         </div>
                     </div>
+
+                    <div className="col-span-full space-y-2.5">
+                        <div className="flex items-center justify-between px-0.5">
+                            <div className="flex items-center gap-2 text-neutral-600">
+                               <div className="w-1.5 h-1.5 rounded-full bg-cyan-500" />
+                               <span className="text-[8.5px] font-black uppercase tracking-[0.15em]">Linetype Plot Map</span>
+                            </div>
+                            <div className="flex gap-1.5">
+                                {['continuous', 'dashed', 'center'].map(lt => (
+                                    <button 
+                                        key={`quick-lt-${lt}`}
+                                        onClick={() => handleUpdateStyle(selectedAcis, { lineStyle: lt as any })}
+                                        className={`text-[6.5px] font-black uppercase px-2 py-0.5 rounded border transition-all ${currentStyle.lineStyle === lt ? 'bg-cyan-400 text-black border-cyan-400' : 'bg-black/40 border-white/5 text-neutral-700 hover:text-cyan-400 hover:border-cyan-400/30'}`}
+                                    >
+                                        {lt.slice(0, 4)}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="p-3 bg-[#0d0d0f] border border-white/5 rounded-xl transition-all shadow-lg hover:border-white/10 flex items-center gap-4">
+                           <div className="relative group/lt-select flex-1">
+                               <select 
+                                   value={currentStyle.lineStyle}
+                                   onChange={(e) => handleUpdateStyle(selectedAcis, { lineStyle: e.target.value as any })}
+                                   className="w-full bg-black/50 border border-white/5 text-white text-[10px] p-2.5 rounded-lg outline-none appearance-none font-black text-center tracking-[0.1em] hover:border-cyan-400/20 transition-all uppercase"
+                               >
+                                   <option value="useObjectLineStyle">USE OBJECT LINETYPE</option>
+                                   <option value="continuous">CONTINUOUS</option>
+                                   <option value="dashed">DASHED</option>
+                                   <option value="dotted">DOTTED</option>
+                                   <option value="center">CENTER</option>
+                                   <option value="dashdot">DASHDOT</option>
+                                   <option value="border">BORDER</option>
+                                   <option value="divide">DIVIDE</option>
+                                   <option value="phantom">PHANTOM</option>
+                                   <option value="zigzag">ZIGZAG</option>
+                                </select>
+                                <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-900 pointer-events-none group-hover/lt-select:text-cyan-400 transition-colors">
+                                    <ChevronDown size={14} />
+                                </div>
+                           </div>
+                           <div className="flex items-center gap-2 px-4 py-2 bg-black/40 rounded-lg border border-white/5 min-w-[120px] justify-center">
+                              <span className="text-[7.5px] font-black text-neutral-700 uppercase tracking-widest">AUTO_RESCALE</span>
+                              <div className="w-8 h-4 rounded-full bg-neutral-900 border border-white/10 relative p-0.5 pointer-events-none">
+                                <div className="w-3 h-3 rounded-full bg-cyan-400/20 absolute right-0.5" />
+                              </div>
+                           </div>
+                        </div>
+                    </div>
                  </div>
 
                  <div className="space-y-3.5">
@@ -566,14 +615,45 @@ const CtbManager: React.FC<CtbManagerProps> = ({ isOpen, onClose, settings, onUp
 
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     {[
-                        { label: 'TERMINAL', icon: <BoxSelect size={11} />, val: 'BUTT' },
-                        { label: 'JOINT', icon: <Maximize2 size={11} />, val: 'MITER' },
-                        { label: 'ALGO', icon: <Palette size={11} />, val: 'SOLID' }
+                        { 
+                          label: 'TERMINAL', 
+                          icon: <BoxSelect size={11} />, 
+                          val: currentStyle.lineEndStyle || 'BUTT',
+                          onClick: () => {
+                             const opts = ['BUTT', 'SQUARE', 'ROUND', 'DIAMOND'];
+                             const idx = opts.indexOf(currentStyle.lineEndStyle || 'BUTT');
+                             handleUpdateStyle(selectedAcis, { lineEndStyle: opts[(idx + 1) % opts.length] as any });
+                          }
+                        },
+                        { 
+                          label: 'JOINT', 
+                          icon: <Maximize2 size={11} />, 
+                          val: currentStyle.lineJoinStyle || 'MITER',
+                          onClick: () => {
+                             const opts = ['MITER', 'BEVEL', 'ROUND', 'DIAMOND'];
+                             const idx = opts.indexOf(currentStyle.lineJoinStyle || 'MITER');
+                             handleUpdateStyle(selectedAcis, { lineJoinStyle: opts[(idx + 1) % opts.length] as any });
+                          }
+                        },
+                        { 
+                          label: 'FILL ALGO', 
+                          icon: <Palette size={11} />, 
+                          val: currentStyle.fillStyle || 'SOLID',
+                          onClick: () => {
+                             const opts = ['SOLID', 'CHECKERBOARD', 'CROSSHATCH'];
+                             const idx = opts.indexOf(currentStyle.fillStyle || 'SOLID');
+                             handleUpdateStyle(selectedAcis, { fillStyle: opts[(idx + 1) % opts.length] as any });
+                          }
+                        }
                     ].map(card => (
-                        <div key={card.label} className="p-3 bg-white/[0.01] border border-white/5 rounded-xl flex items-center justify-between group hover:bg-white/[0.02] hover:border-white/10 transition-all cursor-pointer active:scale-95">
+                        <div 
+                          key={card.label} 
+                          onClick={card.onClick}
+                          className="p-3 bg-white/[0.01] border border-white/5 rounded-xl flex items-center justify-between group hover:bg-white/[0.02] hover:border-white/10 transition-all cursor-pointer active:scale-95"
+                        >
                             <div className="flex flex-col">
                                 <span className="text-[6.5px] font-black text-neutral-800 uppercase tracking-[0.1em]">{card.label}</span>
-                                <span className="text-[9px] font-black text-neutral-600 uppercase group-hover:text-cyan-400 transition-colors mt-0.5">{card.val}</span>
+                                <span className="text-[9px] font-black text-white/60 group-hover:text-cyan-400 uppercase transition-colors mt-0.5">{card.val}</span>
                             </div>
                             <div className="w-7 h-7 rounded-md bg-black/40 flex items-center justify-center text-neutral-800 group-hover:text-cyan-400 transition-all border border-white/5">
                                 {card.icon}

@@ -34,6 +34,8 @@ interface CADCanvasProps {
   setLogMessage?: (msg: string | null) => void;
   onObjectContextMenu?: (x: number, y: number) => void;
   isPlotting?: boolean;
+  commandInput?: string;
+  aiRecommendation?: string | null;
 }
 
 export interface CADCanvasHandle {
@@ -45,7 +47,9 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     isViewportActive = false, activeViewportId, onViewportToggle,
     onMouseMove, onClick, selectedIds = [], highlightIds = [], onSelectionChange, previewShapes,
     activePrompt, basePoint = null, activeCommandName, isAiThinking, lastAiCommandTime, onAction, onCommand,
-    setLogMessage, onObjectContextMenu, isPlotting = false
+    setLogMessage, onObjectContextMenu, isPlotting = false,
+    commandInput = '',
+    aiRecommendation = null
 }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
@@ -466,15 +470,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           return isRectIntersecting(viewportBounds, bounds);
       });
 
-      // LOD: If we have many shapes, skip tiny details
-      const useLOD = visibleShapes.length > 5000;
-
       visibleShapes.forEach(s => {
-          if (useLOD) {
-              const bounds = getShapeBounds(s, blocks);
-              const pixelSize = Math.max(bounds.xMax - bounds.xMin, bounds.yMax - bounds.yMin) * ts;
-              if (pixelSize < 1) return; // Skip too small to see
-          }
           drawShape(ctx, s, ts);
       });
       if (activeSnapRef.current) drawSnapMarker(ctx, activeSnapRef.current, ts, w, h);
@@ -974,12 +970,13 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
 
     const processText = (txt: string) => {
         if (!txt) return '';
-        // Better MTEXT code cleaning
+        // Robust MTEXT/TEXT code cleaning
         return txt
             .replace(/%%c/gi, 'Ø')
             .replace(/%%d/gi, '°')
             .replace(/%%p/gi, '±')
             .replace(/\\P/g, '\n')
+            .replace(/\\U\+([0-9A-F]{4})/gi, (match, grp) => String.fromCharCode(parseInt(grp, 16))) // Unicode
             .replace(/\{\\f[^;]*?;/g, '') // Formatting font
             .replace(/\{\\A[^;]*?;/g, '') // Formatting alignment
             .replace(/\{\\H[^;]*?;/g, '') // Formatting height
@@ -1094,22 +1091,31 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       }
       case 'dimension': {
           const ds = settings.dimStyles[s.styleId || 'standard'] || settings.dimStyles['standard'] || {
-            arrowSize: 200, textSize: 250, textOffset: 100, extendLine: 150, offsetLine: 100, precision: 2
+            arrowSize: 2.5, textSize: 2.5, textOffset: 0.6, extendLine: 1.25, offsetLine: 0.6, precision: 2
           };
           
-          const arrowS = ds.arrowSize * (ds.arrowScale || 1.0);
+          // Use size from shape (if parsed from DWG) or from style
+          // User suggestion: Text height = Drawing scale * 1.65
+          const defaultH = (settings.drawingScale || 1.0) * 1.65;
+          const finalDimTextSize = s.size || s.height || ds.textSize || defaultH;
+          const arrowS = (s.size ? s.size * 0.8 : (ds.arrowSize || defaultH * 0.8)) * (ds.arrowScale || 1.0);
+          const tOffset = s.size ? s.size * 0.4 : (ds.textOffset || defaultH * 0.4);
 
           const measuredValue = calculateDimensionValue(s, s.dimX, s.dimY);
           const rawText = s.text || '<>';
           const dimValueText = s.dimType === 'angular' ? formatAngle(measuredValue, settings) : formatDimensionValue(measuredValue, ds, settings);
           const dimText = processText(rawText.replace('<>', dimValueText));
 
-          if (s.dimType === 'radius' || s.dimType === 'diameter' || s.dimType === 'angular' || s.dimType === 'arc') {
-              const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+          if (s.dimType === 'radius' || s.dimType === 'diameter') {
+              const cx = s.cx ?? s.x1;
+              const cy = s.cy ?? s.y1;
+              const dx = s.x2 - cx, dy = s.y2 - cy;
               const angle = Math.atan2(dy, dx);
+              const r = Math.sqrt(dx*dx + dy*dy);
               
               ctx.beginPath();
-              ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2);
+              ctx.moveTo(cx, cy); 
+              ctx.lineTo(s.x2, s.y2);
               ctx.stroke();
               
               ctx.save();
@@ -1118,45 +1124,120 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               ctx.restore();
 
               if (s.dimType === 'diameter') {
+                  const x3 = cx - dx, y3 = cy - dy;
+                  ctx.beginPath();
+                  ctx.moveTo(cx, cy); ctx.lineTo(x3, y3);
+                  ctx.stroke();
                   ctx.save();
-                  ctx.translate(s.x1 - dx, s.y1 - dy);
-                  ctx.rotate(angle);
+                  ctx.translate(x3, y3); ctx.rotate(angle);
                   drawArrowhead(arrowS, ds.arrowType);
                   ctx.restore();
-                  ctx.beginPath();
-                  ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x1 - dx, s.y1 - dy);
-                  ctx.stroke();
               }
 
               ctx.save();
-              // Calculate text position
-              let tx = (s.x1 + s.x2) / 2;
-              let ty = (s.y1 + s.y2) / 2;
-              if (s.dimType === 'diameter') {
-                  tx = s.x1; ty = s.y1;
-              }
-              
-              const offset = (ds.textPlacement === 'above' || ds.textPlacement === undefined) ? (ds.textOffset + ds.textSize/2) : 0;
-              tx += Math.cos(angle + Math.PI/2) * offset;
-              ty += Math.sin(angle + Math.PI/2) * offset;
-              
+              const tx = s.dimX || (cx + s.x2) / 2;
+              const ty = s.dimY || (cy + s.y2) / 2;
               ctx.translate(tx, ty);
               let tAngle = angle;
               if (tAngle > Math.PI/2) tAngle -= Math.PI;
               if (tAngle < -Math.PI/2) tAngle += Math.PI;
               ctx.rotate(tAngle); ctx.scale(1, -1);
-              ctx.font = `bold ${ds.textSize}px "JetBrains Mono", monospace`; 
+              ctx.font = `bold ${finalDimTextSize}px "JetBrains Mono", monospace`; 
               ctx.textAlign = 'center'; 
               ctx.textBaseline = 'middle';
-
-              // Text Background - "Cut" the line
+              
               const metrics = ctx.measureText(dimText);
-              const padX = ds.textSize * 0.4;
-              const padY = ds.textSize * 0.2;
-              ctx.fillStyle = isModel ? "#0a0a0c" : "#ffffff"; // Use correct background for masking
-              ctx.fillRect(-metrics.width/2 - padX, -ds.textSize/2 - padY, metrics.width + padX*2, ds.textSize + padY*2);
-
+              ctx.fillStyle = isModel ? "#0a0a0c" : "#ffffff";
+              ctx.fillRect(-metrics.width/2 - 2, -finalDimTextSize/2 - 1, metrics.width + 4, finalDimTextSize + 2);
               ctx.fillStyle = baseColor; 
+              ctx.fillText(dimText, 0, 0);
+              ctx.restore();
+              break;
+          }
+
+          if (s.dimType === 'angular' || s.dimType === 'arc') {
+              const cx = s.cx ?? s.x1;
+              const cy = s.cy ?? s.y1;
+              const dx = s.dimX - cx, dy = s.dimY - cy;
+              const r = Math.sqrt(dx*dx + dy*dy);
+              
+              const a1 = s.angle1 || 0;
+              const a2 = s.angle2 || 0;
+              
+              // Calculate correct sweep direction to pass through dimX, dimY
+              const dimAngle = Math.atan2(dy, dx);
+              
+              // Normalize angles
+              const normalize = (a: number) => {
+                  let res = a % (Math.PI * 2);
+                  if (res < 0) res += Math.PI * 2;
+                  return res;
+              };
+              
+              const na1 = normalize(a1);
+              const na2 = normalize(a2);
+              const ndim = normalize(dimAngle);
+              
+              let start = na1;
+              let end = na2;
+              let anticlockwise = false;
+              
+              // Check if ndim is between na1 and na2 in CCW or CW sense
+              const isBetweenCCW = (a: number, s: number, e: number) => {
+                  if (s <= e) return a >= s && a <= e;
+                  return a >= s || a <= e;
+              };
+              
+              if (isBetweenCCW(ndim, na1, na2)) {
+                  start = na1; end = na2; anticlockwise = false;
+              } else {
+                  start = na1; end = na2; anticlockwise = true;
+              }
+              
+              // Draw the arc dimension line
+              ctx.beginPath();
+              ctx.arc(cx, cy, r, start, end, anticlockwise);
+              ctx.stroke();
+
+              // Draw arrows
+              const drawDimArrow = (ang: number, isStart: boolean) => {
+                  ctx.save();
+                  ctx.translate(cx + r * Math.cos(ang), cy + r * Math.sin(ang));
+                  // Arrow needs to be tangent to arc. Normal is rad vector
+                  // Tangent is normal + PI/2. 
+                  const tangent = ang + (anticlockwise ? (isStart ? -Math.PI/2 : Math.PI/2) : (isStart ? Math.PI/2 : -Math.PI/2));
+                  ctx.rotate(tangent);
+                  drawArrowhead(arrowS, ds.arrowType);
+                  ctx.restore();
+              };
+              
+              drawDimArrow(start, true);
+              drawDimArrow(end, false);
+
+              // Text position - midpoint of the arc used
+              let mid = (start + end) / 2;
+              if (Math.abs(end - start) > Math.PI && !anticlockwise) mid += Math.PI;
+              if (Math.abs(end - start) < Math.PI && anticlockwise) mid += Math.PI;
+              
+              const tx = cx + (r + (ds.textPlacement === 'above' ? finalDimTextSize : 0)) * Math.cos(mid);
+              const ty = cy + (r + (ds.textPlacement === 'above' ? finalDimTextSize : 0)) * Math.sin(mid);
+              
+              ctx.save();
+              ctx.translate(tx, ty);
+              let tAngle = mid + Math.PI/2;
+              if (tAngle > Math.PI/2) tAngle -= Math.PI;
+              if (tAngle < -Math.PI/2) tAngle += Math.PI;
+              ctx.rotate(tAngle); ctx.scale(1, -1);
+              ctx.font = `bold ${finalDimTextSize}px "JetBrains Mono", monospace`;
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              
+              // Mask
+              const metrics = ctx.measureText(dimText);
+              ctx.fillStyle = isModel ? "#0a0a0c" : "#ffffff";
+              ctx.fillRect(-metrics.width/2 - 2, -finalDimTextSize/2 - 1, metrics.width + 4, finalDimTextSize + 2);
+              
+              ctx.fillStyle = baseColor;
               ctx.fillText(dimText, 0, 0);
               ctx.restore();
               break;
@@ -1170,11 +1251,11 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               ctx.stroke();
               ctx.save();
               ctx.translate(s.x2, s.y2); ctx.scale(1, -1);
-              ctx.font = `bold ${ds.textSize}px "JetBrains Mono", monospace`; 
+              ctx.font = `bold ${finalDimTextSize}px "JetBrains Mono", monospace`; 
               ctx.textAlign = (isX ? 'left' : 'center') as CanvasTextAlign; 
               ctx.textBaseline = (isX ? 'middle' : 'bottom') as CanvasTextBaseline;
               ctx.fillStyle = baseColor;
-              ctx.fillText(dimText, isX ? ds.textOffset : 0, isX ? 0 : -ds.textOffset);
+              ctx.fillText(dimText, isX ? tOffset : 0, isX ? 0 : -tOffset);
               ctx.restore();
               break;
           }
@@ -1218,9 +1299,9 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           
           ctx.save();
           let placementOffset = 0;
-          if (ds.textPlacement === 'above') placementOffset = (ds.textOffset + ds.textSize/2);
-          else if (ds.textPlacement === 'below') placementOffset = -(ds.textOffset + ds.textSize/2);
-          else placementOffset = (ds.textOffset + ds.textSize/2); 
+          if (ds.textPlacement === 'above') placementOffset = (tOffset + finalDimTextSize/2);
+          else if (ds.textPlacement === 'below') placementOffset = -(tOffset + finalDimTextSize/2);
+          else placementOffset = (tOffset + finalDimTextSize/2); 
           
           if (ds.textPlacement === 'center') placementOffset = 0;
 
@@ -1231,16 +1312,16 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           if (tAngle > Math.PI/2) tAngle -= Math.PI;
           if (tAngle < -Math.PI/2) tAngle += Math.PI;
           ctx.rotate(tAngle); ctx.scale(1, -1);
-          ctx.font = `bold ${ds.textSize}px "JetBrains Mono", "Fira Code", monospace`; 
+          ctx.font = `bold ${finalDimTextSize}px "JetBrains Mono", "Fira Code", monospace`; 
           ctx.textAlign = 'center'; 
           ctx.textBaseline = 'middle';
           
           // Always mask dimension text for better readability against drawing lines
           const metrics = ctx.measureText(dimText);
-          const padX = ds.textSize * 0.4;
-          const padY = ds.textSize * 0.2;
+          const padX = finalDimTextSize * 0.4;
+          const padY = finalDimTextSize * 0.2;
           ctx.fillStyle = isModel ? "#0a0a0c" : "#ffffff";
-          ctx.fillRect(-metrics.width/2 - padX, -ds.textSize/2 - padY, metrics.width + padX*2, ds.textSize + padY*2);
+          ctx.fillRect(-metrics.width/2 - padX, -finalDimTextSize/2 - padY, metrics.width + padX*2, finalDimTextSize + padY*2);
 
           ctx.fillStyle = baseColor; 
           ctx.fillText(dimText, 0, 0);
@@ -1796,80 +1877,91 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                         const px = i * s + (j % 2 === 0 ? 0 : s/2);
                         const py = j * s;
                         const r = s * 0.2;
+                        ctx.beginPath();
                         for (let k = 0; k < 5; k++) {
                             const a1 = (k * 0.8 * Math.PI) - Math.PI/2;
                             const a2 = ((k+1) * 0.8 * Math.PI) - Math.PI/2;
                             ctx.moveTo(px + Math.cos(a1) * r, py + Math.sin(a1) * r);
                             ctx.lineTo(px + Math.cos(a2) * r, py + Math.sin(a2) * r);
                         }
+                        ctx.stroke();
                     }
                 }
 
                 if (pattern === 'grass') {
                     const s = spacing;
                     for (let j = -count; j <= count; j++) {
-                        const px = i * s + Math.random() * s;
-                        const py = j * s + Math.random() * s;
+                        // Deterministic "random" position within cell
+                        const noiseX = Math.abs(Math.sin(i * 12.9898 + j * 78.233)) * s;
+                        const noiseY = Math.abs(Math.cos(i * 12.9898 + j * 78.233)) * s;
+                        const px = i * s + noiseX;
+                        const py = j * s + noiseY;
+                        ctx.beginPath();
                         ctx.moveTo(px, py);
                         ctx.lineTo(px - s*0.1, py - s*0.3);
                         ctx.moveTo(px, py);
                         ctx.lineTo(px + s*0.1, py - s*0.3);
                         ctx.moveTo(px, py);
                         ctx.lineTo(px, py - s*0.4);
+                        ctx.stroke();
+                    }
+                }
+
+                if (pattern === 'earth') {
+                    const s = spacing;
+                    ctx.beginPath();
+                    ctx.moveTo(-diagonal, offset);
+                    ctx.lineTo(diagonal, offset);
+                    ctx.stroke();
+                    for (let x = -diagonal; x < diagonal; x += s) {
+                        ctx.beginPath();
+                        ctx.moveTo(x, offset);
+                        ctx.lineTo(x + s*0.3, offset - s*0.3);
+                        ctx.stroke();
+                    }
+                }
+
+                if (pattern === 'sand') {
+                    const s = spacing / 2.5;
+                    const noise = Math.abs(Math.sin(i * 99 + offset * 88));
+                    if (noise > 0.5) {
+                        ctx.beginPath();
+                        ctx.arc(i * s, offset, 0.2/ts, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+
+                if (pattern === 'conc') {
+                    const s = spacing;
+                    const noise = Math.abs(Math.sin(i * 123 + offset * 456));
+                    if (noise > 0.8) {
+                        ctx.beginPath();
+                        const r = s * 0.1;
+                        ctx.moveTo(i*s, offset - r);
+                        ctx.lineTo(i*s + r, offset + r);
+                        ctx.lineTo(i*s - r, offset + r);
+                        ctx.closePath();
+                        ctx.stroke();
+                    } else if (noise > 0.4) {
+                        ctx.beginPath();
+                        ctx.arc(i*s, offset, 0.1/ts, 0, Math.PI * 2);
+                        ctx.fill();
                     }
                 }
 
                 if (pattern === 'cork') {
                     const s = spacing;
                     for (let j = -count; j <= count; j++) {
-                        const px = i * s + (j % 2 === 0 ? 0 : s/2);
-                        const py = j * s;
-                        ctx.arc(px, py, s*0.15, 0, Math.PI * 2);
+                        const noiseX = Math.abs(Math.sin(i * 45 + j * 67)) * s;
+                        const noiseY = Math.abs(Math.cos(i * 45 + j * 67)) * s;
+                        const px = i * s + noiseX;
+                        const py = j * s + noiseY;
+                        ctx.beginPath();
+                        ctx.arc(px, py, s*0.1, 0, Math.PI * 2);
                         ctx.moveTo(px + s*0.2, py + s*0.1);
                         ctx.lineTo(px + s*0.3, py + s*0.2);
+                        ctx.stroke();
                     }
-                }
-
-                if (pattern === 'hound') {
-                    const s = spacing;
-                    const px = i * s;
-                    const py = offset;
-                    ctx.moveTo(px, py);
-                    ctx.lineTo(px + s/2, py + s/2);
-                    ctx.lineTo(px + s, py);
-                    ctx.lineTo(px + s/2, py - s/2);
-                    ctx.closePath();
-                }
-
-                if (pattern === 'grid') {
-                    const s = spacing;
-                    ctx.moveTo(i * s, -diagonal);
-                    ctx.lineTo(i * s, diagonal);
-                    ctx.moveTo(-diagonal, i * s);
-                    ctx.lineTo(diagonal, i * s);
-                }
-
-                if (pattern === 'brick') {
-                    const s = spacing;
-                    const h = s / 2;
-                    ctx.moveTo(-diagonal, offset);
-                    ctx.lineTo(diagonal, offset);
-                    const shift = (Math.floor(offset / h) % 2 === 0) ? 0 : s / 2;
-                    for (let x = -diagonal + shift; x < diagonal; x += s) {
-                        ctx.moveTo(x, offset);
-                        ctx.lineTo(x, offset + h);
-                    }
-                }
-
-                if (pattern === 'triang') {
-                    const s = spacing;
-                    const h = s * 0.866;
-                    const px = i * s + (Math.floor(offset / h) % 2 === 0 ? 0 : s/2);
-                    const py = offset;
-                    ctx.moveTo(px, py);
-                    ctx.lineTo(px + s/2, py + h);
-                    ctx.lineTo(px - s/2, py + h);
-                    ctx.closePath();
                 }
 
                 if (pattern === 'clay') {
@@ -1881,18 +1973,6 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                         ctx.arc(px, py, s*0.2, Math.PI, 0);
                         ctx.moveTo(px + s*0.1, py + s*0.1);
                         ctx.arc(px + s*0.3, py + s*0.1, s*0.2, Math.PI, 0);
-                    }
-                }
-
-                if (pattern === 'cork') {
-                    const s = spacing;
-                    for (let j = -count; j <= count; j++) {
-                        const px = i * s + Math.random() * s;
-                        const py = j * s + Math.random() * s;
-                        ctx.moveTo(px + s*0.1, py);
-                        ctx.arc(px, py, s*0.1, 0, Math.PI * 2);
-                        ctx.moveTo(px + s*0.3, py + s*0.2);
-                        ctx.lineTo(px + s*0.4, py + s*0.3);
                     }
                 }
             }
@@ -2423,8 +2503,60 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   useEffect(() => { redraw(); }, [redraw, view, isViewportActive, layers, layerConfig, selectedIds, highlightIds, settings, previewShapes, activeTab]);
 
   return (
-    <div className="w-full h-full overflow-hidden bg-[#0a0a0c] touch-none">
+    <div className="w-full h-full overflow-hidden bg-[#0a0a0c] touch-none relative">
         <canvas ref={canvasRef} className="w-full h-full outline-none select-none touch-none" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onContextMenu={e => e.preventDefault()} />
+        
+        {/* Dynamic Input Floating UI */}
+        {isCommandActive && (
+          <div 
+            className="absolute pointer-events-none flex flex-col gap-1.5"
+            style={{ 
+              left: (worldCursorRef.current ? worldToScreen(worldCursorRef.current.x, worldCursorRef.current.y).x : 0) + 20, 
+              top: (worldCursorRef.current ? worldToScreen(worldCursorRef.current.x, worldCursorRef.current.y).y : 0) + 20,
+              zIndex: 50
+            }}
+          >
+            {/* Prompt */}
+            {activePrompt && (
+              <div className="bg-black/80 backdrop-blur-md border border-white/10 rounded px-2 py-0.5 whitespace-nowrap shadow-xl">
+                 <span className="text-[9px] font-mono text-neutral-400 leading-none">{activePrompt.split(':')[0]}</span>
+              </div>
+            )}
+            
+            {/* Current Input / Stats */}
+            <div className="flex items-center gap-1.5">
+               <div className="bg-[#00bcd4]/95 border border-[#00bcd4] rounded px-2 py-0.5 shadow-[0_0_15px_rgba(0,188,212,0.4)] min-w-[40px] flex items-center justify-center">
+                  <span className="text-[10px] font-mono text-black font-bold tracking-tight">
+                    {commandInput || "SPECIFY_POINT"}
+                    {commandInput && <span className="animate-pulse ml-0.5">_</span>}
+                  </span>
+               </div>
+               
+               {basePoint && (
+                 <div className="bg-neutral-900/90 border border-white/5 rounded px-2 py-0.5 backdrop-blur-sm">
+                    <span className="text-[9px] font-mono text-neutral-300">
+                      {distance(basePoint, worldCursorRef.current).toFixed(1)} {" < "} {(Math.atan2(worldCursorRef.current.y - basePoint.y, worldCursorRef.current.x - basePoint.x) * 180 / Math.PI + 360) % 360}°
+                    </span>
+                 </div>
+               )}
+            </div>
+
+            {aiRecommendation && (
+              <div className="bg-indigo-500/90 backdrop-blur-md border border-indigo-400/50 rounded px-2 py-0.5 shadow-xl animate-in fade-in slide-in-from-left-2 duration-300 flex items-center gap-1.5">
+                 <div className="w-1 h-1 rounded-full bg-white animate-pulse" />
+                 <span className="text-[8px] font-black text-white uppercase tracking-widest">
+                    SUGGESTION: {aiRecommendation}
+                 </span>
+              </div>
+            )}
+            
+            <div className="flex items-center gap-1 opacity-60">
+               <span className="text-[7px] font-mono text-neutral-500 uppercase tracking-tighter">TAB: CYCLE FIELDS</span>
+               <span className="text-[7px] font-mono text-white/20">|</span>
+               <span className="text-[7px] font-mono text-neutral-500 uppercase tracking-tighter">ENTER: CONFIRM</span>
+            </div>
+          </div>
+        )}
     </div>
   );
 });

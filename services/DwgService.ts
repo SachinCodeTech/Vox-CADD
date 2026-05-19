@@ -126,30 +126,40 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
             if (!text) return "";
             
             let actualText = text;
-            // Clean up AutoCAD anonymous names and garbage codes
-            if (actualText.startsWith('A$') || actualText.includes('$')) {
-                actualText = actualText.split('*').pop() || actualText;
-            }
-            if (actualText.includes(';')) {
-                actualText = actualText.split(';').pop() || actualText;
-            }
+            
+            // 1. Handle dimension measurement placeholder <>
+            // Note: measurement value should be injected before this or handled in caller
 
-            // Robust MText cleanup
-            return actualText
+            // 2. Clear known garbage names but be careful with * blocks (AutoCAD uses them for anonymous blocks/dimensions)
+            if (actualText.startsWith('A$C') && /A\$C[0-9A-F]{8,}/i.test(actualText)) {
+                return '';
+            }
+            // Allow common dimension placeholders and small strings
+            if (actualText === '<>' || actualText.length < 2) return actualText;
+
+            // 3. Robust MText/Regex cleanup 
+            // We want to keep \P as newline, but remove formatting
+            actualText = actualText
                 .replace(/\\P/g, "\n")
                 .replace(/\\L/g, "")
                 .replace(/\\l/g, "")
-                .replace(/\{[^;]*;/g, "")
+                .replace(/\\U\+([0-9A-F]{4})/gi, (match, grp) => String.fromCharCode(parseInt(grp, 16)))
+                .replace(/\{/g, "")
                 .replace(/\}/g, "")
+                // Remove formatting groups like \fArial|b0|i0|c0|p34;
+                .replace(/\\[fACWHQTQ][^;]*;/g, "")
                 .replace(/\\S[^;]*;/g, "")
-                .replace(/\\f[^;]*;/g, "")
-                .replace(/\\A[^;]*;/g, "")
-                .replace(/\\H[^;]*;/g, "")
-                .replace(/\\C[^;]*;/g, "")
-                .replace(/\\W[^;]*;/g, "")
-                .replace(/\\T[^;]*;/g, "")
-                .replace(/\\Q[^;]*;/g, "")
                 .replace(/\\/g, "");
+
+            // 4. Final trim
+            actualText = actualText.trim();
+            
+            // If it's just garbage characters from encoding errors, try to detect
+            if (actualText.length > 50 && !actualText.includes(' ') && /[A-Z0-9]{20,}/.test(actualText)) {
+                return '';
+            }
+
+            return actualText;
         };
 
         const convertEntity = (ent: any): Shape | null => {
@@ -157,21 +167,34 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
             
             // Handle layer as string or object
             let layer = '0';
+            // Resolve Layer Name from various possible properties
             if (typeof ent.layer === 'string') layer = ent.layer;
-            else if (ent.layer && typeof ent.layer.name === 'string') layer = ent.layer.name;
-            else if (typeof ent.layerName === 'string') layer = ent.layerName;
+            else if (ent.layerName && typeof ent.layerName === 'string') layer = ent.layerName;
+            else if (ent.layer && (ent.layer.name || ent.layer.layerName)) layer = ent.layer.name || ent.layer.layerName;
             else if (ent.layer && ent.layer.id) layer = String(ent.layer.id);
             else if (ent.layer_id) layer = String(ent.layer_id);
             
             // Normalize special AutoCAD layers
             const lowerLayer = layer.toLowerCase();
             if (lowerLayer === 'defpoints') layer = 'defpoints';
-            if (layer === '0' || lowerLayer === '0') layer = '0';
+            else if (layer === '0' || lowerLayer === '0') layer = '0';
             
-            // Robust type detection - using includes as suggested
+            // Robust type detection
             const type = (ent.type || ent.objectType || '').toUpperCase().trim();
-            const color = aciToHex(ent.color, ent.true_color || ent.trueColor);
-            const thickness = ent.thickness !== undefined && typeof ent.thickness === 'number' ? ent.thickness : mapLineweight(ent.lineweight || ent.lineWeight);
+            
+            // Use ACI color (1-255), True Color, or ByLayer(256)/ByBlock(0)
+            const rawTrueColor = ent.true_color || ent.trueColor || ent.truecolor || 0;
+            const color = aciToHex(ent.color !== undefined ? ent.color : 256, rawTrueColor !== 0 ? rawTrueColor : undefined);
+            
+            // Map thickness/lineweight
+            let thickness = 0.25;
+            if (ent.thickness !== undefined && typeof ent.thickness === 'number' && ent.thickness > 0) {
+                thickness = ent.thickness;
+            } else {
+                const lw = ent.lineweight !== undefined ? ent.lineweight : (ent.lineWeight !== undefined ? ent.lineWeight : -1);
+                thickness = mapLineweight(lw) || 0.25;
+            }
+
             const lineType = (ent.lineType || ent.linetype || 'bylayer').toLowerCase();
             const lineScale = ent.ltScale || ent.lineTypeScale || 1;
 
@@ -198,12 +221,13 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             return { id: nextId(), type: 'line', layer, color, x1: start.x, y1: start.y, x2: end.x, y2: end.y, thickness, lineType, lineScale } as any;
                         }
                         break;
-                    case type.includes('CIRCLE'):
+                    case type.includes('CIRCLE'): {
                         const center = ent.center || ent.center_point || ent.position;
                         if (center) {
                             return { id: nextId(), type: 'circle', layer, color, x: center.x, y: center.y, radius: ent.radius || 1, thickness, lineType, lineScale } as any;
                         }
                         break;
+                    }
                     case type.includes('ARC'):
                         const arcCenter = ent.center || ent.center_point || ent.position;
                         if (arcCenter) {
@@ -219,13 +243,13 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             }
                         }
                         if (vertices.length > 1) {
-                            return { id: nextId(), type: 'pline', layer, color, points: vertices.map((v: any) => ({ x: v.x, y: v.y, bulge: v.bulge || 0 })), closed: !!(ent.flag & 1) || !!ent.closed || !!ent.isClosed, thickness, lineType, lineScale } as any;
+                            return { id: nextId(), type: 'pline', layer, color, points: vertices.map((v: any) => ({ x: v.x, y: v.y, bulge: v.bulge || 0 })), closed: !!(ent.flag & 1) || !!ent.closed || !!ent.isClosed || !!(ent.flags & 1), thickness, lineType, lineScale } as any;
                         }
                         break;
                     case type.includes('SPLINE'):
                         const splPoints = (ent.controlPoints || ent.fitPoints || ent.vertices || ent.points || []).filter((v: any) => v && isValid(v.x) && isValid(v.y));
                         if (splPoints.length > 1) {
-                            return { id: nextId(), type: 'spline', layer, color, points: splPoints.map((v: any) => ({ x: v.x, y: v.y })), closed: !!ent.closed || !!ent.isClosed, thickness, lineType, lineScale } as any;
+                            return { id: nextId(), type: 'spline', layer, color, points: splPoints.map((v: any) => ({ x: v.x, y: v.y })), closed: !!ent.closed || !!ent.isClosed || !!(ent.flags & 1), thickness, lineType, lineScale } as any;
                         }
                         break;
                     case type.includes('TEXT') || type.includes('MTEXT') || type.includes('ATTRIB') || type.includes('ATTDEF'):
@@ -233,6 +257,10 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                         if (pos && isValid(pos.x) && isValid(pos.y)) {
                             const rawText = ent.text || ent.content || ent.textString || ent.value || ent.string || '';
                             const text = cleanText(rawText);
+                            
+                            // Only skip if truly empty, don't skip [Text] if it's actual content
+                            if (text === '') return null;
+
                             let fontFamily = 'standard';
                             const fMatch = rawText.match(/\\f([^;|]+)[;|]/);
                             if (fMatch) fontFamily = fMatch[1];
@@ -240,10 +268,13 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             
                             const rotation = ent.rotation !== undefined ? ent.rotation : 0;
                             const h = ent.height || ent.textHeight || 2.5;
+                            const width = ent.width || ent.rectWidth || 0;
+                            const attachmentPoint = ent.attachmentPoint || ent.attachment_point || 1;
+                            
                             return { 
-                                id: nextId(), type: (type.includes('MTEXT') || rawText.includes('\P')) ? 'mtext' : 'text', 
+                                id: nextId(), type: (type.includes('MTEXT') || rawText.includes('\\P')) ? 'mtext' : 'text', 
                                 layer, color, x: pos.x, y: pos.y, 
-                                size: h, height: h,
+                                size: h, height: h, width, attachmentPoint,
                                 content: text, text: text, rotation, fontFamily,
                                 underline: /\\L/i.test(rawText), bold: rawText.includes('|b1'), thickness, lineType, lineScale 
                             } as any;
@@ -278,27 +309,94 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                         break;
                     case type.includes('INSERT') || type.includes('BLOCK'):
                         const insPoint = ent.insertPoint || ent.position || ent.insertionPoint;
-                        const bName = ent.blockName || ent.name || ent.block;
-                        if (insPoint && bName) {
-                            const blockId = typeof bName === 'string' ? bName : (bName.name || bName.id || '0');
-                            const scaleX = ent.scale?.x || ent.xScale || 1;
-                            const scaleY = ent.scale?.y || ent.yScale || 1;
-                            return { id: nextId(), type: 'block', layer, color, x: insPoint.x, y: insPoint.y, blockId, scaleX, scaleY, rotation: ent.rotation || 0, name: blockId } as any;
+                        const bItem = ent.blockName || ent.name || ent.block || ent.blockRecord || ent.block_record;
+                        if (insPoint && bItem) {
+                            // Extract block name or ID reliably
+                            let blockId = '';
+                            if (typeof bItem === 'string') {
+                                blockId = bItem;
+                            } else if (bItem && typeof bItem.name === 'string') {
+                                blockId = bItem.name;
+                            } else if (bItem && bItem.id) {
+                                blockId = String(bItem.id);
+                            } else if (ent.block_id) {
+                                blockId = String(ent.block_id);
+                            }
+                            
+                            if (blockId) {
+                                const scaleX = ent.scale?.x !== undefined ? ent.scale.x : (ent.xScale !== undefined ? ent.xScale : 1);
+                                const scaleY = ent.scale?.y !== undefined ? ent.scale.y : (ent.yScale !== undefined ? ent.yScale : 1);
+                                return { id: nextId(), type: 'block', layer, color, x: insPoint.x, y: insPoint.y, blockId, scaleX, scaleY, rotation: ent.rotation || 0, name: blockId } as any;
+                            }
                         }
                         break;
-                    case type.includes('DIMENSION') || type.includes('DIM'):
-                        const dimText = ent.measurement !== undefined ? `${ent.measurement.toFixed(2)}` : (ent.text || 'DIM');
-                        const dimPos = ent.textPosition || ent.text_point || ent.insertionPoint || ent.definitionPoint || ent.defPoint || ent.position;
-                        if (dimPos && isValid(dimPos.x) && isValid(dimPos.y)) {
-                            return { 
-                                id: nextId(), type: 'text', layer, color, 
-                                x: dimPos.x, y: dimPos.y, 
-                                text: dimText, content: dimText, 
-                                size: 2.8, height: 2.8,
-                                rotation: 0, fontFamily: 'standard'
-                            } as any;
+                    case type.includes('DIMENSION') || type.includes('DIM'): {
+                        const measurement = ent.measurement !== undefined ? ent.measurement : 0;
+                        const rawDimText = ent.text || ent.content || ent.textString || '';
+                        let formattedDimText = '';
+                        
+                        if (!rawDimText || rawDimText === '' || rawDimText === '<>') {
+                            formattedDimText = measurement.toFixed(2);
+                        } else {
+                            formattedDimText = cleanText(rawDimText.replace('<>', measurement.toFixed(2)));
                         }
-                        break;
+
+                        // Extract points common to many dimension types
+                        const d1 = ent.definitionPoint || ent.defPoint || ent.point1 || ent.extLine1;
+                        const d2 = ent.definitionPoint2 || ent.defPoint2 || ent.point2 || ent.extLine2;
+                        const d3 = ent.definitionPoint3 || ent.defPoint3 || ent.point3 || ent.dimLinePoint || ent.position;
+                        const d4 = ent.definitionPoint4 || ent.defPoint4 || ent.point4;
+                        const center = ent.center || ent.arcCenter;
+                        
+                        // Fallbacks for dimension points
+                        const x1 = (d1?.x ?? 0), y1 = (d1?.y ?? 0);
+                        const x2 = (d2?.x ?? (ent.insertionPoint?.x ?? x1)), y2 = (d2?.y ?? (ent.insertionPoint?.y ?? y1));
+                        const x3 = (d3?.x ?? x1), y3 = (d3?.y ?? y1);
+                        const x4 = (d4?.x ?? x2), y4 = (d4?.y ?? y2);
+                        const cx = (center?.x ?? 0), cy = (center?.y ?? 0);
+
+                        const dimX = (d3?.x ?? (ent.textPosition?.x ?? (x1 + x2)/2));
+                        const dimY = (d3?.y ?? (ent.textPosition?.y ?? (y1 + y2)/2));
+
+                        // Detect dimension type
+                        let dimType: any = 'aligned';
+                        const dimFlags = ent.dimensionType || ent.dimType || 0;
+                        const actualType = (dimFlags & 0x07); // Lower 3 bits often hold the type
+
+                        if (type.includes('LINEAR') || actualType === 0) dimType = 'linear';
+                        else if (type.includes('ALIGNED') || actualType === 1) dimType = 'aligned';
+                        else if (type.includes('ANG') || actualType === 2 || actualType === 5) dimType = 'angular';
+                        else if (type.includes('DIA') || actualType === 3) dimType = 'diameter';
+                        else if (type.includes('RAD') || actualType === 4) dimType = 'radius';
+                        else if (type.includes('ORD') || actualType === 6) dimType = 'ordinate';
+                        else if (actualType === 0x40) dimType = 'arc'; // Some variants use flags
+                        
+                        const dimH = ent.height || ent.textHeight || 2.5;
+                        
+                        let angle1 = ent.startAngle || 0;
+                        let angle2 = ent.endAngle || 0;
+                        
+                        if (dimType === 'angular' || dimType === 'arc') {
+                            // If angles aren't provided directly, calculate from definition points relative to center
+                            if (ent.angle1 !== undefined) angle1 = ent.angle1;
+                            else if (x1 !== cx || y1 !== cy) angle1 = Math.atan2(y1 - cy, x1 - cx);
+                            
+                            if (ent.angle2 !== undefined) angle2 = ent.angle2;
+                            else if (x2 !== cx || y2 !== cy) angle2 = Math.atan2(y2 - cy, x2 - cx);
+                        }
+
+                        return { 
+                            id: nextId(), type: 'dimension', dimType, 
+                            layer, color, 
+                            x1, y1, x2, y2, x3, y3, x4, y4, cx, cy,
+                            angle1, angle2,
+                            dimX, dimY,
+                            text: formattedDimText,
+                            size: dimH, height: dimH,
+                            rotation: ent.rotation || 0,
+                            thickness, lineType, lineScale
+                        } as any;
+                    }
                 }
             } catch (err) {
                 console.warn(`Extraction error for ${type}:`, err);
@@ -323,14 +421,20 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
             if (lowerName === 'defpoints') name = 'defpoints';
             if (name === '0' || lowerName === '0') name = '0';
 
+            // Extract ACI color - try multiple variants as provided by WASM
+            const aci = l.color !== undefined ? l.color : 
+                        (l.aci !== undefined ? l.aci : 
+                        (l.color_index !== undefined ? l.color_index : 7));
+            
+            const rawLayerTrueColor = l.true_color || l.trueColor || l.truecolor || 0;
+            const lColor = aciToHex(Math.abs(aci), rawLayerTrueColor !== 0 ? rawLayerTrueColor : undefined);
+
             if (name === '0' && layers['0']) {
-                // Update 0 layer if properties found
-                if (l.color !== undefined) layers['0'].color = aciToHex(Math.abs(l.color));
+                layers['0'].color = lColor;
                 return;
             }
             
-            const aci = l.color !== undefined ? l.color : (l.aci !== undefined ? l.aci : 7);
-            const flag = l.flag !== undefined ? l.flag : (l.flags || 0);
+            const flag = l.flag !== undefined ? l.flag : (l.flags !== undefined ? l.flags : (l.status || 0));
             
             // Standard CAD Layer flags: 1=Frozen, 2=Frozen by default, 4=Locked
             layers[name] = { 
@@ -340,8 +444,8 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                 locked: !!(flag & 4), 
                 frozen: !!(flag & 1), 
                 plottable: name.toLowerCase() !== 'defpoints' && (l.is_plottable !== false && l.plot !== false && l.isPlottable !== false), 
-                color: aciToHex(Math.abs(aci)), 
-                thickness: mapLineweight(l.lineweight || l.lineWeight || l.lineweight_enum || l.lineWeight_enum) || 0.25, 
+                color: lColor, 
+                thickness: mapLineweight(l.lineweight !== undefined ? l.lineweight : (l.lineWeight !== undefined ? l.lineWeight : l.lineweight_enum)) || 0.25, 
                 lineType: (l.lineType || l.linetype || l.linestyle || 'continuous').toLowerCase() as any 
             };
         };
@@ -361,7 +465,12 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                 for (let i = 0; i < numRawBlocks; i++) {
                     if (i % 20 === 0) await new Promise(r => setTimeout(r, 0));
                     const b = rawBlocks[i];
-                    const name = b.name || b.id || b.blockName;
+                    let name = b.name || b.id || b.blockName;
+                    if (typeof name !== 'string') {
+                        if (name && name.name) name = name.name;
+                        else if (name && name.id) name = String(name.id);
+                        else name = String(i);
+                    }
                     if (name) {
                         const bEntities = b.entities || b.objects || [];
                         const blockShapes: Shape[] = [];
@@ -372,7 +481,16 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             });
                         }
                         const bp = b.basePoint || b.position || { x: 0, y: 0 };
-                        blocks[name] = { id: name, name: name, basePoint: { x: bp.x || 0, y: bp.y || 0 }, shapes: blockShapes };
+                        const blockDef = { id: name, name: name, basePoint: { x: bp.x || 0, y: bp.y || 0 }, shapes: blockShapes };
+                        blocks[name] = blockDef;
+
+                        // Also store by handle/ID if it exists to allow lookups by numeric reference
+                        if (b.id && String(b.id) !== name) {
+                            blocks[String(b.id)] = blockDef;
+                        }
+                        if (b.handle && String(b.handle) !== name) {
+                            blocks[String(b.handle)] = blockDef;
+                        }
                     }
                 }
             } else {
@@ -390,7 +508,12 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                         });
                     }
                     const bp = b.basePoint || b.position || { x: 0, y: 0 };
-                    blocks[name] = { id: name, name: name, basePoint: { x: bp.x || 0, y: bp.y || 0 }, shapes: blockShapes };
+                    const blockDef = { id: name, name: name, basePoint: { x: bp.x || 0, y: bp.y || 0 }, shapes: blockShapes };
+                    blocks[name] = blockDef;
+                    
+                    // Handle numeric links
+                    if (b.id && String(b.id) !== name) blocks[String(b.id)] = blockDef;
+                    if (b.handle && String(b.handle) !== name) blocks[String(b.handle)] = blockDef;
                 }
             }
         }

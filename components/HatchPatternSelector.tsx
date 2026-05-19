@@ -158,109 +158,92 @@ const HatchPreview: React.FC<{ pattern: string }> = ({ pattern }) => {
     }
 
     ctx.strokeStyle = '#00bcd4';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
+    ctx.lineWidth = 1.5;
+    const size = canvas.width;
+    const spacing = 20;
 
-    const size = 400; // Assuming canvas is 400x400
-    const s = 15; // density
-
-    if (pattern === 'ansi31' || pattern === 'ansi32' || pattern === 'ansi33') {
-        const spacing = pattern === 'ansi31' ? 12 : (pattern === 'ansi32' ? 8 : 6);
-        for (let i = -size; i < size * 2; i += spacing) {
+    if (pattern.startsWith('ansi')) {
+        const s = pattern === 'ansi31' ? 8 : (pattern === 'ansi32' ? 12 : 10);
+        for (let i = -size; i < size * 2; i += s) {
+            ctx.beginPath();
             ctx.moveTo(i, 0); ctx.lineTo(i + size, size);
+            ctx.stroke();
             if (pattern === 'ansi32' || pattern === 'ansi33') {
+                ctx.beginPath();
                 ctx.moveTo(i + (pattern === 'ansi32' ? 3 : 2), 0); 
                 ctx.lineTo(i + (pattern === 'ansi32' ? 3 : 2) + size, size);
+                ctx.stroke();
             }
             if (pattern === 'ansi33') {
-                ctx.moveTo(i + 4, 0); ctx.lineTo(i + 4 + size, size);
+                ctx.beginPath();
+                ctx.moveTo(i + 5, 0); ctx.lineTo(i + 5 + size, size);
+                ctx.stroke();
             }
         }
-    } else if (pattern === 'ansi37') {
-        for (let i = -size; i < size * 2; i += 20) {
-            ctx.moveTo(i, 0); ctx.lineTo(i + size, size);
-            ctx.moveTo(i + 5, 0); ctx.lineTo(i + 5 + size/2, size/2);
+    } else if (pattern === 'brick') {
+        const h = 15;
+        for (let i = 0; i < size; i += h) {
+            ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(size, i); ctx.stroke();
+            let shift = (Math.floor(i/h) % 2 === 0) ? 0 : spacing/2;
+            for(let x = shift; x < size + spacing; x += spacing) {
+                ctx.beginPath(); ctx.moveTo(x, i); ctx.lineTo(x, i + h); ctx.stroke();
+            }
         }
-    } else if (pattern === 'net' || pattern === 'grid' || pattern === 'cross') {
-        const spacing = pattern === 'net' ? 15 : (pattern === 'grid' ? 10 : 20);
-        const angle = pattern === 'net' ? Math.PI/4 : 0;
-        ctx.save();
-        ctx.translate(size/2, size/2);
-        ctx.rotate(angle);
-        ctx.translate(-size/2, -size/2);
-        for (let i = -size; i < size*2; i += spacing) {
-            ctx.moveTo(i, -size); ctx.lineTo(i, size*2);
-            ctx.moveTo(-size, i); ctx.lineTo(size*2, i);
-        }
-        ctx.restore();
     } else if (pattern === 'dots' || pattern === 'sand') {
         ctx.fillStyle = '#00bcd4';
-        const density = pattern === 'dots' ? 15 : 8;
-        for (let i = 0; i < size; i += density) {
-            for (let j = 0; j < size; j += density) {
-                if (Math.random() > 0.4) {
+        const s = pattern === 'dots' ? 10 : 6;
+        for (let i = 0; i < size; i += s) {
+            for (let j = 0; j < size; j += s) {
+                const noise = Math.abs(Math.sin(i * 123 + j * 456));
+                if (noise > (pattern === 'dots' ? 0.3 : 0.6)) {
                     ctx.beginPath();
-                    ctx.arc(i + Math.random()*density, j + Math.random()*density, pattern === 'dots' ? 1.5 : 0.8, 0, Math.PI*2);
+                    ctx.arc(i + noise*s, j + noise*s, pattern === 'dots' ? 1.2 : 0.6, 0, Math.PI*2);
                     ctx.fill();
                 }
             }
         }
-    } else if (pattern === 'brick') {
-        for (let i = 0; i < size; i += 20) {
-            ctx.moveTo(0, i); ctx.lineTo(size, i);
-            let offset = ( (i/20)%2 === 0 ) ? 0 : 20;
-            for(let k = 0; k <= size; k += 40) {
-                ctx.moveTo(k + offset, i); ctx.lineTo(k + offset, i + 20);
-            }
-        }
-    } else if (pattern === 'honey') {
-        const r = 12;
-        const h = r * Math.sin(Math.PI / 3);
-        const w = r * 1.5;
-        for (let j = 0; j < size / h + 2; j++) {
-            for (let i = 0; i < size / w + 2; i++) {
-                const x = i * w;
-                const y = j * h + (i % 2) * h / 2;
-                ctx.moveTo(x + r, y);
-                for (let k = 1; k < 6; k++) {
-                    ctx.lineTo(x + r * Math.cos(k * Math.PI / 3), y + r * Math.sin(k * Math.PI / 3));
-                }
-                ctx.closePath();
-            }
-        }
-    } else if (pattern === 'triang') {
-        const ts = 20;
-        for (let i = 0; i < size; i += ts) {
-            for (let j = 0; j < size; j += ts) {
-                ctx.moveTo(i, j); ctx.lineTo(i + ts/2, j - ts/2); ctx.lineTo(i + ts, j); ctx.closePath();
-            }
-        }
-    } else if (pattern === 'zigzag') {
-        const zs = 15;
-        for (let i = -size; i < size; i += zs) {
-            ctx.moveTo(0, i);
-            for (let x = 0; x < size; x += zs) {
-                ctx.lineTo(x + zs/2, i + zs/2);
-                ctx.lineTo(x + zs, i);
+    } else if (pattern === 'grass') {
+        for (let i = 0; i < size; i += spacing) {
+            for (let j = 0; j < size; j += spacing) {
+                const noiseX = Math.abs(Math.sin(i * 45 + j * 67)) * spacing;
+                const noiseY = Math.abs(Math.cos(i * 45 + j * 67)) * spacing;
+                const px = i + noiseX;
+                const py = j + noiseY;
+                ctx.beginPath();
+                ctx.moveTo(px, py); ctx.lineTo(px, py - 6);
+                ctx.moveTo(px, py); ctx.lineTo(px - 3, py - 4);
+                ctx.moveTo(px, py); ctx.lineTo(px + 3, py - 4);
+                ctx.stroke();
             }
         }
     } else if (pattern === 'stars') {
-        for (let i = 0; i < size; i += 40) {
-            for (let j = 0; j < size; j += 40) {
-                const cx = i + 20, cy = j + 20, r = 8;
-                ctx.moveTo(cx, cy - r);
-                for (let k = 1; k < 10; k++) {
-                    const radius = k % 2 === 0 ? r : r/2;
-                    ctx.lineTo(cx + radius * Math.sin(k * Math.PI / 5), cy - radius * Math.cos(k * Math.PI / 5));
+        for (let i = 0; i < size; i += 30) {
+            for (let j = 0; j < size; j += 30) {
+                const px = i + 15, py = j + 15, r = 5;
+                ctx.beginPath();
+                for (let k = 0; k < 5; k++) {
+                    const a1 = (k * 0.8 * Math.PI) - Math.PI/2;
+                    const a2 = ((k+1) * 0.8 * Math.PI) - Math.PI/2;
+                    ctx.moveTo(px + Math.cos(a1) * r, py + Math.sin(a1) * r);
+                    ctx.lineTo(px + Math.cos(a2) * r, py + Math.sin(a2) * r);
                 }
-                ctx.closePath();
+                ctx.stroke();
             }
         }
     } else {
-        // Fallback: simple diagonal lines
-        for (let i = -size; i < size * 2; i += 15) {
-            ctx.moveTo(i, 0); ctx.lineTo(i + size, size);
+        // Generic diagonal for others
+        const angle = pattern === 'net' || pattern === 'grid' ? 0 : Math.PI/4;
+        ctx.save();
+        ctx.translate(size/2, size/2);
+        ctx.rotate(angle);
+        ctx.translate(-size/2, -size/2);
+        for (let i = -size; i < size * 2; i += 12) {
+            ctx.beginPath(); ctx.moveTo(i, -size); ctx.lineTo(i, size*2); ctx.stroke();
+            if (pattern === 'net' || pattern === 'grid') {
+                ctx.beginPath(); ctx.moveTo(-size, i); ctx.lineTo(size*2, i); ctx.stroke();
+            }
         }
+        ctx.restore();
     }
     
     ctx.stroke();

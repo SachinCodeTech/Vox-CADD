@@ -11,7 +11,7 @@ import {
   Infinity, ArrowUpRight, Rows, Dot, CircleOff, Type, AlignLeft, MousePointer, 
   Zap, Pencil, Activity, Grid3X3, Layers2, Settings2, Info, Lock, Eye, EyeOff,
   Package, Grid2X2, Download, Search, Filter, MonitorPlay,
-  ArrowRightLeft, Radius, Diameter, Settings, History
+  ArrowRightLeft, Radius, Diameter, Settings, History, DraftingCompass
 } from 'lucide-react';
 import { AppSettings } from '../types';
 import { ToolbarCategory } from './App';
@@ -297,6 +297,8 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
             <ToolCircleBtn onClick={() => onSettingChange({ ...settings, showHUD: !settings.showHUD })} icon={<Monitor />} label="HUD" active={settings.showHUD} />
             <ToolCircleBtn onClick={() => onSettingChange({ ...settings, showLineWeights: !settings.showLineWeights })} icon={<Weight />} label="L-WEIGHT" active={settings.showLineWeights} />
             <ToolCircleBtn onClick={() => onAction('toggleLayers')} icon={<Layers2 />} label="LAYERS" active={activePanel === 'layers'} />
+            <ToolCircleBtn onClick={() => onAction('toggleDimStyle')} icon={<Sliders />} label="DIM STYLE" active={activePanel === 'dimstyle'} />
+            <ToolCircleBtn onClick={() => onAction('toggleLineTypes')} icon={<DraftingCompass />} label="LINETYPE" active={activePanel === 'linetypes'} />
             <ToolCircleBtn onClick={() => onSettingChange({ ...settings, showCtbInView: !settings.showCtbInView })} icon={<Zap />} label="SHOW CTB" active={settings.showCtbInView} />
             <ToolCircleBtn onClick={() => onAction('toggleProperties')} icon={<Settings2 />} label="PROPS" active={activePanel === 'properties'} />
             <ToolCircleBtn onClick={() => onAction('toggleDraftingSettings')} icon={<Sliders />} label="DRAFT" active={activePanel === 'drafting'} />

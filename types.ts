@@ -31,6 +31,7 @@ export interface BaseShape {
   fill?: boolean; 
   text?: string;
   height?: number;
+  size?: number;
   opacity?: number;
   isPreview?: boolean; 
   lineScale?: number;
@@ -354,6 +355,9 @@ export interface CtbPlotStyle {
   lineweight: number | 'useObjectLineweight'; // in mm
   lineStyle: LineType | 'useObjectLineStyle';
   screening: number; // 0-100
+  lineEndStyle?: 'BUTT' | 'SQUARE' | 'ROUND' | 'DIAMOND';
+  lineJoinStyle?: 'MITER' | 'BEVEL' | 'ROUND' | 'DIAMOND';
+  fillStyle?: 'SOLID' | 'CHECKERBOARD' | 'CROSSHATCH';
 }
 
 export interface CtbFile {
