@@ -1,0 +1,40 @@
+<svg width="512" height="512" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" floodOpacity="0.5"/>
+    </filter>
+    <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse">
+      <path d="M 10 0 L 0 0 0 10" fill="none" stroke="white" strokeWidth="0.5" strokeOpacity="0.1"/>
+    </pattern>
+  </defs>
+
+  {/* Outer rounded container - Dark */}
+  <rect x="5" y="5" width="90" height="90" rx="20" fill="#0D1117" stroke="#30363D" strokeWidth="1"/>
+  
+  {/* Grid Pattern Overlay */}
+  <rect x="5" y="5" width="90" height="90" rx="20" fill="url(#grid)" />
+
+  {/* Primary Logo Square - Bright Cyan */}
+  <rect x="28" y="28" width="44" height="44" rx="12" fill="#00BCD4" filter="url(#shadow)" />
+
+  {/* Stylized 'V' / Drafting Tool */}
+  <path 
+    d="M38 45 L50 63 L62 45" 
+    stroke="white" 
+    strokeWidth="6" 
+    strokeLinecap="round" 
+    strokeLinejoin="round" 
+  />
+  
+  {/* Top Drafting Line */}
+  <path 
+    d="M40 45 L60 45" 
+    stroke="white" 
+    strokeWidth="1.5" 
+    strokeDasharray="2 2"
+    strokeOpacity="0.8"
+  />
+  
+  {/* Pivot Point */}
+  <circle cx="50" cy="63" r="1.5" fill="#00BCD4" />
+</svg>
