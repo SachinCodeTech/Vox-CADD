@@ -7,7 +7,7 @@ VoxCADD is a high-precision architectural CAD engine with AI-assisted drafting c
 This project follows a streamlined development and deployment workflow:
 1. **App Development**: Developed and iterated in **Google AI Studio**.
 2. **Push Updates**: Code changes are pushed to **GitHub**.
-3. **Backup & Deployment**: GitHub provides source code backup and manages **deployment** (via GitHub Actions).
+3. **Backup & Deployment**: GitHub provides source code backup and manages **deployment** (via GitHub Actions to GitHub Pages or integration with **Vercel**).
 
 ## Features
 

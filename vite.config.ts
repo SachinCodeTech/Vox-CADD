@@ -7,7 +7,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     const isProduction = mode === 'production';
-    const base = env.VITE_BASE_URL || (isProduction ? '/voxcadd-professional/' : '/');
+    const base = env.VITE_BASE_URL || '/';
     
     return {
       base: base,
