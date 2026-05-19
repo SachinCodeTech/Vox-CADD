@@ -182,7 +182,7 @@ export class CommandEngine {
 export class LineCommand implements CADCommand {
     name = "LINE"; public pts: Point[] = []; private segmentIds: string[] = [];
     constructor(public ctx: CommandContext) {}
-    onStart() { this.ctx.setMessage("LINE Specify start point:"); }
+    onStart() { this.ctx.setMessage("LINE Start point:"); }
     onClick(p: Point, snapped: boolean) {
         if (this.pts.length > 0) {
             const anchor = this.pts[this.pts.length - 1];
@@ -191,7 +191,7 @@ export class LineCommand implements CADCommand {
             this.segmentIds.push(id);
             this.pts.push(finalP);
         } else { this.pts.push(p); }
-        this.ctx.setMessage("LINE Specify next point or [Close/Undo]:");
+        this.ctx.setMessage("LINE Next point or [Close/Undo]:");
         this.onMove(p, snapped);
     }
     onInput(text: string): boolean {
@@ -219,11 +219,11 @@ export class LineCommand implements CADCommand {
                     });
                 }
                 this.pts.pop();
-                this.ctx.setMessage("LINE Specify next point or [Close/Undo]:");
+                this.ctx.setMessage("LINE Next point or [Close/Undo]:");
                 return true;
             } else if (this.pts.length === 1) {
                 this.pts = [];
-                this.ctx.setMessage("LINE Specify start point:");
+                this.ctx.setMessage("LINE Start point:");
                 return true;
             }
         }
@@ -260,16 +260,16 @@ export class DoubleLineCommand implements CADCommand {
     private isDrawing = false;
     constructor(public ctx: CommandContext) {}
     onStart() { 
-        this.ctx.setMessage("DLINE Specify start point or [Thickness/Justification]:"); 
+        this.ctx.setMessage("DLINE Start point or [Thickness/Justification]:"); 
     }
     onInput(text: string): boolean {
         const t = text.trim().toLowerCase();
         if (t === 't' || t === 'thickness') {
-            this.ctx.setMessage("DLINE Specify wall thickness:");
+            this.ctx.setMessage("DLINE wall thickness:");
             return true;
         }
         if (t === 'j' || t === 'justification') {
-            this.ctx.setMessage("DLINE Enter justification [Top/Zero/Bottom] <zero>:");
+            this.ctx.setMessage("DLINE justification [Top/Zero/Bottom] <zero>:");
             return true;
         }
         if (t === 'c' || t === 'close') {
@@ -284,18 +284,18 @@ export class DoubleLineCommand implements CADCommand {
         if (t === 'u' || t === 'undo') {
             if (this.pts.length > 0) {
                 this.pts.pop();
-                this.ctx.setMessage(this.pts.length > 0 ? "DLINE Next point:" : "DLINE Specify start point:");
+                this.ctx.setMessage(this.pts.length > 0 ? "DLINE Next point:" : "DLINE Start point:");
                 return true;
             }
         }
         
-        if (t === 'top') { this.justification = 'top'; this.ctx.setMessage("Justification: TOP. Specify start point:"); return true; }
-        if (t === 'zero' || t === 'z') { this.justification = 'zero'; this.ctx.setMessage("Justification: ZERO. Specify start point:"); return true; }
-        if (t === 'bottom' || t === 'b') { this.justification = 'bottom'; this.ctx.setMessage("Justification: BOTTOM. Specify start point:"); return true; }
+        if (t === 'top') { this.justification = 'top'; this.ctx.setMessage("Justification: TOP. Start point:"); return true; }
+        if (t === 'zero' || t === 'z') { this.justification = 'zero'; this.ctx.setMessage("Justification: ZERO. Start point:"); return true; }
+        if (t === 'bottom' || t === 'b') { this.justification = 'bottom'; this.ctx.setMessage("Justification: BOTTOM. Start point:"); return true; }
         
         if (!isNaN(parseFloat(t)) && !t.includes(',') && this.pts.length === 0) {
             this.thickness = parseFloat(t);
-            this.ctx.setMessage("DLINE Thickness set. Specify start point:");
+            this.ctx.setMessage("DLINE Thickness set. Start point:");
             return true;
         }
 
@@ -381,7 +381,7 @@ export class DoubleLineCommand implements CADCommand {
 export class PolyCommand implements CADCommand {
     name = "PLINE"; public pts: Point[] = []; mode: 'line' | 'arc' = 'line'; prevTangent: number | null = null;
     constructor(public ctx: CommandContext) {}
-    onStart() { this.ctx.setMessage("PLINE Specify start point:"); }
+    onStart() { this.ctx.setMessage("PLINE Start point:"); }
     onClick(p: Point, snapped: boolean) {
         if (this.pts.length > 0) {
             const anchor = this.pts[this.pts.length - 1];
@@ -436,8 +436,8 @@ export class PolyCommand implements CADCommand {
     }
     onInput(text: string): boolean {
         const t = text.trim().toLowerCase();
-        if (t === 'a' || t === 'arc') { this.mode = 'arc'; this.ctx.setMessage("PLINE Specify endpoint of arc:"); return true; }
-        if (t === 'l' || t === 'line') { this.mode = 'line'; this.ctx.setMessage("PLINE Specify next point:"); return true; }
+        if (t === 'a' || t === 'arc') { this.mode = 'arc'; this.ctx.setMessage("PLINE endpoint of arc:"); return true; }
+        if (t === 'l' || t === 'line') { this.mode = 'line'; this.ctx.setMessage("PLINE Next point:"); return true; }
         if (t === 'c' || t === 'close') {
             if (this.pts.length > 2) {
                 const style = getStyleSettings(this.ctx);
@@ -462,7 +462,7 @@ export class PolyCommand implements CADCommand {
                         }
                     } else { this.prevTangent = null; }
                 }
-                this.ctx.setMessage(this.pts.length > 0 ? "PLINE Next point:" : "PLINE Specify start point:");
+                this.ctx.setMessage(this.pts.length > 0 ? "PLINE Next point:" : "PLINE Start point:");
                 return true;
             }
         }
@@ -668,7 +668,7 @@ export class CircleCommand implements CADCommand {
     constructor(public ctx: CommandContext) {}
 
     onStart() { 
-        this.ctx.setMessage("CIRCLE Specify center point for circle or [3P/2P/Ttr (tan tan radius)]:"); 
+        this.ctx.setMessage("CIRCLE center point for circle or [3P/2P/Ttr (tan tan radius)]:"); 
     }
 
     onInput(text: string): boolean {
@@ -678,17 +678,17 @@ export class CircleCommand implements CADCommand {
         if (this.pts.length === 0 && this.selectedShapes.length === 0) {
             if (t === '2p') { 
                 this.mode = '2p'; 
-                this.ctx.setMessage("CIRCLE Specify first end point of circle's diameter:"); 
+                this.ctx.setMessage("CIRCLE first end point of circle's diameter:"); 
                 return true; 
             }
             if (t === '3p') { 
                 this.mode = '3p'; 
-                this.ctx.setMessage("CIRCLE Specify first point on circle:"); 
+                this.ctx.setMessage("CIRCLE first point on circle:"); 
                 return true; 
             }
             if (t === 'ttr' || t === 't') {
                 this.mode = 'ttr';
-                this.ctx.setMessage("CIRCLE Specify point on object for first tangent of circle:");
+                this.ctx.setMessage("CIRCLE point on object for first tangent:");
                 return true;
             }
         }
@@ -697,12 +697,12 @@ export class CircleCommand implements CADCommand {
         if (this.mode === 'default' && this.pts.length === 1) {
             if (t === 'd' || t === 'diameter') {
                 this.isDiameter = true;
-                this.ctx.setMessage("CIRCLE Specify diameter of circle:");
+                this.ctx.setMessage("CIRCLE diameter of circle:");
                 return true;
             }
             if (t === 'r' || t === 'radius') {
                 this.isDiameter = false;
-                this.ctx.setMessage("CIRCLE Specify radius of circle or [Diameter]:");
+                this.ctx.setMessage("CIRCLE radius of circle or [Diameter]:");
                 return true;
             }
 
@@ -741,9 +741,9 @@ export class CircleCommand implements CADCommand {
                     this.selectedShapes.push(shape);
                     this.pts.push(p); 
                     if (this.selectedShapes.length === 1) {
-                        this.ctx.setMessage("CIRCLE Specify point on object for second tangent of circle:");
+                        this.ctx.setMessage("CIRCLE point on object for second tangent:");
                     } else if (this.selectedShapes.length === 2) {
-                        this.ctx.setMessage("CIRCLE Specify radius of circle:");
+                        this.ctx.setMessage("CIRCLE radius of circle:");
                     }
                 } else {
                     this.ctx.addLog("No object found at selection point.");
@@ -758,7 +758,7 @@ export class CircleCommand implements CADCommand {
         if (this.mode === '2p') {
             this.pts.push(p);
             if (this.pts.length === 1) {
-                this.ctx.setMessage("CIRCLE Specify second end point of circle's diameter:");
+                this.ctx.setMessage("CIRCLE second end point of circle's diameter:");
             } else {
                 const center = { x: (this.pts[0].x + this.pts[1].x) / 2, y: (this.pts[0].y + this.pts[1].y) / 2 };
                 this.radius = distance(this.pts[0], this.pts[1]) / 2;
@@ -771,9 +771,9 @@ export class CircleCommand implements CADCommand {
         if (this.mode === '3p') {
             this.pts.push(p);
             if (this.pts.length === 1) {
-                this.ctx.setMessage("CIRCLE Specify second point on circle:");
+                this.ctx.setMessage("CIRCLE second point on circle:");
             } else if (this.pts.length === 2) {
-                this.ctx.setMessage("CIRCLE Specify third point on circle:");
+                this.ctx.setMessage("CIRCLE third point on circle:");
             } else {
                 const circ = getCircleFrom3Points(this.pts[0], this.pts[1], this.pts[2]);
                 if (circ) {
@@ -791,7 +791,7 @@ export class CircleCommand implements CADCommand {
         if (this.mode === 'default') {
             if (this.pts.length === 0) {
                 this.pts.push(p);
-                this.ctx.setMessage("CIRCLE Specify radius of circle or [Diameter]:");
+                this.ctx.setMessage("CIRCLE radius of circle or [Diameter]:");
             } else {
                 const r = distance(this.pts[0], p);
                 this.radius = this.isDiameter ? r / 2 : r;

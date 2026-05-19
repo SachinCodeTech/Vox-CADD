@@ -367,6 +367,11 @@ export interface CtbFile {
   styles: Record<number, CtbPlotStyle>;
 }
 
+export interface NamedView extends ViewState {
+  id: string;
+  name: string;
+}
+
 export interface AppSettings {
   ortho: boolean;
   snap: boolean;
@@ -410,6 +415,8 @@ export interface AppSettings {
   activeCtbId?: string;
   ctbFiles?: Record<string, CtbFile>;
   showCtbInView?: boolean;
+  aiSuggestionsEnabled?: boolean;
+  namedViews?: NamedView[];
 }
 
 export interface VoxProject {
@@ -423,6 +430,7 @@ export interface VoxProject {
   entities: Shape[];
   layouts: Record<string, LayoutDefinition>;
   bounds: { xMin: number; yMin: number; xMax: number; yMax: number };
+  namedViews?: NamedView[];
   stats?: {
     total: number;
     unsupported: number;

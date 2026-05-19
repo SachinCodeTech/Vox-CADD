@@ -2502,9 +2502,19 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
 
   useEffect(() => { redraw(); }, [redraw, view, isViewportActive, layers, layerConfig, selectedIds, highlightIds, settings, previewShapes, activeTab]);
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const x = e.clientX, y = e.clientY;
+    if (isCommandActive) {
+      onAction?.('enter');
+    } else {
+      onObjectContextMenu?.(x, y);
+    }
+  };
+
   return (
     <div className="w-full h-full overflow-hidden bg-[#0a0a0c] touch-none relative">
-        <canvas ref={canvasRef} className="w-full h-full outline-none select-none touch-none" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onContextMenu={e => e.preventDefault()} />
+        <canvas ref={canvasRef} className="w-full h-full outline-none select-none touch-none" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onContextMenu={handleContextMenu} />
         
         {/* Dynamic Input Floating UI */}
         {isCommandActive && (
@@ -2517,7 +2527,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
             }}
           >
             {/* Prompt */}
-            {activePrompt && (
+            {activePrompt && !activePrompt.toLowerCase().includes('specify point') && (
               <div className="bg-black/80 backdrop-blur-md border border-white/10 rounded px-2 py-0.5 whitespace-nowrap shadow-xl">
                  <span className="text-[9px] font-mono text-neutral-400 leading-none">{activePrompt.split(':')[0]}</span>
               </div>
@@ -2527,7 +2537,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
             <div className="flex items-center gap-1.5">
                <div className="bg-[#00bcd4]/95 border border-[#00bcd4] rounded px-2 py-0.5 shadow-[0_0_15px_rgba(0,188,212,0.4)] min-w-[40px] flex items-center justify-center">
                   <span className="text-[10px] font-mono text-black font-bold tracking-tight">
-                    {commandInput || "SPECIFY_POINT"}
+                    {commandInput || "..."}
                     {commandInput && <span className="animate-pulse ml-0.5">_</span>}
                   </span>
                </div>
@@ -2535,13 +2545,13 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                {basePoint && (
                  <div className="bg-neutral-900/90 border border-white/5 rounded px-2 py-0.5 backdrop-blur-sm">
                     <span className="text-[9px] font-mono text-neutral-300">
-                      {distance(basePoint, worldCursorRef.current).toFixed(1)} {" < "} {(Math.atan2(worldCursorRef.current.y - basePoint.y, worldCursorRef.current.x - basePoint.x) * 180 / Math.PI + 360) % 360}°
+                        {formatLength(distance(basePoint, worldCursorRef.current), settings)} {" < "} {(Math.atan2(worldCursorRef.current.y - basePoint.y, worldCursorRef.current.x - basePoint.x) * 180 / Math.PI + 360) % 360}°
                     </span>
                  </div>
                )}
             </div>
 
-            {aiRecommendation && (
+            {settings.aiSuggestionsEnabled && aiRecommendation && (
               <div className="bg-indigo-500/90 backdrop-blur-md border border-indigo-400/50 rounded px-2 py-0.5 shadow-xl animate-in fade-in slide-in-from-left-2 duration-300 flex items-center gap-1.5">
                  <div className="w-1 h-1 rounded-full bg-white animate-pulse" />
                  <span className="text-[8px] font-black text-white uppercase tracking-widest">

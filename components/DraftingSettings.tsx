@@ -172,20 +172,27 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
 
                   <div className="space-y-4">
                     <label className="text-[8px] font-black text-neutral-600 uppercase tracking-[0.25em] px-1">Visibility Toggles</label>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                        <button 
                         onClick={() => onSettingsChange({ showLineWeights: !settings.showLineWeights })} 
-                        className={`p-5 rounded-2xl border flex flex-col items-center gap-3 transition-all ${settings.showLineWeights ? 'bg-cyan-500/5 border-cyan-500/10 text-cyan-400' : 'bg-neutral-900/50 border-white/5 text-neutral-600'}`}
+                        className={`p-3.5 rounded-2xl border flex flex-col items-center gap-2 transition-all ${settings.showLineWeights ? 'bg-cyan-500/5 border-cyan-500/10 text-cyan-400' : 'bg-neutral-900/50 border-white/5 text-neutral-600'}`}
                        >
-                          <Ruler size={20} />
-                          <span className="text-[8px] font-black uppercase tracking-widest">Weight</span>
+                          <Ruler size={16} />
+                          <span className="text-[7px] font-black uppercase tracking-widest">Weight</span>
                        </button>
                        <button 
                         onClick={() => onSettingsChange({ showHUD: !settings.showHUD })} 
-                        className={`p-5 rounded-2xl border flex flex-col items-center gap-3 transition-all ${settings.showHUD ? 'bg-cyan-500/5 border-cyan-500/10 text-cyan-400' : 'bg-neutral-900/50 border-white/5 text-neutral-600'}`}
+                        className={`p-3.5 rounded-2xl border flex flex-col items-center gap-2 transition-all ${settings.showHUD ? 'bg-cyan-500/5 border-cyan-500/10 text-cyan-400' : 'bg-neutral-900/50 border-white/5 text-neutral-600'}`}
                        >
-                          <Settings2 size={20} />
-                          <span className="text-[8px] font-black uppercase tracking-widest">HUD</span>
+                          <Settings2 size={16} />
+                          <span className="text-[7px] font-black uppercase tracking-widest">HUD</span>
+                       </button>
+                       <button 
+                        onClick={() => onSettingsChange({ aiSuggestionsEnabled: !settings.aiSuggestionsEnabled })} 
+                        className={`p-3.5 rounded-2xl border flex flex-col items-center gap-2 transition-all ${settings.aiSuggestionsEnabled ? 'bg-indigo-500/5 border-indigo-500/10 text-indigo-400' : 'bg-neutral-900/50 border-white/5 text-neutral-600'}`}
+                       >
+                          <Zap size={16} className={settings.aiSuggestionsEnabled ? "animate-pulse" : ""} />
+                          <span className="text-[7px] font-black uppercase tracking-widest">AI SUGGEST</span>
                        </button>
                     </div>
                  </div>

@@ -44,11 +44,12 @@ import {
   SelectAllCommand, CopyClipCommand, CutClipCommand, PasteClipCommand, SplineCommand, SketchCommand, StretchCommand, SelectCommand,
   ArrayCommand, BlockCommand, InsertCommand, FilterCommand, FindCommand, ViewportCommand, LayoutCommand, GripEditCommand, ImportCommand
 } from '../services/commandEngine';
-import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType, BlockDefinition, LayoutDefinition, LayoutViewport, LineTypeDefinition } from '../types';
-import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive, AlertTriangle, Cpu, Move, Copy, Maximize2, FlipHorizontal, Trash2, History, Palette, Check, Settings2, Terminal } from 'lucide-react';
+import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType, BlockDefinition, LayoutDefinition, LayoutViewport, LineTypeDefinition, NamedView } from '../types';
+import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive, AlertTriangle, Cpu, Move, Copy, Maximize2, FlipHorizontal, Trash2, History, Palette, Check, Settings2, Terminal, Camera, Zap } from 'lucide-react';
 
 import VoxIcon from './VoxIcon';
 import ImportSummaryDialog from './ImportSummaryDialog';
+import ViewManager from './ViewManager';
 import { storageService } from '../services/storageService';
 import { cloudStorageService } from '../services/cloudStorageService';
 import { trackFileMetadata, syncUserMetadata, onAuthChange, logAppEvent } from '../services/firebaseService';
@@ -110,6 +111,7 @@ const INITIAL_SETTINGS: AppSettings = {
   },
   activeCtbId: 'voxcadd',
   showCtbInView: false,
+  aiSuggestionsEnabled: true,
   ctbFiles: {
     'voxcadd': voxCtb,
     'monochrome': monoCtb
@@ -123,7 +125,7 @@ const INITIAL_LAYERS_CONFIG: Record<string, LayerConfig> = {
 };
 
 export type ToolbarCategory = 'Draw' | 'Modify' | 'Anno' | 'View' | 'Tools' | 'History' | 'Edit';
-type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 'file' | 'mainmenu' | 'drawing_props' | 'help' | 'about' | 'privacy' | 'new_file' | 'dimstyle' | 'linetypes';
+type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 'file' | 'mainmenu' | 'drawing_props' | 'help' | 'about' | 'privacy' | 'new_file' | 'dimstyle' | 'linetypes' | 'views';
 
 const STORAGE_PREFIX = 'voxcadd_file_v1_';
 const REGISTRY_KEY = 'voxcadd_recent_files';
@@ -1291,6 +1293,44 @@ const App: React.FC = () => {
         } else {
             setLogMessage("VOX_Z-P: NO_HISTORY_DATA");
         }
+        break;
+      }
+      case 'toggleViews': setActivePanel(activePanel === 'views' ? 'none' : 'views'); break;
+      case 'saveView': {
+        const name = payload;
+        const newView: NamedView = {
+          id: generateId(),
+          name,
+          ...view
+        };
+        setSettings(s => ({
+          ...s,
+          namedViews: [...(s.namedViews || []), newView]
+        }));
+        setLogMessage(`VIEW_SAVED: ${name.toUpperCase()}`);
+        break;
+      }
+      case 'recallView': {
+        const namedView = payload as NamedView;
+        setView({
+          scale: namedView.scale,
+          originX: namedView.originX,
+          originY: namedView.originY
+        });
+        setLogMessage(`VIEW_RECALLED: ${namedView.name.toUpperCase()}`);
+        break;
+      }
+      case 'deleteView': {
+        const viewId = payload;
+        setSettings(s => ({
+          ...s,
+          namedViews: (s.namedViews || []).filter(v => v.id !== viewId)
+        }));
+        setLogMessage("VIEW_DELETED");
+        break;
+      }
+      case 'commandContextMenu': {
+        // No longer used, as right-click now acts as Enter during commands
         break;
       }
       case 'setUnits': 
@@ -2476,6 +2516,7 @@ const App: React.FC = () => {
   const sidebarButtons = [
     { id: 'drafting', icon: Target, action: 'toggleDraftingSettings', activeOn: 'drafting' },
     { id: 'layers', icon: Layers, action: 'toggleLayers', activeOn: 'layers' },
+    { id: 'views', icon: Camera, action: 'toggleViews', activeOn: 'views' },
     { id: 'drawing_props', icon: FileText, action: 'toggleDrawingProps', activeOn: 'drawing_props' },
     { id: 'properties', icon: Sliders, action: 'toggleProperties', activeOn: 'properties' },
     { id: 'calculator', icon: Calculator, action: 'toggleCalculator', activeOn: 'calculator' }
@@ -2929,6 +2970,33 @@ const App: React.FC = () => {
             </motion.div>
           )}
 
+          {activePanel === 'views' && (
+              <motion.div 
+                key="panel-views-overlay"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[1000] flex items-center justify-center sm:p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+              >
+                  <motion.div 
+                    initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                    animate={{ scale: 1, opacity: 1, y: 0 }}
+                    exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                    className="pointer-events-auto w-full h-full sm:h-auto sm:w-auto flex items-center justify-center p-2 sm:p-0"
+                  >
+                    <ViewManager 
+                      settings={settings}
+                      activeTab={activeTab}
+                      currentView={view}
+                      onRecallView={(v) => handleAction('recallView', v)}
+                      onSaveView={(name) => handleAction('saveView', name)}
+                      onDeleteView={(id) => handleAction('deleteView', id)}
+                      onClose={() => setActivePanel('none')}
+                    />
+                  </motion.div>
+              </motion.div>
+          )}
+
           {activePanel === 'properties' && (
              <motion.div 
                key="panel-properties-overlay"
@@ -3316,29 +3384,48 @@ const App: React.FC = () => {
               <div className="text-[7px] text-neutral-500 font-mono">{selectedIds.length} ITEMS</div>
             </div>
             
-            <button onClick={() => { executeCommand('m'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
-              <Move className="text-cyan-500" size={14} /> Move
+            <div className="grid grid-cols-2 gap-1 mb-1">
+              <button onClick={() => { executeCommand('m'); setObjectContextMenu(null); }} className="px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-cyan-500/10 hover:text-cyan-400 transition-all font-black uppercase flex flex-col items-center gap-1.5 border border-transparent hover:border-cyan-500/20 active:scale-95">
+                <Move size={14} /> <span>Move</span>
+              </button>
+              <button onClick={() => { executeCommand('co'); setObjectContextMenu(null); }} className="px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-cyan-500/10 hover:text-cyan-400 transition-all font-black uppercase flex flex-col items-center gap-1.5 border border-transparent hover:border-cyan-500/20 active:scale-95">
+                <Copy size={14} /> <span>Copy</span>
+              </button>
+              <button onClick={() => { executeCommand('ro'); setObjectContextMenu(null); }} className="px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-cyan-500/10 hover:text-cyan-400 transition-all font-black uppercase flex flex-col items-center gap-1.5 border border-transparent hover:border-cyan-500/20 active:scale-95">
+                <RotateCw size={14} /> <span>Rotate</span>
+              </button>
+              <button onClick={() => { executeCommand('sc'); setObjectContextMenu(null); }} className="px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-cyan-500/10 hover:text-cyan-400 transition-all font-black uppercase flex flex-col items-center gap-1.5 border border-transparent hover:border-cyan-500/20 active:scale-95">
+                <Maximize2 size={14} /> <span>Scale</span>
+              </button>
+            </div>
+
+            <div className="h-px bg-white/5 my-1 mx-2" />
+
+            <button onClick={() => { executeCommand('join'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center justify-between active:scale-95 group">
+              <div className="flex items-center gap-3"><Weight size={14} className="text-indigo-400" /> Join Entities</div>
+              <span className="text-[7px] text-neutral-600 group-hover:text-neutral-400">J</span>
             </button>
-            <button onClick={() => { executeCommand('co'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
-              <Copy className="text-cyan-500" size={14} /> Copy
+            <button onClick={() => { executeCommand('explode'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center justify-between active:scale-95 group">
+              <div className="flex items-center gap-3"><Zap size={14} className="text-orange-400" /> Explode</div>
+              <span className="text-[7px] text-neutral-600 group-hover:text-neutral-400">X</span>
             </button>
-            <button onClick={() => { executeCommand('ro'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
-              <RotateCw className="text-cyan-500" size={14} /> Rotate
+
+            <div className="h-px bg-white/5 my-1 mx-2" />
+            
+            <button onClick={() => { setActivePanel('properties'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <Sliders size={14} className="text-amber-400" /> Quick Properties
             </button>
-            <button onClick={() => { executeCommand('sc'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
-              <Maximize2 className="text-cyan-500" size={14} /> Scale
-            </button>
-            <button onClick={() => { executeCommand('mi'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
-              <FlipHorizontal className="text-cyan-500" size={14} /> Mirror
+            <button onClick={() => { setActivePanel('layers'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <Layers size={14} className="text-blue-400" /> Layer Setup
             </button>
             
-            <div className="h-px bg-white/5 my-1" />
+            <div className="h-px bg-white/5 my-1 mx-2" />
             
-            <button onClick={() => { executeCommand('e'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-red-500/80 hover:bg-red-500 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
-              <Trash2 size={14} /> Erase
+            <button onClick={() => { executeCommand('e'); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-red-500/80 hover:bg-red-500 hover:text-white transition-all font-black uppercase flex items-center gap-3 active:scale-95">
+              <Trash2 size={14} /> Erase Selection
             </button>
-            <button onClick={() => { setSelectedIds([]); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-500 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
-              <X size={14} /> Deselect All
+            <button onClick={() => { setSelectedIds([]); setObjectContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-600 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+              <X size={14} /> Clear Selection
             </button>
           </div>
         </>
