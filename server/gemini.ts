@@ -80,48 +80,91 @@ geminiRouter.post("/command", async (req, res) => {
     const contents = history ? [...history.slice(-6), { role: 'user', parts: userParts }] : [{ role: 'user', parts: userParts }];
 
     const result = await (async () => {
-      let retries = 0;
-      const maxRetries = 5;
-      const baseDelay = 1000;
-      
-      while (true) {
-        try {
-          return await ai.models.generateContent({
-            model: "gemini-2.0-flash", // Stable choice for high-precision architectural tasks
-            contents,
-            config: {
-              systemInstruction: SYSTEM_INSTRUCTION,
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  explanation: { type: Type.STRING },
-                  commands: { type: Type.ARRAY, items: { type: Type.STRING } }
+      const MODELS_TO_TRY = [
+        "gemini-3.5-flash",        // Primary - modern standard flash model, active on free tiers
+        "gemini-flash-latest",     // Dynamic alias pointing to the latest version of flash
+        "gemini-2.0-flash",        // Previous stable model
+      ];
+
+      let generatedResult: any = null;
+      let fallbackIndex = 0;
+      let lastError: any = null;
+
+      while (fallbackIndex < MODELS_TO_TRY.length) {
+        const activeModel = MODELS_TO_TRY[fallbackIndex];
+        let retries = 0;
+        const maxRetries = 2; // Keep retries per model low to fall back quickly
+        const baseDelay = 1000;
+        let modelSucceeded = false;
+
+        console.log(`[VoxCADD AI Architect] Attempting to generate content with model: ${activeModel}...`);
+
+        while (retries < maxRetries) {
+          try {
+            generatedResult = await ai.models.generateContent({
+              model: activeModel,
+              contents,
+              config: {
+                systemInstruction: SYSTEM_INSTRUCTION,
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    explanation: { type: Type.STRING },
+                    commands: { type: Type.ARRAY, items: { type: Type.STRING } }
+                  },
+                  required: ["explanation", "commands"]
                 },
-                required: ["explanation", "commands"]
-              },
-              temperature: 0.1,
-              tools: [{ googleSearch: {} }]
+                temperature: 0.1,
+                tools: [{ googleSearch: {} }]
+              }
+            });
+            modelSucceeded = true;
+            break; // Succeeded! Break the retry loop
+          } catch (err: any) {
+            lastError = err;
+            const status = err?.status || err?.code || 0;
+            const errMsg = err?.message || JSON.stringify(err);
+            const isRateLimit = status === 429 || errMsg.includes('429') || errMsg.includes('QUOTA_EXHAUSTED') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota exceeded');
+            const isLimitZero = errMsg.includes('limit: 0') || errMsg.includes('limit:0') || errMsg.includes('unsupported') || errMsg.includes('not found') || errMsg.includes('not support');
+
+            if (isLimitZero) {
+              console.warn(`[VoxCADD AI Architect] Model ${activeModel} has zero quota limit (limit: 0) or is unsupported. Skipping to next model...`);
+              break; // Break the retry loop for this model, fallback to next model immediately
             }
-          });
-        } catch (err: any) {
-          const status = err?.status || err?.code || 0;
-          const errMsg = err?.message || JSON.stringify(err);
-          const isRateLimit = status === 429 || errMsg.includes('429') || errMsg.includes('QUOTA_EXHAUSTED') || errMsg.includes('RESOURCE_EXHAUSTED');
-          
-          if (isRateLimit && retries < maxRetries) {
-            retries++;
-            // Exponential backoff with jitter
-            const delay = baseDelay * Math.pow(2, retries) + Math.random() * 1000;
-            console.warn(`[VoxCADD AI Architect] Rate Limit (429). Retry ${retries}/${maxRetries} in ${Math.round(delay)}ms...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-            continue;
+
+            if (isRateLimit) {
+              retries++;
+              if (retries >= maxRetries) {
+                console.warn(`[VoxCADD AI Architect] Model ${activeModel} rate limited after max retries. Moving to next model...`);
+                break;
+              }
+              // Exponential backoff with jitter
+              const delay = baseDelay * Math.pow(2, retries) + Math.random() * 500;
+              console.warn(`[VoxCADD AI Architect] Rate Limit (429) for ${activeModel}. Retry ${retries}/${maxRetries} in ${Math.round(delay)}ms...`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+              continue;
+            }
+
+            console.warn(`[VoxCADD AI Architect] Unexpected error on ${activeModel}:`, errMsg);
+            break; // Fallback to next model
           }
-          
-          console.error("[VoxCADD AI Architect] Critical Model Error:", errMsg);
-          throw err;
         }
+
+        if (modelSucceeded && generatedResult) {
+          console.log(`[VoxCADD AI Architect] Successfully generated content using model: ${activeModel}`);
+          break; // Succeeded! Break the outer loop
+        }
+
+        fallbackIndex++;
       }
+
+      if (!generatedResult) {
+        const errorMsg = lastError?.message || JSON.stringify(lastError) || "Unknown Error";
+        throw new Error(`Exhausted all available Gemini models (${MODELS_TO_TRY.join(', ')}). Your API Key might have exceeded its daily limit or lacks general access. Details: ${errorMsg}`);
+      }
+
+      return generatedResult;
     })();
 
     const responseText = result.text || "{}";

@@ -10,6 +10,7 @@ import MenuBar from './MenuBar';
 import PropertiesPanel from './PropertiesPanel';
 import CalculatorPanel from './CalculatorPanel';
 import DraftingSettings from './DraftingSettings';
+import AiDraftingPanel from './AiDraftingPanel';
 import DrawingProperties from './DrawingProperties';
 import InfoPanel from './InfoPanel';
 import GlobalCommandPalette from './GlobalCommandPalette';
@@ -30,7 +31,7 @@ import { Capacitor } from '@capacitor/core';
 import { generateId, hitTestGrip, getAllShapesBounds, getShapeBounds, scaleShape } from '../services/cadService';
 import { getCommandFromAI, connectLiveAgent } from '../services/geminiService';
 import { shapesToDXF, dxfToProject } from '../services/dxfService';
-import { shapesToVox, voxToProject, createEmptyVoxProject } from '../services/voxService';
+import { shapesToVox, voxToProject, createEmptyVoxProject, calculateVoxProjectStats } from '../services/voxService';
 import { dwgToProject } from '../services/DwgService';
 import { 
   CADCommand, CommandEngine, LineCommand, DoubleLineCommand, CircleCommand, RectCommand, PolyCommand, 
@@ -45,7 +46,7 @@ import {
   ArrayCommand, BlockCommand, InsertCommand, FilterCommand, FindCommand, ViewportCommand, LayoutCommand, GripEditCommand, ImportCommand
 } from '../services/commandEngine';
 import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType, BlockDefinition, LayoutDefinition, LayoutViewport, LineTypeDefinition, NamedView } from '../types';
-import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive, AlertTriangle, Cpu, Move, Copy, Maximize2, FlipHorizontal, Trash2, History, Palette, Check, Settings2, Terminal, Camera } from 'lucide-react';
+import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive, AlertTriangle, Cpu, Move, Copy, Maximize2, FlipHorizontal, Trash2, History, Palette, Check, Settings2, Terminal, Camera, Sparkles } from 'lucide-react';
 
 import VoxIcon from './VoxIcon';
 import ImportSummaryDialog from './ImportSummaryDialog';
@@ -125,7 +126,7 @@ const INITIAL_LAYERS_CONFIG: Record<string, LayerConfig> = {
 };
 
 export type ToolbarCategory = 'Draw' | 'Modify' | 'Anno' | 'View' | 'Tools' | 'History' | 'Edit';
-type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 'file' | 'mainmenu' | 'drawing_props' | 'help' | 'about' | 'privacy' | 'new_file' | 'dimstyle' | 'linetypes' | 'views';
+type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 'file' | 'mainmenu' | 'drawing_props' | 'help' | 'about' | 'privacy' | 'new_file' | 'dimstyle' | 'linetypes' | 'views' | 'ai_drafting';
 
 const STORAGE_PREFIX = 'voxcadd_file_v1_';
 const REGISTRY_KEY = 'voxcadd_recent_files';
@@ -207,6 +208,8 @@ const App: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [objectContextMenu, setObjectContextMenu] = useState<{ x: number, y: number } | null>(null);
   const [commandContextMenu, setCommandContextMenu] = useState<{ x: number, y: number } | null>(null);
+  const [lockedMousePoint, setLockedMousePoint] = useState<Point | null>(null);
+  const [contextDistanceInput, setContextDistanceInput] = useState('');
   const [commandInput, setCommandInput] = useState('');
   const [isLiveActive, setIsLiveActive] = useState(false);
   const [commandPrompt, setCommandPrompt] = useState<string>("COMMAND:");
@@ -276,7 +279,7 @@ const App: React.FC = () => {
                         
                         setLoadingStatus(`COMPILING ${finalExt.substring(1).toUpperCase()} DATA...`);
                         
-                        let content: string | Blob;
+                        let content: string | Blob | Uint8Array;
                         if (isPdfExport) {
                             const res = await fetch(dataUrl);
                             content = await res.blob();
@@ -679,6 +682,7 @@ const App: React.FC = () => {
   const layerConfigRef = useRef(layerConfig);
   const selectedIdsRef = useRef(selectedIds);
   const liveSessionRef = useRef<any>(null);
+  const recognitionRef = useRef<any>(null);
   const canvasHandleRef = useRef<CADCanvasHandle>(null);
 
   const [viewHistory, setViewHistory] = useState<ViewState[]>([]);
@@ -808,7 +812,8 @@ const App: React.FC = () => {
       const file = e.dataTransfer?.files[0];
       if (file) {
         const isDwg = file.name.toLowerCase().endsWith('.dwg');
-        const content = isDwg ? await file.arrayBuffer() : await file.text();
+        const isVox = file.name.toLowerCase().endsWith('.vox');
+        const content = (isDwg || isVox) ? await file.arrayBuffer() : await file.text();
         handleOpenFile(file.name, content, "external");
       }
     };
@@ -823,7 +828,8 @@ const App: React.FC = () => {
           setFileHandle(fileHandle);
           const file = await fileHandle.getFile();
           const isDwg = file.name.toLowerCase().endsWith('.dwg');
-          const content = isDwg ? await file.arrayBuffer() : await file.text();
+          const isVox = file.name.toLowerCase().endsWith('.vox');
+          const content = (isDwg || isVox) ? await file.arrayBuffer() : await file.text();
           handleOpenFile(file.name, content, "device/storage");
         }
       });
@@ -868,7 +874,7 @@ const App: React.FC = () => {
             }
             project = await dxfToProject(content, settingsRef.current);
         } else if (isVox) {
-            if (typeof content !== 'string') {
+            if (typeof content !== 'string' && !(content instanceof ArrayBuffer)) {
                 setLoadingFile(false);
                 return;
             }
@@ -880,8 +886,11 @@ const App: React.FC = () => {
             }
             
             // Fallback for DXF-formatted .vox files (legacy or renamed)
-            if (!project && (content.trim().startsWith('999') || content.includes('SECTION'))) {
-                project = await dxfToProject(content, settingsRef.current);
+            if (!project && typeof content === 'string') {
+                const trimmed = content.trim();
+                if (trimmed.startsWith('999') || trimmed.includes('SECTION')) {
+                    project = await dxfToProject(content, settingsRef.current);
+                }
             }
         }
 
@@ -1148,6 +1157,7 @@ const App: React.FC = () => {
       case 'toggleMainMenu': setActivePanel(activePanel === 'mainmenu' ? 'none' : 'mainmenu'); break;
       case 'toggleDrawingProps': setActivePanel(activePanel === 'drawing_props' ? 'none' : 'drawing_props'); break;
       case 'toggleHelp': setActivePanel(activePanel === 'help' ? 'none' : 'help'); break;
+      case 'toggleAiDrafting': setActivePanel(activePanel === 'ai_drafting' ? 'none' : 'ai_drafting'); break;
       case 'interpret_sketch': {
         const triggerSketchInterpretation = async (providedImage?: string) => {
            setIsAiThinking(true);
@@ -1332,6 +1342,15 @@ const App: React.FC = () => {
       }
       case 'commandContextMenu': {
         setCommandContextMenu(payload);
+        if (payload && payload.wp) {
+          setLockedMousePoint(payload.wp);
+          if (engineRef.current) {
+            engineRef.current.ctx.lastMousePoint = { ...payload.wp };
+            engineRef.current.move(payload.wp, false);
+          }
+        } else if (engineRef.current && engineRef.current.ctx.lastMousePoint) {
+          setLockedMousePoint({ ...engineRef.current.ctx.lastMousePoint });
+        }
         break;
       }
       case 'setUnits': 
@@ -1364,7 +1383,8 @@ const App: React.FC = () => {
             const file = e.target.files[0];
             if (!file) { setLogMessage("OPEN_CANCELLED"); return; }
             const isDwg = file.name.toLowerCase().endsWith('.dwg');
-            const content = isDwg ? await file.arrayBuffer() : await file.text();
+            const isVox = file.name.toLowerCase().endsWith('.vox');
+            const content = (isDwg || isVox) ? await file.arrayBuffer() : await file.text();
             handleOpenFile(file.name, content, "external/sd-card");
         };
         openInput.click();
@@ -1609,7 +1629,7 @@ const App: React.FC = () => {
             setLoadingStatus("ENCODING GEOMETRY...");
             await new Promise(r => setTimeout(r, 50));
 
-            let content: string = "";
+            let content: string | Uint8Array = "";
             if (isDxfExport) {
                 content = shapesToDXF(Object.values(layersRef.current).flat() as Shape[], layerConfigRef.current, settingsRef.current, blocksRef.current);
             } else {
@@ -1799,76 +1819,6 @@ const App: React.FC = () => {
     }
   };
 
-  // Global Keyboard Shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.ctrlKey || e.metaKey) {
-            switch(e.key.toLowerCase()) {
-                case 's':
-                    e.preventDefault();
-                    if (e.shiftKey) handleAction('saveAs');
-                    else handleAction('save');
-                    break;
-                case 'o':
-                    e.preventDefault();
-                    handleAction('open');
-                    break;
-                case 'n':
-                    e.preventDefault();
-                    handleAction('new');
-                    break;
-                case 'z':
-                    e.preventDefault();
-                    if (e.shiftKey) handleAction('redo');
-                    else handleAction('undo');
-                    break;
-                case 'y':
-                    if (!e.shiftKey) {
-                        e.preventDefault();
-                        handleAction('redo');
-                    }
-                    break;
-                case 'a':
-                    e.preventDefault();
-                    handleAction('selectAll');
-                    break;
-            }
-        } else {
-            switch(e.key) {
-                case 'F3':
-                    e.preventDefault();
-                    setSettings(prev => ({ ...prev, snap: !prev.snap }));
-                    setLogMessage(settingsRef.current.snap ? "OSNAP_OFF" : "OSNAP_ON");
-                    break;
-                case 'F7':
-                    e.preventDefault();
-                    setSettings(prev => ({ ...prev, grid: !prev.grid }));
-                    setLogMessage(settingsRef.current.grid ? "GRID_OFF" : "GRID_ON");
-                    break;
-                case 'F8':
-                    e.preventDefault();
-                    setSettings(prev => ({ ...prev, ortho: !prev.ortho }));
-                    setLogMessage(settingsRef.current.ortho ? "ORTHO_OFF" : "ORTHO_ON");
-                    break;
-                case 'F10':
-                    e.preventDefault();
-                    setSettings(prev => ({ ...prev, polarTrackingEnabled: !prev.polarTrackingEnabled }));
-                    setLogMessage(settingsRef.current.polarTrackingEnabled ? "POLAR_OFF" : "POLAR_ON");
-                    break;
-                case 'F11':
-                    e.preventDefault();
-                    // OTRACK is essentially tracked by having snap on and hover logic, 
-                    // but we can have a toggle for the acquisition logic if needed.
-                    // For now, let's treat F11 as a UX toggle for tracking visibility.
-                    setLogMessage("OTRACK_TOGGLED");
-                    break;
-            }
-        }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentFileName, handleAction]);
-
   // Auto-Save Effect
   useEffect(() => {
     const timer = setInterval(() => {
@@ -1881,11 +1831,29 @@ const App: React.FC = () => {
   }, [commitToHistory]);
 
   const getAiContextSummary = useCallback(() => {
-    const totalEntities = (Object.values(layersRef.current).flat() as Shape[]).length;
+    const allShapes = (Object.values(layersRef.current).flat() as Shape[]);
+    const totalEntities = allShapes.length;
     const layerNames = Object.keys(layerConfig).join(', ');
-    const bounds = getAllShapesBounds(Object.values(layersRef.current).flat() as Shape[], blocks);
+    const bounds = getAllShapesBounds(allShapes, blocks);
     const sketchShapes = (layersRef.current['A-SKETCH'] || []).length;
     
+    // Detailed Selected Entity context
+    const selected = allShapes.filter(s => selectedIds.includes(s.id));
+    const selectionContext = selected.length > 0 
+      ? `\n      - Active Selection (${selected.length} items):\n` + selected.map(s => {
+          if (s.type === 'line') return `        * Line [id: ${s.id}, layer: ${s.layer}, start: (${s.x1.toFixed(1)},${s.y1.toFixed(1)}), end: (${s.x2.toFixed(1)},${s.y2.toFixed(1)})]`;
+          if (s.type === 'rect') return `        * Rect [id: ${s.id}, layer: ${s.layer}, origin: (${s.x.toFixed(1)},${s.y.toFixed(1)}), w: ${s.width.toFixed(1)}, h: ${s.height.toFixed(1)}]`;
+          if (s.type === 'circle') return `        * Circle [id: ${s.id}, layer: ${s.layer}, center: (${s.x.toFixed(1)},${s.y.toFixed(1)}), r: ${s.radius.toFixed(1)}]`;
+          if (s.type === 'arc') return `        * Arc [id: ${s.id}, layer: ${s.layer}, center: (${s.x.toFixed(1)},${s.y.toFixed(1)}), r: ${s.radius.toFixed(1)}, angles: ${s.startAngle.toFixed(1)} to ${s.endAngle.toFixed(1)}]`;
+          if (s.type === 'pline' || s.type === 'spline' || s.type === 'polygon' || s.type === 'dline') {
+            const count = (s as any).points?.length || 0;
+            return `        * ${s.type.toUpperCase()} [id: ${s.id}, layer: ${s.layer}, vertices: ${count}, closed: ${(s as any).closed ? 'Yes' : 'No'}]`;
+          }
+          if (s.type === 'text' || s.type === 'mtext') return `        * Text [id: ${s.id}, layer: ${s.layer}, content: "${(s as any).content || ''}"]`;
+          return `        * ${s.type.toUpperCase()} [id: ${s.id}, layer: ${s.layer}]`;
+        }).join('\n')
+      : '\n      - Active Selection: None';
+
     return `
       Drawing Context:
       - Units: ${settingsRef.current.units} (${settingsRef.current.unitSubtype})
@@ -1899,9 +1867,9 @@ const App: React.FC = () => {
       - Active Command: ${activeCommandName || 'None'}
       - Snap Settings: ${settingsRef.current.snapEnabled ? 'ON' : 'OFF'} (Endpoint: ${settingsRef.current.snapEndpoint ? 'Y' : 'N'}, Midpoint: ${settingsRef.current.snapMidpoint ? 'Y' : 'N'}, Center: ${settingsRef.current.snapCenter ? 'Y' : 'N'})
       - Ortho Mode: ${settingsRef.current.ortho ? 'ON' : 'OFF'}
-      - Polar Tracking: ${settingsRef.current.polarTrackingEnabled ? 'ON' : 'OFF'} (Step: ${settingsRef.current.polarTrackingAngle}°)
+      - Polar Tracking: ${settingsRef.current.polarTrackingEnabled ? 'ON' : 'OFF'} (Step: ${settingsRef.current.polarTrackingAngle}°)${selectionContext}
     `.trim();
-  }, [layerConfig, view, activeCommandName, blocks]);
+  }, [layerConfig, view, activeCommandName, blocks, selectedIds]);
 
   // Real-time architectural suggestions
   useEffect(() => {
@@ -1973,59 +1941,7 @@ const App: React.FC = () => {
       return ns;
   };
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (mtextEditor) {
-          mtextEditor.callback("");
-          setMtextEditor(null);
-        } else if (activePanel !== 'none') {
-          setActivePanel('none');
-        } else if (engineRef.current?.active) {
-          handleAction('cancel');
-        } else if (selectedIds.length > 0) {
-          setSelectedIds([]);
-        }
-      } else if (e.key === 'Tab') {
-        if (engineRef.current?.active && !isNavigatingInput()) {
-            e.preventDefault();
-            // In CAD, Tab usually cycles between fields in dynamic input.
-            // Here we can auto-complete patterns or cycle through common prefixes.
-            if (commandInput && !commandInput.includes(',') && !commandInput.includes('<')) {
-                setCommandInput(commandInput + ',');
-            } else if (commandInput.includes(',')) {
-                // swap or something? For now just append or cycle snap points?
-                // Standard AutoCAD Tab cycles snap points if near multiple.
-                // But if typing, it cycles input fields. 
-                // Let's just help the user type faster.
-            }
-        }
-      } else if (e.key === 'Delete' || (e.key === 'Backspace' && !isNavigatingInput())) {
-        if (!engineRef.current?.active && selectedIds.length > 0) {
-            handleAction('erase');
-        }
-      } else if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 && !isNavigatingInput()) {
-        if (e.key.toLowerCase() === 'z') {
-           e.preventDefault();
-           handleAction('zoomRealTime');
-        } else {
-          const cmdInput = document.getElementById('command-input') as HTMLInputElement;
-          if (cmdInput) {
-            cmdInput.focus();
-          }
-        }
-      }
-    };
-    
-    // Helper to check if we are typing in an input
-    const isNavigatingInput = () => {
-        const active = document.activeElement;
-        return active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.getAttribute('contenteditable') === 'true');
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [mtextEditor, activePanel, selectedIds, handleAction]);
+  // Helper to rescales entity coordinates when standard units are changed
 
   const executeCommand = useCallback((cmdStr: string) => {
     const trimmed = cmdStr.trim();
@@ -2034,6 +1950,11 @@ const App: React.FC = () => {
     if (trimmed.length > 1000) {
         setLogMessage("ERR: COMMAND_BUFFER_OVERFLOW");
         return;
+    }
+
+    if (engineRef.current && lockedMousePoint) {
+      engineRef.current.ctx.lastMousePoint = { ...lockedMousePoint };
+      setLockedMousePoint(null);
     }
 
     if (trimmed && navigator.vibrate) navigator.vibrate(10);
@@ -2269,7 +2190,161 @@ const App: React.FC = () => {
         setActiveCommandName(undefined);
     }
     setCommandInput('');
-  }, [undo, commitToHistory, showCircleOptions, handleAction]);
+  }, [undo, commitToHistory, showCircleOptions, handleAction, lockedMousePoint, lastCommandName, activeCommandName]);
+
+  // Global Keyboard Shortcuts (Moved below executeCommand to resolve block-scope lookup)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+        const active = document.activeElement;
+        const isNavigating = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.getAttribute('contenteditable') === 'true');
+        
+        if (e.ctrlKey || e.metaKey) {
+            if (isNavigating) {
+                // Let native edits occur within typing boxes, except page save (Ctrl+S)
+                if (e.key.toLowerCase() === 's') {
+                    e.preventDefault();
+                    if (e.shiftKey) handleAction('saveAs');
+                    else handleAction('save');
+                }
+                return;
+            }
+
+            switch(e.key.toLowerCase()) {
+                case 's':
+                    e.preventDefault();
+                    if (e.shiftKey) handleAction('saveAs');
+                    else handleAction('save');
+                    break;
+                case 'o':
+                    e.preventDefault();
+                    handleAction('open');
+                    break;
+                case 'n':
+                    e.preventDefault();
+                    handleAction('new');
+                    break;
+                case 'z':
+                    e.preventDefault();
+                    if (e.shiftKey) handleAction('redo');
+                    else handleAction('undo');
+                    break;
+                case 'y':
+                    if (!e.shiftKey) {
+                        e.preventDefault();
+                        handleAction('redo');
+                    }
+                    break;
+                case 'a':
+                    e.preventDefault();
+                    handleAction('selectAll');
+                    break;
+                case 'c':
+                    // Map Ctrl+C explicitly to CAD selection clipboard
+                    e.preventDefault();
+                    executeCommand('copyclip');
+                    break;
+                case 'v':
+                    // Map Ctrl+V explicitly to CAD selection clipboard
+                    e.preventDefault();
+                    executeCommand('paste');
+                    break;
+                case 'x':
+                    // Map Ctrl+X explicitly to CAD selection clipboard
+                    e.preventDefault();
+                    executeCommand('cut');
+                    break;
+            }
+        } else {
+            if (isNavigating) return;
+
+            switch(e.key) {
+                case 'F3':
+                    e.preventDefault();
+                    setSettings(prev => ({ ...prev, snap: !prev.snap }));
+                    setLogMessage(settingsRef.current.snap ? "OSNAP_OFF" : "OSNAP_ON");
+                    break;
+                case 'F7':
+                    e.preventDefault();
+                    setSettings(prev => ({ ...prev, grid: !prev.grid }));
+                    setLogMessage(settingsRef.current.grid ? "GRID_OFF" : "GRID_ON");
+                    break;
+                case 'F8':
+                    e.preventDefault();
+                    setSettings(prev => ({ ...prev, ortho: !prev.ortho }));
+                    setLogMessage(settingsRef.current.ortho ? "ORTHO_OFF" : "ORTHO_ON");
+                    break;
+                case 'F10':
+                    e.preventDefault();
+                    setSettings(prev => ({ ...prev, polarTrackingEnabled: !prev.polarTrackingEnabled }));
+                    setLogMessage(settingsRef.current.polarTrackingEnabled ? "POLAR_OFF" : "POLAR_ON");
+                    break;
+                case 'F11':
+                    e.preventDefault();
+                    setLogMessage("OTRACK_TOGGLED");
+                    break;
+            }
+        }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [currentFileName, handleAction, executeCommand]);
+
+  // Viewport Control & Auxiliary Input Observer (Moved below executeCommand)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (mtextEditor) {
+          mtextEditor.callback("");
+          setMtextEditor(null);
+        } else if (activePanel !== 'none') {
+          setActivePanel('none');
+        } else if (engineRef.current?.active) {
+          handleAction('cancel');
+        } else if (selectedIds.length > 0) {
+          setSelectedIds([]);
+        }
+      } else if (e.key === 'Tab') {
+        if (engineRef.current?.active && !isNavigatingInput()) {
+            e.preventDefault();
+            if (commandInput && !commandInput.includes(',') && !commandInput.includes('<')) {
+                setCommandInput(commandInput + ',');
+            }
+        }
+      } else if (e.key === 'Delete' || (e.key === 'Backspace' && !isNavigatingInput())) {
+        if (!engineRef.current?.active && selectedIds.length > 0) {
+            handleAction('erase');
+        }
+      } else if ((e.key === 'Enter' || e.key === ' ') && !isNavigatingInput()) {
+        e.preventDefault();
+        if (engineRef.current?.active) {
+          engineRef.current.input(''); 
+        } else if (lastCommandName) {
+          setLogMessage(`REPEATING: ${lastCommandName.toUpperCase()}`);
+          executeCommand(lastCommandName);
+        }
+      } else if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 && !isNavigatingInput()) {
+        if (e.key.toLowerCase() === 'z') {
+           e.preventDefault();
+           handleAction('zoomRealTime');
+        } else {
+          const cmdInput = document.getElementById('command-input') as HTMLInputElement;
+          if (cmdInput) {
+            cmdInput.focus();
+          }
+          setCommandInput(prev => prev + e.key);
+        }
+      }
+    };
+    
+    // Helper to check if we are typing in an input
+    const isNavigatingInput = () => {
+        const active = document.activeElement;
+        return active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.getAttribute('contenteditable') === 'true');
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [mtextEditor, activePanel, selectedIds, handleAction, lastCommandName, executeCommand, commandInput]);
 
   useEffect(() => {
     if (!engineRef.current) {
@@ -2492,29 +2567,135 @@ const App: React.FC = () => {
 
   const handleLiveToggle = useCallback(async () => {
     if (isLiveActive) {
-        if (liveSessionRef.current) { (await liveSessionRef.current).close(); liveSessionRef.current = null; }
-        setIsLiveActive(false); setLogMessage("ARCHITECT_LIVE_OFFLINE");
+        // Halt any existing voice processing/recognition runs
+        if (liveSessionRef.current) { 
+          try { (await liveSessionRef.current).close(); } catch(err) {}
+          liveSessionRef.current = null; 
+        }
+        if (recognitionRef.current) {
+          const recog = recognitionRef.current;
+          recognitionRef.current = null; // Mark inactive to block restart
+          try { recog.stop(); } catch(err) {}
+        }
+        try { window.speechSynthesis.cancel(); } catch(err) {}
+        setIsLiveActive(false); 
+        setLogMessage("ARCHITECT_LIVE_OFFLINE");
     } else {
         setLogMessage("AWAKENING_ARCHITECT_CORE...");
+        
+        const SpeechRecognitionClass = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (!SpeechRecognitionClass) {
+          setLogMessage("ERR: SPEECH_RECOGNITION_NOT_SUPPORTED");
+          return;
+        }
+
         try {
-            const sessionPromise = connectLiveAgent({
-                onCommand: (cmds) => {
-                    if (!cmds) return;
-                    if (typeof cmds === 'string') {
-                        cmds.split('\n').forEach(c => executeCommand(c));
-                    } else if (Array.isArray(cmds)) {
-                        cmds.forEach(c => executeCommand(c));
-                    }
-                },
-                onTranscript: (t, u) => setLogMessage(u ? `USER: ${t}` : `ARCHITECT: ${t}`),
-                onInterrupted: () => {}
-            });
-            liveSessionRef.current = sessionPromise; setIsLiveActive(true); setLogMessage("ARCHITECT_LIVE_CONNECTED");
-        } catch (e: any) { setLogMessage(`ERR: ${e.message}`); }
+          const recog = new SpeechRecognitionClass();
+          recog.continuous = false; // Simple discrete pause-triggered command drafting is extremely clean
+          recog.interimResults = true;
+          recog.lang = 'en-US';
+
+          let finalTranscriptsHandled = new Set<number>();
+
+          recog.onstart = () => {
+            setIsLiveActive(true);
+            setLogMessage("VOICE DRAFTING ACTIVE // SPEAK NOW...");
+          };
+
+          recog.onerror = (event: any) => {
+            console.error("Speech Recognition Error:", event);
+            if (event.error !== 'no-speech') {
+              setLogMessage(`ERR: VOICE_INPUT_${event.error.toUpperCase()}`);
+            }
+          };
+
+          recog.onend = () => {
+            // Continuously listen if user hasn't toggled off yet
+            if (recognitionRef.current === recog) {
+              try { recog.start(); } catch(err) { console.error("Error restarting voice:", err); }
+            }
+          };
+
+          recog.onresult = async (event: any) => {
+            let interimTranscript = '';
+            let finalTranscript = '';
+
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+              const transcriptText = event.results[i][0].transcript;
+              if (event.results[i].isFinal) {
+                if (!finalTranscriptsHandled.has(i)) {
+                  finalTranscriptsHandled.add(i);
+                  finalTranscript = transcriptText;
+                }
+              } else {
+                interimTranscript += transcriptText;
+              }
+            }
+
+            if (interimTranscript) {
+              setLogMessage(`HEARING: "${interimTranscript.toUpperCase()}"`);
+            }
+
+            if (finalTranscript && finalTranscript.trim()) {
+              const query = finalTranscript.trim();
+              setLogMessage(`YOU: "${query.toUpperCase()}"`);
+              
+              setCommandHistory(prev => [...prev.slice(-50), "VOICE> " + query.toUpperCase()]);
+              setLogMessage(`AI ARCHITECT IS DRAFTING...`);
+              setIsAiThinking(true);
+              
+              try {
+                const ctxSummary = getAiContextSummary();
+                const response = await getCommandFromAI(query, ctxSummary);
+                
+                setIsAiThinking(false);
+                
+                if (response.text) {
+                  setLogMessage(`AI: ${response.text}`);
+                  setCommandHistory(prev => [...prev.slice(-50), "AI> " + response.text.toUpperCase()]);
+                  
+                  // Text-to-Speech audio feedback
+                  try {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(response.text);
+                    utterance.rate = 1.0;
+                    utterance.pitch = 1.0;
+                    const voices = window.speechSynthesis.getVoices();
+                    const enVoice = voices.find(v => v.lang.startsWith('en'));
+                    if (enVoice) utterance.voice = enVoice;
+                    
+                    window.speechSynthesis.speak(utterance);
+                  } catch (speechErr) {
+                    console.error("Vocal response synthesis failed:", speechErr);
+                  }
+                }
+
+                if (response.commands && response.commands.length > 0) {
+                  response.commands.forEach((c: string) => {
+                    executeCommand(c);
+                  });
+                } else if (!response.text) {
+                  setLogMessage("INFO: NO_DRAFT_COMMAND_INTERPRETED");
+                }
+              } catch (aiErr: any) {
+                setIsAiThinking(false);
+                setLogMessage(`ERR: ${aiErr.message || "VOICE_DRAFT_FAILED"}`);
+              }
+            }
+          };
+
+          recognitionRef.current = recog;
+          recog.start();
+
+        } catch (initializationErr: any) {
+          console.error("Speech setup failed:", initializationErr);
+          setLogMessage(`ERR: SPEECH_INIT_FAILED`);
+        }
     }
-  }, [isLiveActive, executeCommand]);
+  }, [isLiveActive, executeCommand, getAiContextSummary]);
 
   const sidebarButtons = [
+    { id: 'ai_drafting', icon: Sparkles, action: 'toggleAiDrafting', activeOn: 'ai_drafting' },
     { id: 'drafting', icon: Target, action: 'toggleDraftingSettings', activeOn: 'drafting' },
     { id: 'layers', icon: Layers, action: 'toggleLayers', activeOn: 'layers' },
     { id: 'views', icon: Camera, action: 'toggleViews', activeOn: 'views' },
@@ -2827,8 +3008,17 @@ const App: React.FC = () => {
             activeViewportId={activeViewportId}
             onViewportToggle={handleViewportToggle} 
             onClick={onCanvasClick} 
-            onMouseMove={(x,y,s,shift) => { if(engineRef.current) engineRef.current.move({x,y}, s, shift); }} 
+            onMouseMove={(x,y,s,shift) => { 
+              if (engineRef.current && !commandContextMenu) {
+                const active = document.activeElement;
+                const isNavigating = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.getAttribute('contenteditable') === 'true');
+                if (!isNavigating) {
+                  engineRef.current.move({x,y}, s, shift);
+                }
+              }
+            }} 
             onAction={handleAction}
+            isContextMenuOpen={!!commandContextMenu}
             selectedIds={selectedIds} 
             onSelectionChange={(ids, additive) => {
               if (additive) {
@@ -3048,6 +3238,33 @@ const App: React.FC = () => {
             </motion.div>
           )}
 
+          {activePanel === 'ai_drafting' && (
+            <motion.div 
+              key="panel-ai-drafting-overlay"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[1000] flex items-center justify-center sm:p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="pointer-events-auto w-full h-full sm:h-auto sm:w-auto flex items-center justify-center p-2 sm:p-0"
+              >
+                <AiDraftingPanel 
+                  onClose={() => setActivePanel('none')}
+                  onCommand={executeCommand}
+                  getCommandFromAI={getCommandFromAI}
+                  getAiContextSummary={getAiContextSummary}
+                  undo={undo}
+                  setLogMessage={setLogMessage}
+                  onCaptureCanvas={() => canvasHandleRef.current?.captureImage()}
+                />
+              </motion.div>
+            </motion.div>
+          )}
+
           {activePanel === 'ctb' && (
             <motion.div 
               key="panel-ctb-overlay"
@@ -3149,7 +3366,42 @@ const App: React.FC = () => {
                   }} 
                   onClose={() => setActivePanel('none')} 
                   entityCount={(Object.values(layers).flat() as Shape[]).length} 
-                  currentFileName={currentFileName} 
+                  currentFileName={currentFileName}
+                  projectStats={calculateVoxProjectStats({
+                    entities: Object.values(layers).flat() as Shape[],
+                    layers: layerConfig
+                  })}
+                  layersConfigList={layerConfig}
+                  onPurgeLayers={() => {
+                    const activeLayers = new Set<string>();
+                    (Object.values(layers) as any[]).forEach(shapesList => {
+                      if (Array.isArray(shapesList)) {
+                        shapesList.forEach(s => {
+                          if (s?.layer) activeLayers.add(s.layer);
+                        });
+                      }
+                    });
+                    activeLayers.add('0');
+                    activeLayers.add('defpoints');
+                    activeLayers.add(settings.currentLayer);
+
+                    const newLayerConfig = { ...layerConfig };
+                    let purgedCount = 0;
+                    Object.keys(newLayerConfig).forEach(layerId => {
+                      if (!activeLayers.has(layerId)) {
+                        delete newLayerConfig[layerId];
+                        purgedCount++;
+                      }
+                    });
+
+                    if (purgedCount > 0) {
+                      setLayerConfig(newLayerConfig);
+                      setLogMessage(`PURGED ${purgedCount} UNUSED LAYERS`);
+                      setTimeout(() => commitToHistory(), 50);
+                    } else {
+                      setLogMessage("PURGE: NO UNUSED LAYERS FOUND");
+                    }
+                  }}
                 />
               </motion.div>
             </motion.div>
@@ -3415,24 +3667,59 @@ const App: React.FC = () => {
 
       {commandContextMenu && (
         <>
-          <div className="fixed inset-0 z-[1050]" onClick={() => setCommandContextMenu(null)} />
+          <div className="fixed inset-0 z-[1050]" onClick={() => { setCommandContextMenu(null); setLockedMousePoint(null); setContextDistanceInput(''); }} />
           <div 
-            className="fixed bg-[#0a0a0c]/98 backdrop-blur-2xl border border-white/10 rounded-2xl p-2 flex flex-col gap-1 shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[1100] animate-in zoom-in-95 fade-in slide-in-from-top-4 duration-200 min-w-[200px]"
+            className="fixed bg-[#0a0a0c]/98 backdrop-blur-2xl border border-white/10 rounded-2xl p-2 flex flex-col gap-1 shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[1100] animate-in zoom-in-95 fade-in slide-in-from-top-4 duration-200 min-w-[210px]"
             style={{ 
-              left: Math.max(10, Math.min(commandContextMenu.x, window.innerWidth - 210)), 
-              top: Math.max(10, Math.min(commandContextMenu.y, window.innerHeight - 300))
+              left: Math.max(10, Math.min(commandContextMenu.x, window.innerWidth - 220)), 
+              top: Math.max(10, Math.min(commandContextMenu.y, window.innerHeight - 450))
             }}
           >
             <div className="px-3 py-1.5 border-b border-white/5 mb-1 flex items-center justify-between">
               <div className="text-[8px] font-black uppercase text-cyan-500 tracking-widest">Command Context</div>
               <div className="text-[7px] text-neutral-500 font-mono italic">{activeCommandName}</div>
             </div>
+
+            {/* Direct Distance Input inside the Right-Click Context Menu */}
+            <div className="px-1.5 py-1 mb-1 border-b border-white/5">
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (contextDistanceInput.trim()) {
+                    if (engineRef.current && lockedMousePoint) {
+                      engineRef.current.ctx.lastMousePoint = { ...lockedMousePoint };
+                    }
+                    executeCommand(contextDistanceInput);
+                    setContextDistanceInput('');
+                    setCommandContextMenu(null);
+                    setLockedMousePoint(null);
+                  }
+                }}
+                className="flex items-center gap-1.5"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <input 
+                  type="text"
+                  autoFocus
+                  placeholder={`Distance (${settings.units}/${settings.unitSubtype || 'mm'})...`}
+                  value={contextDistanceInput}
+                  onChange={(e) => setContextDistanceInput(e.target.value)}
+                  className="flex-1 w-full bg-[#121216]/90 border border-white/10 rounded-xl px-2.5 py-1.5 text-[11px] text-white placeholder-neutral-500 focus:outline-none focus:border-cyan-500/50 font-mono"
+                />
+                <button 
+                  type="submit"
+                  className="px-2.5 py-1.5 bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 rounded-xl hover:bg-cyan-500/30 transition-all text-[10px] font-black uppercase active:scale-95"
+                >
+                  Draw
+                </button>
+              </form>
+            </div>
             
             <button 
               onClick={() => {
                 setPromptDialog({
                   title: 'Direct Distance Entry',
-                  message: `Enter distance in current units (${settings.units}/${settings.unitSubtype || 'mm'}):`,
+                  message: `Enter distance/length in current units (${settings.units}/${settings.unitSubtype || 'mm'}):`,
                   initialValue: '',
                   type: 'prompt',
                   onConfirm: (val) => {
@@ -3441,17 +3728,399 @@ const App: React.FC = () => {
                 });
                 setCommandContextMenu(null);
               }}
-              className="w-full text-left px-3 py-3 rounded-xl text-[10px] text-cyan-400 bg-cyan-400/5 border border-cyan-400/10 hover:bg-cyan-400/10 transition-all font-black uppercase flex items-center gap-3 active:scale-95 shadow-[0_0_15px_rgba(34,211,238,0.1)]"
+              className="w-full text-left px-3 py-2.5 bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 rounded-xl text-[10px] font-black uppercase flex items-center gap-3 active:scale-95 shadow-[0_0_15px_rgba(6,182,212,0.15)] hover:bg-cyan-500/20 transition-all mb-1"
             >
               <Target size={14} /> Enter Distance
             </button>
 
+            {/* Context-Specific Actions based on active command */}
+            {activeCommandName === 'LINE' && (
+              <>
+                <button 
+                  onClick={() => {
+                    executeCommand('C');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Check size={14} className="text-cyan-500" /> Close Shape (C)
+                </button>
+                <button 
+                  onClick={() => {
+                    executeCommand('U');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <History size={14} className="text-amber-500" /> Undo Segment (U)
+                </button>
+              </>
+            )}
+
+            {activeCommandName === 'DLINE' && (
+              <>
+                <button 
+                  onClick={() => {
+                    setPromptDialog({
+                      title: 'Double Line Thickness',
+                      message: 'Enter wall thickness value:',
+                      initialValue: '230',
+                      type: 'prompt',
+                      onConfirm: (val) => {
+                        if (val) executeCommand(val);
+                      }
+                    });
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Weight size={14} className="text-cyan-500" /> Set Thickness (T)
+                </button>
+                <button 
+                  onClick={() => {
+                    executeCommand('j zero');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Check size={14} className="text-neutral-500" /> Align: Zero (Center)
+                </button>
+                <button 
+                  onClick={() => {
+                    executeCommand('j top');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Check size={14} className="text-neutral-500" /> Align: Top
+                </button>
+                <button 
+                  onClick={() => {
+                    executeCommand('j bottom');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Check size={14} className="text-neutral-500" /> Align: Bottom
+                </button>
+                <button 
+                  onClick={() => {
+                    executeCommand('C');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Check size={14} className="text-emerald-500" /> Close DLine (C)
+                </button>
+                <button 
+                  onClick={() => {
+                    executeCommand('U');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <History size={14} className="text-amber-500" /> Undo Segment (U)
+                </button>
+              </>
+            )}
+
+            {activeCommandName === 'POLYLINE' && (
+              <>
+                <button 
+                  onClick={() => {
+                    executeCommand('A');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Check size={14} className="text-cyan-500" /> Switch to Arc (A)
+                </button>
+                <button 
+                  onClick={() => {
+                    executeCommand('L');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Check size={14} className="text-cyan-500" /> Switch to Line (L)
+                </button>
+                <button 
+                  onClick={() => {
+                    executeCommand('C');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Check size={14} className="text-emerald-500" /> Close Polyline (C)
+                </button>
+                <button 
+                  onClick={() => {
+                    executeCommand('U');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <History size={14} className="text-amber-500" /> Undo Point (U)
+                </button>
+              </>
+            )}
+
+            {activeCommandName === 'CIRCLE' && (
+              <>
+                <button 
+                  onClick={() => {
+                    setPromptDialog({
+                      title: 'Circle Radius',
+                      message: 'Enter circle radius:',
+                      initialValue: '',
+                      type: 'prompt',
+                      onConfirm: (val) => {
+                        if (val) {
+                          executeCommand('R');
+                          executeCommand(val);
+                        }
+                      }
+                    });
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Target size={14} className="text-cyan-500" /> Enter Radius (R)
+                </button>
+                <button 
+                  onClick={() => {
+                    setPromptDialog({
+                      title: 'Circle Diameter',
+                      message: 'Enter circle diameter:',
+                      initialValue: '',
+                      type: 'prompt',
+                      onConfirm: (val) => {
+                        if (val) {
+                          executeCommand('D');
+                          executeCommand(val);
+                        }
+                      }
+                    });
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Target size={14} className="text-cyan-400" /> Enter Diameter (D)
+                </button>
+                <button 
+                  onClick={() => {
+                    executeCommand('2P');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Check size={14} className="text-neutral-500" /> 2-Point Mode (2P)
+                </button>
+                <button 
+                  onClick={() => {
+                    executeCommand('3P');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Check size={14} className="text-neutral-500" /> 3-Point Mode (3P)
+                </button>
+                <button 
+                  onClick={() => {
+                    executeCommand('TTR');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Check size={14} className="text-neutral-500" /> Tangent-Tangent-Radius
+                </button>
+              </>
+            )}
+
+            {activeCommandName === 'RECTANGLE' && (
+              <>
+                <button 
+                  onClick={() => {
+                    setPromptDialog({
+                      title: 'Rectangle Width',
+                      message: 'Enter rectangle width:',
+                      initialValue: '',
+                      type: 'prompt',
+                      onConfirm: (w) => {
+                        if (w) {
+                          executeCommand('D');
+                          executeCommand(w);
+                          setPromptDialog({
+                            title: 'Rectangle Height',
+                            message: 'Enter rectangle height:',
+                            initialValue: '',
+                            type: 'prompt',
+                            onConfirm: (h) => {
+                              if (h) executeCommand(h);
+                            }
+                          });
+                        }
+                      }
+                    });
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Sliders size={14} className="text-cyan-500" /> Set Dimensions (D)
+                </button>
+                <button 
+                  onClick={() => {
+                    setPromptDialog({
+                      title: 'Rectangle Rotation',
+                      message: 'Enter rotation angle (degrees):',
+                      initialValue: '0',
+                      type: 'prompt',
+                      onConfirm: (rot) => {
+                        if (rot) {
+                          executeCommand('R');
+                          executeCommand(rot);
+                        }
+                      }
+                    });
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <RotateCw size={14} className="text-amber-500" /> Set Rotation (R)
+                </button>
+              </>
+            )}
+
+            {activeCommandName === 'ARC' && (
+              <>
+                <button 
+                  onClick={() => {
+                    executeCommand('3P');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Check size={14} className="text-neutral-500" /> 3-Point Arc
+                </button>
+                <button 
+                  onClick={() => {
+                    executeCommand('CENTER');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Check size={14} className="text-neutral-500" /> Center-Start-End
+                </button>
+                <button 
+                  onClick={() => {
+                    executeCommand('2P');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Check size={14} className="text-neutral-500" /> 2-Point Arc
+                </button>
+                <button 
+                  onClick={() => {
+                    setPromptDialog({
+                      title: 'Arc Radius (SER)',
+                      message: 'Enter arc radius:',
+                      initialValue: '',
+                      type: 'prompt',
+                      onConfirm: (rad) => {
+                        if (rad) {
+                          executeCommand('SER');
+                          executeCommand(rad);
+                        }
+                      }
+                    });
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Target size={14} className="text-cyan-500" /> Start-End-Radius
+                </button>
+              </>
+            )}
+
+            {activeCommandName === 'POLYGON' && (
+              <>
+                <button 
+                  onClick={() => {
+                    setPromptDialog({
+                      title: 'Polygon Sides',
+                      message: 'Enter number of sides (>= 3):',
+                      initialValue: '4',
+                      type: 'prompt',
+                      onConfirm: (sides) => {
+                        if (sides) executeCommand(sides);
+                      }
+                    });
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Grid3X3 size={14} className="text-cyan-500" /> See/Set Sides
+                </button>
+                <button 
+                  onClick={() => {
+                    executeCommand('I');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Check size={14} className="text-neutral-500" /> Inscribed in Circle (I)
+                </button>
+                <button 
+                  onClick={() => {
+                    executeCommand('C');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Check size={14} className="text-neutral-500" /> Circumscribed (C)
+                </button>
+              </>
+            )}
+
+            {activeCommandName === 'ELLIPSE' && (
+              <>
+                <button 
+                  onClick={() => {
+                    executeCommand('CENTER');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Check size={14} className="text-neutral-500" /> Center Mode
+                </button>
+                <button 
+                  onClick={() => {
+                    executeCommand('2P');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Check size={14} className="text-neutral-500" /> Axis Endpoint Mode (2P)
+                </button>
+                <button 
+                  onClick={() => {
+                    executeCommand('3P');
+                    setCommandContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-300 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95"
+                >
+                  <Check size={14} className="text-neutral-500" /> Axis Endpoint Mode (3P)
+                </button>
+              </>
+            )}
+
             <div className="h-px bg-white/5 my-1" />
 
-            <button onClick={() => { executeCommand(''); setCommandContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+            <button onClick={() => { executeCommand(''); setCommandContextMenu(null); }} className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
               <Check className="text-emerald-500" size={14} /> Enter (Finish)
             </button>
-            <button onClick={() => { handleAction('cancel'); setCommandContextMenu(null); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+            <button onClick={() => { handleAction('cancel'); setCommandContextMenu(null); }} className="w-full text-left px-3 py-2 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
               <X className="text-red-500" size={14} /> Cancel (Esc)
             </button>
           </div>

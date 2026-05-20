@@ -36,6 +36,7 @@ interface CADCanvasProps {
   isPlotting?: boolean;
   commandInput?: string;
   aiRecommendation?: string | null;
+  isContextMenuOpen?: boolean;
 }
 
 export interface CADCanvasHandle {
@@ -49,7 +50,8 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     activePrompt, basePoint = null, activeCommandName, isAiThinking, lastAiCommandTime, onAction, onCommand,
     setLogMessage, onObjectContextMenu, isPlotting = false,
     commandInput = '',
-    aiRecommendation = null
+    aiRecommendation = null,
+    isContextMenuOpen = false
 }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
@@ -2137,6 +2139,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   };
 
   const handlePointerDown = (e: React.PointerEvent) => {
+      if (isContextMenuOpen) return;
       const canvas = canvasRef.current; if (!canvas) return;
       // try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
       const rect = canvas.getBoundingClientRect(), x = e.clientX-rect.left, y = e.clientY-rect.top;
@@ -2220,6 +2223,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
+      if (isContextMenuOpen) return;
       const canvas = canvasRef.current; if (!canvas) return;
       const rect = canvas.getBoundingClientRect(), x = e.clientX-rect.left, y = e.clientY-rect.top;
       activePointers.current.set(e.pointerId, {x, y});
@@ -2331,7 +2335,8 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       if (e.button === 2) {
           // Right-click: context menu logic
           if (isCommandActive && onAction) {
-              onAction('enter');
+              // Let contextual right-click menu pop up without advancing the command's internal state machine or submitting an Enter.
+              // Note: handleContextMenu on the canvas will fire on right-click to open commandContextMenu.
           } else if (selectedIds.length > 0 && onObjectContextMenu) {
               onObjectContextMenu(e.clientX, e.clientY);
           } else {
@@ -2504,9 +2509,15 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const wp = screenToWorld(sx, sy);
     const x = e.clientX, y = e.clientY;
     if (isCommandActive) {
-      onAction?.('commandContextMenu', { x, y });
+      onAction?.('commandContextMenu', { x, y, wp });
     } else {
       onObjectContextMenu?.(x, y);
     }

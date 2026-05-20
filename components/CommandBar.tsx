@@ -251,6 +251,20 @@ const CommandBar: React.FC<CommandBarProps> = ({
     }
   }, [history, isHistoryOpen]);
 
+  // Auto-reveal and auto-focus CLI tab when keyboard inputs are directed to command bar
+  useEffect(() => {
+    if (value && activeTab === null) {
+      setActiveTab('cli');
+      if (historyHeight === 0) setHistoryHeight(80);
+      
+      // Focus the textbox after rendering pass
+      setTimeout(() => {
+        const inputEl = document.getElementById('command-input');
+        if (inputEl) inputEl.focus();
+      }, 50);
+    }
+  }, [value, activeTab, historyHeight]);
+
   const toggleTab = (tab: 'cli' | 'ai') => {
     if (activeTab === tab) {
       setActiveTab(null);
@@ -348,6 +362,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
                     )}
                     <textarea 
                         autoFocus
+                        id="command-input"
                         name={`vox-cmd-${Date.now()}`}
                         value={value}
                         onChange={e => { 
@@ -467,6 +482,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
                 <div className="flex-1 min-w-0 h-full">
                     <textarea 
                         autoFocus
+                        id="ai-command-input"
                         disabled={isAiThinking}
                         name={`vox-ai-${Date.now()}`}
                         value={value}

@@ -25,18 +25,30 @@ export default defineConfig(({ mode }) => {
         tailwindcss(),
         VitePWA({
           registerType: 'autoUpdate',
-          includeAssets: ['favicon.svg'],
+          includeAssets: ['favicon.svg', 'icon-192.png', 'icon-512.png'],
           manifest: {
             name: 'VoxCADD Professional',
-            short_name: 'VoxCADD',
-            description: 'Professional CAD Editor for DWG/DXF/VOX',
-            theme_color: '#0f172a',
-            background_color: '#020617',
+            short_name: 'VoxCADD Pro',
+            description: 'Professional architectural and mechanical CAD modeling engine with AI drafting, complete layer managers, and offline DWG/DXF/VOX interoperability.',
+            theme_color: '#0a0a0c',
+            background_color: '#0d0d0f',
             display: 'standalone',
             orientation: 'any',
             scope: base,
             start_url: base,
             icons: [
+              {
+                src: 'icon-192.png',
+                sizes: '192x192',
+                type: 'image/png',
+                purpose: 'any'
+              },
+              {
+                src: 'icon-512.png',
+                sizes: '512x512',
+                type: 'image/png',
+                purpose: 'maskable'
+              },
               {
                 src: 'favicon.svg',
                 sizes: 'any',

@@ -435,6 +435,11 @@ export interface VoxProject {
     total: number;
     unsupported: number;
     counts: Record<string, number>;
+    layerUsage?: Record<string, number>;
+    unusedLayers?: string[];
+    invisibleCount?: number;
+    totalLength?: number;
+    estimatedSizeKB?: string;
   };
 }
 

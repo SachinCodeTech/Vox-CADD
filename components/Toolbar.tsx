@@ -9,7 +9,7 @@ import {
   FilePlus, FolderOpen, Save, Share2, Calculator, Layers, Sliders, XCircle,
   LayoutGrid, MousePointer2, Clipboard, Copy, Spline,
   Infinity, ArrowUpRight, Rows, Dot, CircleOff, Type, AlignLeft, MousePointer, 
-  Zap, Pencil, Activity, Grid3X3, Layers2, Settings2, Info, Lock, Eye, EyeOff,
+  Zap, Pencil, Activity, Grid3X3, Layers2, Settings2, Info, Lock, Eye, EyeOff, Sparkles,
   Package, Grid2X2, Download, Search, Filter, MonitorPlay,
   ArrowRightLeft, Radius, Diameter, Settings, History, DraftingCompass
 } from 'lucide-react';
@@ -303,6 +303,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
             <ToolCircleBtn onClick={() => onAction('toggleProperties')} icon={<Settings2 />} label="PROPS" active={activePanel === 'properties'} />
             <ToolCircleBtn onClick={() => onAction('toggleDraftingSettings')} icon={<Sliders />} label="DRAFT" active={activePanel === 'drafting'} />
             <ToolCircleBtn onClick={() => onAction('toggleCalculator')} icon={<Calculator />} label="CALC" active={activePanel === 'calculator'} />
+            <ToolCircleBtn onClick={() => onAction('toggleAiDrafting')} icon={<Sparkles />} label="AI DRAFT" active={activePanel === 'ai_drafting'} />
             <ToolCircleBtn onClick={() => onCommand('filter')} icon={<Filter />} label="FILTER" active={activeCommandName === 'FILTER'} />
             <ToolCircleBtn onClick={() => onCommand('find')} icon={<Search />} label="FIND" active={activeCommandName === 'FIND'} />
             <ToolCircleBtn onClick={() => onCommand('vports')} icon={<MonitorPlay />} label="VPORTS" active={activeCommandName === 'VIEWPORT'} />
