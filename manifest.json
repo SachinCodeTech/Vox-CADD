@@ -1,0 +1,70 @@
+{
+  "name": "VoxCADD Professional",
+  "short_name": "VoxCADD Pro",
+  "description": "Professional architectural and mechanical CAD modeling engine with AI drafting, complete layer managers, and offline DWG/DXF/VOX interoperability.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0d0d0f",
+  "theme_color": "#0a0a0c",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "./favicon.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./favicon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "file_handlers": [
+    {
+      "action": "./",
+      "name": "VoxCADD Drawing",
+      "icons": [
+        {
+          "src": "./favicon.svg",
+          "sizes": "192x192",
+          "type": "image/svg+xml"
+        }
+      ],
+      "accept": {
+        "application/x-vox": [".vox"],
+        "application/vnd.voxcadd.project": [".vox"],
+        "application/dxf": [".dxf"],
+        "application/dwg": [".dwg"],
+        "application/vox": [".vox", ".dwg", ".dxf"],
+        "application/x-voxcad": [".vox", ".dwg", ".dxf"],
+        "image/vnd.dwg": [".dwg"],
+        "image/vnd.dxf": [".dxf"],
+        "text/plain": [".vox", ".dxf"]
+      }
+    }
+  ],
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "shortcuts": [
+    {
+      "name": "New Project",
+      "url": "./?action=new",
+      "icons": [{ "src": "./icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
