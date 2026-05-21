@@ -3,6 +3,8 @@ import React, { useRef, useEffect, useState, useCallback, useMemo, useImperative
 import { Shape, ViewState, AppSettings, SnapPoint, LayerConfig, Point, MTextShape, BlockDefinition, LayoutDefinition, LineTypeDefinition, LineType, CtbFile } from '../types';
 import { hitTestShape, findBestSnap, formatLength, formatAngle, formatDimensionValue, calculateDimensionValue, getShapesInRect, getShapeBounds, isRectIntersecting, formatDualLength, isShapeClosed, isPointInsideShape, getPolylineOffsetPoints, calculateShapeLength, distance, getAllShapesBounds, projectPointOnLine } from '../services/cadService';
 import { resolveShapeProperties, resolveColor, resolveLineWeight, resolveLineType } from '../services/propertyService';
+import { DrawingSpatialIndex } from '../services/spatialIndex';
+
 
 interface CADCanvasProps {
   layers: Record<string, Shape[]>;
@@ -126,7 +128,16 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     });
   }, [layers, layerConfig]);
 
+  const renderingSpatialIndex = useMemo(() => {
+    return new DrawingSpatialIndex(allRenderableShapes, blocks);
+  }, [allRenderableShapes, blocks]);
+
+  const selectionSpatialIndex = useMemo(() => {
+    return new DrawingSpatialIndex(allSelectableShapes, blocks);
+  }, [allSelectableShapes, blocks]);
+
   const getAllShapesForRendering = useCallback(() => allRenderableShapes, [allRenderableShapes]);
+
   const getAllShapesForSelection = useCallback(() => allSelectableShapes, [allSelectableShapes]);
 
   const calculateScreenToWorld = (sx: number, sy: number, v: ViewState, w: number, h: number): Point => {
@@ -237,10 +248,14 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     const osnapActive = shiftKey ? !settings.snap : settings.snap;
     
     if (osnapActive && (activeTab === 'model' || isViewportActive)) {
-      const allRenderable = getAllShapesForRendering().filter(s => {
-        const conf = layerConfig[s.layer];
-        return conf ? conf.visible : true;
-      });
+      const searchRadius = Math.max(0.001, 30 / ts);
+      const queryBox = {
+          xMin: wp.x - searchRadius,
+          yMin: wp.y - searchRadius,
+          xMax: wp.x + searchRadius,
+          yMax: wp.y + searchRadius
+      };
+      const allRenderable = renderingSpatialIndex.query(queryBox);
 
       // Maintain tracking points
       const tps = [...trackingPoints.current];
@@ -366,7 +381,17 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               ctx.translate(vW/2 + vp.viewState.originX * ts, vH/2 + vp.viewState.originY * ts);
               ctx.scale(vts, -vts);
               
-              const vShapes = getAllShapesForRendering();
+              const halfVpW = (vp.width / 2) / vp.viewState.scale;
+              const halfVpH = (vp.height / 2) / vp.viewState.scale;
+              const cx = -vp.viewState.originX;
+              const cy = -vp.viewState.originY;
+              const vpBounds = {
+                  xMin: cx - halfVpW,
+                  yMin: cy - halfVpH,
+                  xMax: cx + halfVpW,
+                  yMax: cy + halfVpH
+              };
+              const vShapes = renderingSpatialIndex.query(vpBounds);
               vShapes.forEach(s => drawShape(ctx, s, vts));
               
               if (isActive && isCommandActive && previewShapes) {
@@ -457,7 +482,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           }
       }
 
-      // Performance Optimization: Viewport Culling
+      // Performance Optimization: Spatial Indexing & Viewport Culling
       const sMin = calculateScreenToWorld(0, 0, view, w, h);
       const sMax = calculateScreenToWorld(w*r, h*r, view, w, h);
       const viewportBounds = { 
@@ -467,10 +492,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           yMax: Math.max(sMin.y, sMax.y) 
       };
       
-      const visibleShapes = renderable.filter(s => {
-          const bounds = getShapeBounds(s, blocks);
-          return isRectIntersecting(viewportBounds, bounds);
-      });
+      const visibleShapes = renderingSpatialIndex.query(viewportBounds);
 
       visibleShapes.forEach(s => {
           drawShape(ctx, s, ts);
@@ -2245,7 +2267,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                     
                     const w1 = screenToWorld(pointerStartPos.current.x, pointerStartPos.current.y);
                     const w2 = screenToWorld(x, y);
-                    const selectableShapes = getAllShapesForSelection();
+                    const selectableShapes = selectionSpatialIndex.query({ xMin: Math.min(w1.x, w2.x), yMin: Math.min(w1.y, w2.y), xMax: Math.max(w1.x, w2.x), yMax: Math.max(w1.y, w2.y) });
                     const hits = getShapesInRect(w1, w2, selectableShapes, crossing, blocks);
                     setHighlightedIds(hits.map(s => s.id));
                  }
@@ -2361,7 +2383,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               if (onClick) onClick(w2.x, w2.y, !!activeSnapRef.current, e.shiftKey);
           } else {
               const w1 = screenToWorld(selectionRect.start.x, selectionRect.start.y), w2 = screenToWorld(selectionRect.end.x, selectionRect.end.y);
-              const selectableShapes = getAllShapesForSelection();
+              const selectableShapes = selectionSpatialIndex.query({ xMin: Math.min(w1.x, w2.x), yMin: Math.min(w1.y, w2.y), xMax: Math.max(w1.x, w2.x), yMax: Math.max(w1.y, w2.y) });
               const hits = getShapesInRect(w1, w2, selectableShapes, selectionRect.crossing, blocks);
               if (onSelectionChange) onSelectionChange(hits.map(s => s.id), e.shiftKey);
           }
@@ -2374,8 +2396,15 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               const finalP = activeSnapRef.current ? {x: activeSnapRef.current.x, y: activeSnapRef.current.y} : wp;
               if (isCommandActive && onClick && activeCommandName !== 'PAN') onClick(finalP.x, finalP.y, snapped, e.shiftKey);
               else if (activeCommandName !== 'PAN') {
-                const ts = view.scale * settings.drawingScale, selectableShapes = getAllShapesForSelection();
-                const hit = selectableShapes.find(s => hitTestShape(finalP.x, finalP.y, s, 20/ts, blocks));
+                const ts = view.scale * settings.drawingScale;
+                const radius = 20 / ts;
+                const selectableShapes = selectionSpatialIndex.query({
+                    xMin: finalP.x - radius,
+                    yMin: finalP.y - radius,
+                    xMax: finalP.x + radius,
+                    yMax: finalP.y + radius
+                });
+                const hit = selectableShapes.find(s => hitTestShape(finalP.x, finalP.y, s, radius, blocks));
                 
                 // Requirement: Single tap -> additive selection for shapes, click empty -> clear
                 if (onSelectionChange) {
@@ -2428,7 +2457,45 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         if (e.deltaMode === 2) delta *= 500; // Pages to pixels
         
         const factor = Math.pow(1.002, -delta);
-        const wp = screenToWorld(x, y);
+        const r_pixel = getPixelRatio(), w_pixel = canvas.width/r_pixel, h_pixel = canvas.height/r_pixel;
+
+        // Fresh ref-safe screenToWorld calculation to prevent stale scale drift
+        const freshScreenToWorld = (sx: number, sy: number, vState: ViewState): Point => {
+          const ts = vState.scale * settings.drawingScale;
+          return { x: (sx - w_pixel/2 - vState.originX)/ts, y: -(sy - h_pixel/2 - vState.originY)/ts };
+        };
+
+        let wp: Point;
+        const isModel = activeTab === 'model';
+        if (isModel) {
+            wp = freshScreenToWorld(x, y, view);
+        } else {
+            const pPoint = freshScreenToWorld(x, y, view);
+            if (isViewportActive && activeViewportId) {
+                const layout = layouts.find(l => l.id === activeTab);
+                const vp = layout?.viewports.find(v => v.id === activeViewportId);
+                if (vp && layout) {
+                    const paperW = layout.paperSize.width;
+                    const paperH = layout.paperSize.height;
+                    
+                    const papX = pPoint.x + paperW/2;
+                    const papY = paperH/2 - pPoint.y;
+                    
+                    const relX = papX - vp.x;
+                    const relY = papY - vp.y;
+                    
+                    const vts = vp.viewState.scale;
+                    wp = {
+                        x: (relX - vp.width/2 - vp.viewState.originX) / vts,
+                        y: (vp.height/2 + vp.viewState.originY - relY) / vts
+                    };
+                } else {
+                    wp = pPoint;
+                }
+            } else {
+                wp = pPoint;
+            }
+        }
         
         const currentView = (isViewportActive && activeViewportId) ? 
             layouts.find(l=>l.id===activeTab)?.viewports.find(vp=>vp.id===activeViewportId)?.viewState : view;
@@ -2436,19 +2503,18 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         if (!currentView) return;
 
         const newScale = currentView.scale * factor;
-        const r = getPixelRatio(), w = canvas.width/r, h = canvas.height/r;
         const ts = newScale * settings.drawingScale;
         
         let newOriginX: number, newOriginY: number;
         
         if (activeTab === 'model' || !isViewportActive) {
-            newOriginX = x - w/2 - wp.x * ts;
-            newOriginY = y - h/2 + wp.y * ts;
+            newOriginX = x - w_pixel/2 - wp.x * ts;
+            newOriginY = y - h_pixel/2 + wp.y * ts;
         } else {
             const layout = layouts.find(l => l.id === activeTab);
             const vp = layout?.viewports.find(v => v.id === activeViewportId);
             if (vp && layout) {
-                const pPoint = calculateScreenToWorld(x, y, view, w, h);
+                const pPoint = freshScreenToWorld(x, y, view);
                 const paperW = layout.paperSize.width, paperH = layout.paperSize.height;
                 const papX = pPoint.x + paperW/2, papY = paperH/2 - pPoint.y;
                 const relX = papX - vp.x, relY = papY - vp.y;
@@ -2462,7 +2528,28 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
             }
         }
         
-        setClampedView({ scale: newScale, originX: newOriginX, originY: newOriginY });
+        const clampViewState = (vs: ViewState): ViewState => {
+          const minScale = 1e-6;
+          const maxScale = 1e6;
+          const maxOrigin = 1e9;
+          
+          let scale_v = vs.scale;
+          if (isNaN(scale_v) || !isFinite(scale_v)) scale_v = 1;
+          scale_v = Math.max(minScale, Math.min(maxScale, scale_v));
+
+          let x_v = vs.originX;
+          if (isNaN(x_v) || !isFinite(x_v)) x_v = 0;
+          x_v = Math.max(-maxOrigin, Math.min(maxOrigin, x_v));
+
+          let y_v = vs.originY;
+          if (isNaN(y_v) || !isFinite(y_v)) y_v = 0;
+          y_v = Math.max(-maxOrigin, Math.min(maxOrigin, y_v));
+
+          return { scale: scale_v, originX: x_v, originY: y_v };
+        };
+
+        const clamped = clampViewState({ scale: newScale, originX: newOriginX, originY: newOriginY });
+        setView(clamped);
     };
 
     canvas.addEventListener('wheel', onWheel, { passive: false });
