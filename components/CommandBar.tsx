@@ -64,6 +64,7 @@ export const COMMAND_LIST = [
     { cmd: 'VIEWPORT', alias: 'VP', desc: 'Create layout viewports' }, 
     { cmd: 'LAYOUT', alias: 'LO', desc: 'Manage layout tabs' }, 
     { cmd: 'FIND', alias: 'FIND', desc: 'Find and replace text' },
+    { cmd: 'TABLE', alias: 'TB', desc: 'Create custom Bill of Materials table' },
     { cmd: 'COPYCLIP', alias: 'CC', desc: 'Copy to clipboard' }, 
     { cmd: 'PASTECLIP', alias: 'CV', desc: 'Paste from clipboard' }
 ];

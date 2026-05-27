@@ -634,11 +634,11 @@ export const dxfToProject = async (dxfString: string, defaultSettings: AppSettin
                     const v1 = (entity.vertices && entity.vertices[0]) || entity.start || { x: 0, y: 0 };
                     const v2 = (entity.vertices && entity.vertices[1]) || entity.end || { x: 0, y: 0 };
                     if (isValid(v1.x) && isValid(v1.y) && isValid(v2.x) && isValid(v2.y)) {
-                        // Filter radiating ghost lines to origin
+                        // Filter radiating ghost lines to origin (use 1e9 to avoid clipping actual sheet borders/grids)
                         const is1_0 = Math.abs(v1.x) < 1e-6 && Math.abs(v1.y) < 1e-6;
                         const is2_0 = Math.abs(v2.x) < 1e-6 && Math.abs(v2.y) < 1e-6;
                         const d = Math.sqrt((v1.x - v2.x)**2 + (v1.y - v2.y)**2);
-                        if ((is1_0 || is2_0) && d > 1e5 && !(is1_0 && is2_0)) return null;
+                        if ((is1_0 || is2_0) && d > 1e9 && !(is1_0 && is2_0)) return null;
 
                         return { id: nextId(), layer, color, thickness, lineType, type: 'line', x1: v1.x - offset.x, y1: v1.y - offset.y, x2: v2.x - offset.x, y2: v2.y - offset.y } as any;
                     }
@@ -656,13 +656,6 @@ export const dxfToProject = async (dxfString: string, defaultSettings: AppSettin
                 case 'LWPOLYLINE':
                 case 'POLYLINE':
                     let vts = (entity.vertices || entity.points || []).filter((v: any) => v && isValid(v.x) && isValid(v.y));
-                    
-                    if (vts.length > 2) {
-                        const hasManyNonZero = vts.filter((v: any) => Math.abs(v.x) > 1e-6 || Math.abs(v.y) > 1e-6).length > vts.length / 2;
-                        if (hasManyNonZero) {
-                            vts = vts.filter((v: any) => Math.abs(v.x) > 1e-6 || Math.abs(v.y) > 1e-6);
-                        }
-                    }
 
                     if (vts.length > 1) {
                         return { 

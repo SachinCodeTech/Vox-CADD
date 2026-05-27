@@ -393,6 +393,7 @@ export interface AppSettings {
   gridSpacing: number; 
   gridMajorInterval?: number;
   snapSpacing: number; 
+  gridSnap?: boolean;
   snapOptions: SnapOptions;
   polarTrackingEnabled?: boolean;
   polarAngles?: number[];
@@ -446,6 +447,6 @@ export interface VoxProject {
 export interface SnapPoint {
   x: number;
   y: number;
-  type: 'end' | 'mid' | 'cen' | 'quad' | 'int' | 'perp' | 'tan' | 'near' | 'node' | 'ext' | 'par' | 'gcen' | 'appint' | 'polar';
+  type: 'end' | 'mid' | 'cen' | 'quad' | 'int' | 'perp' | 'tan' | 'near' | 'node' | 'ext' | 'par' | 'gcen' | 'appint' | 'polar' | 'grid';
   lastPoint?: Point;
 }

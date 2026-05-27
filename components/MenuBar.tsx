@@ -150,6 +150,13 @@ const MenuBar: React.FC<MenuBarProps> = ({ onAction, currentFileName, units }) =
             onClick={() => onAction('toggleCtbManager')} 
         />
         <MenuButton 
+            icon={Sliders} 
+            label="Wall Alignment Audit" 
+            desc="Detect and snap crooked A-WALL segments"
+            color="bg-purple-500" 
+            onClick={() => onAction('toggleWallAlignment')} 
+        />
+        <MenuButton 
             icon={FileText} 
             label="Project Properties" 
             desc="Manage drawing metadata and statistics"

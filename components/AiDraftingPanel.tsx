@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   X, Sparkles, Send, Copy, RotateCcw, 
   ChevronDown, ChevronRight, Check, Play, Info, CornerDownLeft, MessageSquare, History,
-  Trash2, Camera, UploadCloud, Image as ImageIcon
+  Trash2, Camera, UploadCloud, Image as ImageIcon, Target
 } from 'lucide-react';
 
 interface AiDraftingPanelProps {
@@ -99,6 +99,8 @@ export const AiDraftingPanel: React.FC<AiDraftingPanelProps> = ({
 
   const [copiedIndex, setCopiedIndex] = useState<{ msgIdx: number; cmdIdx: number } | null>(null);
   const [scriptCopiedIndex, setScriptCopiedIndex] = useState<number | null>(null);
+  const [columnSize, setColumnSize] = useState(300);
+  const [customDimScale, setCustomDimScale] = useState(100);
   
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -408,6 +410,111 @@ export const AiDraftingPanel: React.FC<AiDraftingPanelProps> = ({
                 </div>
               );
             })}
+          </div>
+        </div>
+
+        {/* Real-time CAD Automation Suite */}
+        <div className="flex flex-col gap-1.5 p-3 bg-indigo-950/20 border border-indigo-500/15 rounded-xl">
+          <label className="text-[8px] font-black font-mono text-indigo-400 uppercase tracking-widest flex items-center gap-1">
+            <Sparkles size={10} />
+            AI CAD Power Actions
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                onCommand("autodim");
+              }}
+              title="Locate the most recently modified rectangular boundary and automatically execute 'dimlinear' for all four walls on layer A-DIM"
+              className="py-1.5 px-2 bg-black/60 hover:bg-indigo-500/15 hover:text-indigo-300 text-neutral-400 font-bold text-[9px] uppercase tracking-wider rounded-lg border border-white/5 flex items-center justify-center gap-1.5 transition-all active:scale-95 text-center"
+            >
+              <Target size={11} className="text-indigo-400 shrink-0" />
+              Auto-Dim Walls
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onCommand("suggestlayout");
+              }}
+              title="Analyze the current A-WALL geometry configuration and construct an AI-suggested room furniture/doors layout preview"
+              className="py-1.5 px-2 bg-black/60 hover:bg-indigo-500/15 hover:text-indigo-300 text-neutral-400 font-bold text-[9px] uppercase tracking-wider rounded-lg border border-white/5 flex items-center justify-center gap-1.5 transition-all active:scale-95 text-center"
+            >
+              <Sparkles size={11} className="text-indigo-400 shrink-0" />
+              AI Suggest Layout
+            </button>
+          </div>
+        </div>
+
+        {/* Structural Grid and Dim Scales */}
+        <div className="flex flex-col gap-2 p-3 bg-teal-950/20 border border-teal-500/15 rounded-xl">
+          <label className="text-[8px] font-black font-mono text-teal-400 uppercase tracking-widest flex items-center gap-1">
+            <Target size={10} />
+            Structural Grid & Scale
+          </label>
+          
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] text-neutral-400 font-bold uppercase">Column Size x (mm):</span>
+              <span className="text-[10px] font-mono text-teal-300 font-bold">{columnSize} mm</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <input 
+                type="range" 
+                min={150} 
+                max={1500} 
+                step={50}
+                value={columnSize}
+                onChange={e => setColumnSize(parseInt(e.target.value) || 300)}
+                className="flex-1 accent-teal-500 h-1 rounded-lg bg-neutral-800"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  onCommand(`structgrid ${columnSize}`);
+                }}
+                className="py-1 px-2.5 bg-teal-600 hover:bg-teal-500 text-black font-black text-[9px] uppercase tracking-wider rounded-md transition-all active:scale-95"
+              >
+                Build Grid
+              </button>
+            </div>
+            <p className="text-[8px] text-neutral-500 leading-normal mt-0.5">
+              Generates a dynamic <strong>{columnSize/100}m x {columnSize/100}m</strong> structural grid with {columnSize}mm x {columnSize}mm columns on layer A-WALL at corners (0,0), ({columnSize*10},0), etc.
+            </p>
+          </div>
+
+          <div className="h-px bg-white/5 my-0.5" />
+
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] text-neutral-400 font-bold uppercase">Drawing Scale:</span>
+              <span className="text-[10px] font-mono text-teal-300 font-bold">1 : {customDimScale}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                value={customDimScale}
+                onChange={e => setCustomDimScale(parseInt(e.target.value) || 100)}
+                className="bg-black/40 border border-white/5 text-[9px] font-bold text-neutral-300 rounded px-1.5 py-1 outline-none"
+              >
+                <option value={10}>1 : 10 (Detail)</option>
+                <option value={20}>1 : 20 (Detail)</option>
+                <option value={50}>1 : 50 (Room Layout)</option>
+                <option value={100}>1 : 100 (Floor Plan)</option>
+                <option value={200}>1 : 200 (Site Layout)</option>
+                <option value={500}>1 : 500 (Master Plan)</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => {
+                  onCommand(`dimstyle create scale_1_${customDimScale} ${customDimScale}`);
+                }}
+                className="py-1 px-1.5 bg-neutral-800 hover:text-teal-300 text-neutral-400 font-bold text-[9px] uppercase tracking-wider rounded border border-white/5 transition-all text-center"
+              >
+                Create Style
+              </button>
+            </div>
+            <p className="text-[8px] text-neutral-500 leading-normal">
+              Creates and selects a Dimension Style properly dimensioned for print output at 1:{customDimScale}.
+            </p>
           </div>
         </div>
 

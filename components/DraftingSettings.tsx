@@ -203,7 +203,7 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
                 <div className="space-y-8 animate-in slide-in-from-right-4 duration-300">
                     <div className="space-y-4">
                         <label className="text-[8px] font-black text-neutral-600 uppercase tracking-[0.25em] px-1">Grid Controls</label>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-3 gap-2">
                              <button onClick={() => onSettingsChange({ grid: !settings.grid })} className={`p-5 rounded-2xl border flex flex-col items-center gap-3 transition-all ${settings.grid ? 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400' : 'bg-neutral-900/50 border-white/5 text-neutral-600'}`}>
                                 <LayoutGrid size={20} />
                                 <span className="text-[8px] font-black uppercase tracking-widest">Display</span>
@@ -212,11 +212,15 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
                                 <Hash size={20} />
                                 <span className="text-[8px] font-black uppercase tracking-widest">Ortho</span>
                              </button>
+                             <button onClick={() => onSettingsChange({ gridSnap: !settings.gridSnap })} className={`p-5 rounded-2xl border flex flex-col items-center gap-3 transition-all ${settings.gridSnap ? 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400' : 'bg-neutral-900/50 border-white/5 text-neutral-600'}`}>
+                                <Target size={20} />
+                                <span className="text-[8px] font-black uppercase tracking-widest">Snap (F9)</span>
+                             </button>
                         </div>
                     </div>
                     <div className="space-y-4">
                         <label className="text-[8px] font-black text-neutral-600 uppercase tracking-[0.25em] px-1">Spacing Values</label>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-3 gap-3">
                            <div className="space-y-2">
                                <input 
                                    type="number" 
@@ -225,6 +229,15 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
                                    className="w-full bg-black border border-white/10 rounded-xl py-4 px-4 text-xs text-cyan-400 font-mono focus:border-cyan-500 outline-none" 
                                />
                                <span className="text-[7px] text-neutral-500 font-black uppercase block text-center">Interval</span>
+                           </div>
+                           <div className="space-y-2">
+                               <input 
+                                   type="number" 
+                                   value={settings.snapSpacing} 
+                                   onChange={e => onSettingsChange({ snapSpacing: parseFloat(e.target.value) || 10 })}
+                                   className="w-full bg-black border border-white/10 rounded-xl py-4 px-4 text-xs text-cyan-400 font-mono focus:border-cyan-500 outline-none" 
+                               />
+                               <span className="text-[7px] text-neutral-500 font-black uppercase block text-center">Snap Spacing</span>
                            </div>
                            <div className="space-y-2">
                                <input 

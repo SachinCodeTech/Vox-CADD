@@ -4465,3 +4465,296 @@ export class FindCommand implements CADCommand {
     }
     onClick() {} onMove() {} onEnter() {} onCancel() { this.ctx.onFinish(); }
 }
+
+export class TableCommand implements CADCommand {
+    name = "TABLE";
+    rows: number = 6;
+    cols: number = 4;
+    cellWidth: number = 120;
+    step: number = 0; // 0: insertion point, 1: rows, 2: columns, 3: cellWidth
+
+    constructor(public ctx: CommandContext) {}
+
+    onStart() {
+        this.ctx.setMessage("TABLE Specify insertion point or [Rows/Columns/Cellwidth]:");
+    }
+
+    generateTableShapes(p: Point, isPreview: boolean = false): Shape[] {
+        const style = getStyleSettings(this.ctx);
+        const settings = this.ctx.getSettings();
+        const layer = style.layer;
+        const color = isPreview ? '#00FFFF' : style.color;
+        const thickness = style.thickness;
+        
+        const txtSize = settings.textSize || 15;
+        const cellHeight = txtSize * 2.5;
+        
+        const colWidths: number[] = [];
+        if (this.cols === 4) {
+            colWidths.push(this.cellWidth * 0.5, this.cellWidth * 1.5, this.cellWidth * 0.6, this.cellWidth * 1.4);
+        } else {
+            for (let c = 0; c < this.cols; c++) {
+                colWidths.push(this.cellWidth);
+            }
+        }
+        const totalWidth = colWidths.reduce((sum, w) => sum + w, 0);
+        
+        const shapes: Shape[] = [];
+        
+        // Horizontal lines
+        for (let r = 0; r <= this.rows; r++) {
+            const yLine = p.y - r * cellHeight;
+            shapes.push({
+                id: generateId(),
+                type: 'line',
+                layer,
+                color,
+                thickness,
+                x1: p.x,
+                y1: yLine,
+                x2: p.x + totalWidth,
+                y2: yLine,
+                isPreview
+            } as any);
+        }
+        
+        // Vertical lines
+        let currentX = p.x;
+        shapes.push({
+            id: generateId(),
+            type: 'line',
+            layer,
+            color,
+            thickness,
+            x1: currentX,
+            y1: p.y,
+            x2: currentX,
+            y2: p.y - this.rows * cellHeight,
+            isPreview
+        } as any);
+        
+        colWidths.forEach(w => {
+            currentX += w;
+            shapes.push({
+                id: generateId(),
+                type: 'line',
+                layer,
+                color,
+                thickness,
+                x1: currentX,
+                y1: p.y,
+                x2: currentX,
+                y2: p.y - this.rows * cellHeight,
+                isPreview
+            } as any);
+        });
+        
+        // Gather BOM data
+        const layersDef = this.ctx.getLayers();
+        const blocksDef = this.ctx.getBlocks();
+        const allShapes = Object.values(layersDef).flat();
+        
+        const blockCounts: Record<string, number> = {};
+        const layerCounts: Record<string, { count: number, types: Set<string> }> = {};
+        
+        allShapes.forEach(shape => {
+            if (shape.type === 'block') {
+                const bId = shape.blockId;
+                const bName = blocksDef[bId]?.name || shape.name || bId;
+                blockCounts[bName] = (blockCounts[bName] || 0) + 1;
+            } else {
+                const lyr = shape.layer || '0';
+                if (!layerCounts[lyr]) {
+                    layerCounts[lyr] = { count: 0, types: new Set() };
+                }
+                layerCounts[lyr].count++;
+                if (shape.type) {
+                    layerCounts[lyr].types.add(shape.type);
+                }
+            }
+        });
+        
+        const bomItems: { name: string, qty: string, desc: string }[] = [];
+        Object.entries(blockCounts).forEach(([name, qty]) => {
+            bomItems.push({
+                name: name.toUpperCase(),
+                qty: qty.toString(),
+                desc: "Block Segment Insertion"
+            });
+        });
+        
+        Object.entries(layerCounts).forEach(([layerName, info]) => {
+            const typesStr = Array.from(info.types).map(t => t.toUpperCase()).join('/');
+            bomItems.push({
+                name: `LAYER: ${layerName.toUpperCase()}`,
+                qty: info.count.toString(),
+                desc: `${typesStr} objects`
+            });
+        });
+        
+        // Populate cell texts
+        for (let r = 0; r < this.rows; r++) {
+            const isHeader = r === 0;
+            
+            let colX = p.x;
+            for (let c = 0; c < this.cols; c++) {
+                const w = colWidths[c];
+                const contentX = colX + w / 2;
+                const contentY = p.y - r * cellHeight - cellHeight / 2;
+                
+                let cellText = "";
+                if (isHeader) {
+                    if (this.cols === 4) {
+                        const headers = ["ITEM", "COMPONENT", "QTY", "DESCRIPTION"];
+                        cellText = headers[c] || "";
+                    } else {
+                        cellText = c === 0 ? "ITEM" : (c === 1 ? "NAME" : (c === 2 ? "QTY" : `COL ${c + 1}`));
+                    }
+                } else if (this.cols === 4) {
+                    const itemIndex = r - 1;
+                    const bItem = bomItems[itemIndex];
+                    if (bItem) {
+                        if (c === 0) cellText = r.toString();
+                        else if (c === 1) cellText = bItem.name;
+                        else if (c === 2) cellText = bItem.qty;
+                        else if (c === 3) cellText = bItem.desc;
+                    } else {
+                        if (c === 0) cellText = r.toString();
+                        else cellText = "-";
+                    }
+                } else {
+                    const itemIndex = r - 1;
+                    const bItem = bomItems[itemIndex];
+                    if (c === 0) {
+                        cellText = r.toString();
+                    } else if (c === 1) {
+                        cellText = bItem ? bItem.name : "-";
+                    } else if (c === 2) {
+                        cellText = bItem ? bItem.qty : "-";
+                    } else {
+                        cellText = "-";
+                    }
+                }
+                
+                shapes.push({
+                    id: generateId(),
+                    type: 'mtext',
+                    layer,
+                    color,
+                    x: contentX,
+                    y: contentY,
+                    size: isHeader ? txtSize * 1.1 : txtSize,
+                    content: cellText,
+                    bold: isHeader,
+                    attachmentPoint: 5, // Center/Middle
+                    width: w,
+                    height: cellHeight,
+                    isPreview,
+                    rotation: 0
+                } as any);
+                
+                colX += w;
+            }
+        }
+        
+        return shapes;
+    }
+
+    onInput(text: string): boolean {
+        const t = text.trim().toLowerCase();
+        
+        if (this.step === 1) {
+            const r = parseInt(t);
+            if (!isNaN(r) && r > 0) {
+                this.rows = r;
+                this.ctx.addLog(`TABLE Rows updated to ${r}`);
+            } else {
+                this.ctx.addLog("Invalid row count.");
+            }
+            this.step = 0;
+            this.ctx.setMessage("TABLE Specify insertion point or [Rows/Columns/Cellwidth]:");
+            return true;
+        }
+        if (this.step === 2) {
+            const c = parseInt(t);
+            if (!isNaN(c) && c > 0) {
+                this.cols = c;
+                this.ctx.addLog(`TABLE Columns updated to ${c}`);
+            } else {
+                this.ctx.addLog("Invalid column count.");
+            }
+            this.step = 0;
+            this.ctx.setMessage("TABLE Specify insertion point or [Rows/Columns/Cellwidth]:");
+            return true;
+        }
+        if (this.step === 3) {
+            const w = parseFloat(t);
+            if (!isNaN(w) && w > 0) {
+                this.cellWidth = w;
+                this.ctx.addLog(`TABLE Cell width updated to ${w}`);
+            } else {
+                this.ctx.addLog("Invalid cell width.");
+            }
+            this.step = 0;
+            this.ctx.setMessage("TABLE Specify insertion point or [Rows/Columns/Cellwidth]:");
+            return true;
+        }
+
+        if (t === 'r' || t === 'rows') {
+            this.step = 1;
+            this.ctx.setMessage("TABLE Enter number of rows <6>:");
+            return true;
+        }
+        if (t === 'c' || t === 'columns') {
+            this.step = 2;
+            this.ctx.setMessage("TABLE Enter number of columns <4>:");
+            return true;
+        }
+        if (t === 'w' || t === 'cellwidth' || t === 'width') {
+            this.step = 3;
+            this.ctx.setMessage("TABLE Enter cell width <120>:");
+            return true;
+        }
+
+        const pt = resolvePointInput(text, null, this.ctx.getSettings(), this.ctx.lastMousePoint);
+        if (pt) {
+            this.onClick(pt);
+            return true;
+        }
+        return false;
+    }
+
+    onClick(p: Point) {
+        if (this.step !== 0) return;
+        const style = getStyleSettings(this.ctx);
+        const shapes = this.generateTableShapes(p, false);
+        this.ctx.setLayers(prev => {
+            const layer = style.layer;
+            return {
+                ...prev,
+                [layer]: [...(prev[layer] || []), ...shapes]
+            };
+        });
+        this.ctx.addLog("BOM_TABLE_CREATED");
+        this.ctx.onFinish();
+    }
+
+    onMove(p: Point) {
+        if (this.step === 0) {
+            const previewShapes = this.generateTableShapes(p, true);
+            this.ctx.setPreview(previewShapes);
+        } else {
+            this.ctx.setPreview(null);
+        }
+    }
+
+    onEnter() {
+        if (this.step === 0) {
+            this.onClick(this.ctx.lastMousePoint);
+        }
+    }
+
+    onCancel() {
+        this.ctx.onFinish();
+    }
+}

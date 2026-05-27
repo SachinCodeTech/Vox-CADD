@@ -109,6 +109,13 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   const isModel = activeTab === 'model';
   const touchStartCount = useRef<number>(0);
 
+  // Canvas Optimization Layer Refs
+  const isViewChangingRef = useRef<boolean>(false);
+  const viewTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const offscreenViewRef = useRef<{ scale: number; originX: number; originY: number; w: number; h: number; tab: string } | null>(null);
+  const offscreenCacheValidRef = useRef<boolean>(false);
+
   const getPixelRatio = () => window.devicePixelRatio || 1;
   
   const allRenderableShapes = useMemo(() => {
@@ -308,13 +315,9 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     trackingPoints.current = [];
   }, [activeCommandName, isCommandActive]);
 
-  const redraw = useCallback(() => {
-    const canvas = canvasRef.current; if (!canvas) return;
-    const ctx = canvas.getContext('2d', { alpha: false }) as CanvasRenderingContext2D | null;
-    if (!ctx || !view) return;
-    const r = getPixelRatio(), w = canvas.width/r, h = canvas.height/r, ts = view.scale * settings.drawingScale;
-    ctx.setTransform(r, 0, 0, r, 0, 0); 
+  const renderStaticSceneToContext = useCallback((ctx: CanvasRenderingContext2D, w: number, h: number, r: number, ts: number) => {
     const isModel = activeTab === 'model';
+    ctx.setTransform(r, 0, 0, r, 0, 0);
     ctx.fillStyle = isModel ? "#0a0a0c" : "#333"; ctx.fillRect(0, 0, w, h);
 
     if (!isModel) {
@@ -394,8 +397,9 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               const vShapes = renderingSpatialIndex.query(vpBounds);
               vShapes.forEach(s => drawShape(ctx, s, vts));
               
-              if (isActive && isCommandActive && previewShapes) {
-                  previewShapes.forEach(s => drawShape(ctx, s, vts));
+              const layoutPreviewShapes = (window as any).__activePreviewShapes || previewShapes;
+              if (isActive && isCommandActive && layoutPreviewShapes) {
+                  layoutPreviewShapes.forEach(s => drawShape(ctx, s, vts));
               }
               
               ctx.restore();
@@ -411,10 +415,6 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
             activeLayout.entities.forEach(s => drawShape(ctx, s, ts));
             ctx.restore();
           }
-      }
-      
-      if (!isViewportActive) {
-          // return? Let's check how we handle clicks in layout
       }
     }
 
@@ -473,16 +473,6 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     
       const renderable = getAllShapesForRendering();
       
-      const textEntities = renderable.filter(s => s.type === 'text' || s.type === 'mtext');
-      if (Date.now() % 5000 < 50) { // Log every ~5 seconds to avoid spam
-          console.log(`[DEBUG] REDRAW: Total=${renderable.length}, Text=${textEntities.length}, Scale=${ts.toFixed(5)}`);
-          const allBounds = getAllShapesBounds(layers, blocks);
-          if (allBounds) {
-              console.log(`[DEBUG] BOUNDS: [${allBounds.xMin.toFixed(1)}, ${allBounds.yMin.toFixed(1)} to ${allBounds.xMax.toFixed(1)}, ${allBounds.yMax.toFixed(1)}]`);
-          }
-      }
-
-      // Performance Optimization: Spatial Indexing & Viewport Culling
       const sMin = calculateScreenToWorld(0, 0, view, w, h);
       const sMax = calculateScreenToWorld(w*r, h*r, view, w, h);
       const viewportBounds = { 
@@ -497,9 +487,31 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       visibleShapes.forEach(s => {
           drawShape(ctx, s, ts);
       });
+      ctx.restore();
+    }
+  }, [activeTab, layouts, view, settings, isViewportActive, activeViewportId, renderingSpatialIndex, previewShapes, isCommandActive, layers, blocks, allRenderableShapes]);
+
+  const renderDynamicOverlays = useCallback((ctx: CanvasRenderingContext2D, w: number, h: number, r: number, ts: number) => {
+    const isModel = activeTab === 'model';
+    ctx.setTransform(r, 0, 0, r, 0, 0);
+
+    if (isModel) {
+      ctx.save(); ctx.translate(w/2 + view.originX, h/2 + view.originY); ctx.scale(ts, -ts);
+
       if (activeSnapRef.current) drawSnapMarker(ctx, activeSnapRef.current, ts, w, h);
-      if (isCommandActive && previewShapes) previewShapes.forEach(s => drawShape(ctx, s, ts));
+      const mainPreviewShapes = (window as any).__activePreviewShapes || previewShapes;
+      if (mainPreviewShapes) mainPreviewShapes.forEach(s => drawShape(ctx, s, ts));
       
+      const sMin = calculateScreenToWorld(0, 0, view, w, h);
+      const sMax = calculateScreenToWorld(w*r, h*r, view, w, h);
+      const viewportBounds = { 
+          xMin: Math.min(sMin.x, sMax.x), 
+          yMin: Math.min(sMin.y, sMax.y), 
+          xMax: Math.max(sMin.x, sMax.x), 
+          yMax: Math.max(sMin.y, sMax.y) 
+      };
+      
+      const visibleShapes = renderingSpatialIndex.query(viewportBounds);
       visibleShapes.filter(s => selectedIds.includes(s.id)).forEach(s => drawGrips(ctx, s, ts));
 
       // Polar / Tracking Line
@@ -674,7 +686,80 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         ctx.fillStyle = '#00bcd4'; ctx.fillText(text, screenPos.x + 25, screenPos.y - 13);
     }
     ctx.restore();
-  }, [view, layers, previewShapes, selectedIds, highlightIds, settings, layerConfig, activeTab, isViewportActive, isCommandActive, selectionRect]);
+  }, [activeTab, view, settings, isCommandActive, previewShapes, selectedIds, isAiThinking, lastAiCommandTime, selectionRect, renderingSpatialIndex]);
+
+  const redraw = useCallback(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    if (canvas.width <= 0 || canvas.height <= 0) return;
+    const ctx = canvas.getContext('2d', { alpha: false }) as CanvasRenderingContext2D | null;
+    if (!ctx || !view) return;
+    const r = getPixelRatio(), w = canvas.width/r, h = canvas.height/r, ts = view.scale * settings.drawingScale;
+    if (w <= 0 || h <= 0) return;
+    
+    const isModel = activeTab === 'model';
+    const cache = offscreenCanvasRef.current;
+    const cachedView = offscreenViewRef.current;
+    let usedCache = false;
+
+    // Use offscreen buffer fast coordinate-scaling & copy during active pan/zoom 
+    if (isViewChangingRef.current && cache && cache.width > 0 && cache.height > 0 && cachedView && cachedView.tab === activeTab && cachedView.w === w && cachedView.h === h && offscreenCacheValidRef.current) {
+      ctx.setTransform(r, 0, 0, r, 0, 0); 
+      ctx.fillStyle = isModel ? "#0a0a0c" : "#333"; ctx.fillRect(0, 0, w, h);
+
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0); // resets to pixel coordinate space
+      
+      const ts1 = view.scale * settings.drawingScale;
+      const ts0 = cachedView.scale * settings.drawingScale;
+      const ratio = ts1 / ts0;
+      
+      const dx = -ratio * (w * r / 2 + cachedView.originX * r) + w * r / 2 + view.originX * r;
+      const dy = -ratio * (h * r / 2 + cachedView.originY * r) + h * r / 2 + view.originY * r;
+      
+      if (cache.width > 0 && cache.height > 0) {
+        ctx.drawImage(cache, dx, dy, w * r * ratio, h * r * ratio);
+      }
+      ctx.restore();
+      usedCache = true;
+    }
+
+    // Refresh of high-resolution cache when the view stabilizes or geometry dictates
+    if (!usedCache) {
+      if (!cache || cache.width !== canvas.width || cache.height !== canvas.height) {
+        if (!offscreenCanvasRef.current) {
+          offscreenCanvasRef.current = document.createElement('canvas');
+        }
+        if (canvas.width > 0 && canvas.height > 0) {
+          offscreenCanvasRef.current.width = canvas.width;
+          offscreenCanvasRef.current.height = canvas.height;
+        }
+      }
+      
+      const octx = offscreenCanvasRef.current!.getContext('2d', { alpha: false }) as CanvasRenderingContext2D;
+      renderStaticSceneToContext(octx, w, h, r, ts);
+
+      offscreenViewRef.current = {
+        scale: view.scale,
+        originX: view.originX,
+        originY: view.originY,
+        w,
+        h,
+        tab: activeTab
+      };
+      offscreenCacheValidRef.current = true;
+
+      // Copy completed high-resolution offscreen buffer 1:1 on screens
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      if (offscreenCanvasRef.current && offscreenCanvasRef.current.width > 0 && offscreenCanvasRef.current.height > 0) {
+        ctx.drawImage(offscreenCanvasRef.current, 0, 0);
+      }
+      ctx.restore();
+    }
+
+    // Overlay real-time dynamic graphics (Cursor, snaps, alignment tracking, marquees)
+    renderDynamicOverlays(ctx, w, h, r, ts);
+  }, [view, settings, activeTab, renderStaticSceneToContext, renderDynamicOverlays]);;
 
   const drawGrips = (ctx: CanvasRenderingContext2D, s: Shape, ts: number) => {
     const size = 7 / ts;
@@ -1635,8 +1720,15 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
             }
         }
         ctx.restore(); break;
-      case 'block':
-        const block = blocks[s.blockId || s.name || ''];
+       case 'block':
+        const blockIdToFind = (s.blockId || s.name || '').toLowerCase().trim();
+        const block = blocks[s.blockId || s.name || ''] || 
+                      blocks[blockIdToFind] || 
+                      Object.values(blocks).find((b: any) => 
+                          ((b && b.name) || '').toLowerCase().trim() === blockIdToFind || 
+                          ((b && b.id) || '').toLowerCase().trim() === blockIdToFind ||
+                          String((b && b.handle) || '').toLowerCase().trim() === blockIdToFind
+                      );
         if (block) {
           ctx.save();
           ctx.translate(s.x, s.y);
@@ -1664,7 +1756,10 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
             ctx.translate(s.x, -s.y);
             ctx.font = `${12 / ts}px monospace`;
             ctx.fillStyle = "#22d3ee";
-            ctx.fillText(`⟐ ${s.blockId || s.name || 'Block'}`, 0, 0);
+            const rawBlockName = s.blockId || s.name || 'Block';
+            const isAnon = rawBlockName.startsWith('*') || rawBlockName.startsWith('A$C') || /^[0-9a-f]{6,16}$/i.test(rawBlockName);
+            const displayName = isAnon ? 'Block Ref' : rawBlockName;
+            ctx.fillText(`⟐ ${displayName}`, 0, 0);
             ctx.restore();
         }
         break;
@@ -2076,6 +2171,11 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         ctx.moveTo(x + size, y - size); ctx.lineTo(x - size, y + size);
         ctx.stroke(); ctx.beginPath();
         ctx.arc(x, y, size/2, 0, Math.PI * 2);
+        break;
+      case 'grid':
+        ctx.moveTo(x - size/1.5, y); ctx.lineTo(x + size/1.5, y);
+        ctx.moveTo(x, y - size/1.5); ctx.lineTo(x, y + size/1.5);
+        ctx.rect(x - size/3, y - size/3, size * (2/3), size * (2/3));
         break;
       default:
         ctx.rect(x - size, y - size, size * 2, size * 2);
@@ -2592,6 +2692,36 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     return () => cancelAnimationFrame(anim);
   }, [isAiThinking, lastAiCommandTime, redraw]);
 
+  // Invalidate offscreen cache when geometry or active settings affect layout rendering
+  useEffect(() => {
+    offscreenCacheValidRef.current = false;
+  }, [layers, blocks, layerConfig, settings, activeTab]);
+
+  // Track active view changes (panning, zooming, pinching) to enable fast-scaling draw mode
+  const lastViewRef = useRef<ViewState>(view);
+  useEffect(() => {
+    const scaleDiff = Math.abs(view.scale - lastViewRef.current.scale);
+    const originDiff = Math.abs(view.originX - lastViewRef.current.originX) + Math.abs(view.originY - lastViewRef.current.originY);
+    
+    if (scaleDiff > 1e-6 || originDiff > 1e-6) {
+      isViewChangingRef.current = true;
+      if (viewTimeoutRef.current) {
+        clearTimeout(viewTimeoutRef.current);
+      }
+      viewTimeoutRef.current = setTimeout(() => {
+        isViewChangingRef.current = false;
+        redraw();
+      }, 100);
+    }
+    lastViewRef.current = view;
+  }, [view, redraw]);
+
+  useEffect(() => {
+    return () => {
+      if (viewTimeoutRef.current) clearTimeout(viewTimeoutRef.current);
+    };
+  }, []);
+
   useEffect(() => { redraw(); }, [redraw, view, isViewportActive, layers, layerConfig, selectedIds, highlightIds, settings, previewShapes, activeTab]);
 
   const handleContextMenu = (e: React.MouseEvent) => {
@@ -2610,8 +2740,32 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     }
   };
 
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const blockId = e.dataTransfer.getData('application/x-cad-block');
+    const bJson = e.dataTransfer.getData('application/x-cad-block-json');
+    if (blockId && canvasRef.current) {
+      const rect = canvasRef.current.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const wp = screenToWorld(sx, sy);
+      onAction?.('dropBlock', { blockId, x: wp.x, y: wp.y, blockJson: bJson });
+    }
+  };
+
   return (
-    <div className="w-full h-full overflow-hidden bg-[#0a0a0c] touch-none relative">
+    <div 
+      className="w-full h-full overflow-hidden bg-[#0a0a0c] touch-none relative"
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
         <canvas ref={canvasRef} className="w-full h-full outline-none select-none touch-none" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onContextMenu={handleContextMenu} />
         
         {/* Dynamic Input Floating UI */}

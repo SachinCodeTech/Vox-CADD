@@ -64,6 +64,7 @@ interface RecentFileItemProps {
     onClick: () => void;
     onDelete: (e: React.MouseEvent) => void;
     onDownload: (e: React.MouseEvent) => void;
+    onRename: (e: React.MouseEvent) => void;
     current?: boolean;
 }
 
@@ -87,7 +88,7 @@ const RecentFileItem: React.FC<RecentFileItemProps> = ({ name, date, onClick, on
             {current && (
                 <div className="px-2 py-1 bg-cyan-400 rounded text-[7px] font-black text-black uppercase tracking-tight shadow-[0_0_10px_rgba(6,182,212,0.3)] mr-1">Active</div>
             )}
-            <div className="flex items-center gap-1 opacity-0 group-hover/item:opacity-100 transition-opacity">
+            <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover/item:opacity-100 transition-opacity">
                 <button 
                     onClick={onRename}
                     title="Rename"

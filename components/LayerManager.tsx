@@ -14,6 +14,7 @@ interface LayerManagerProps {
   onSetActive: (id: string) => void;
   onOpenLineTypes?: () => void;
   onOpenColorSelector?: (currentColor: string, onSelect: (color: string) => void, title?: string) => void;
+  onPurgeEmpty?: () => void;
 }
 
 const LINE_WEIGHTS = [
@@ -56,7 +57,7 @@ const LineTypePreview = ({ type, color = "#00bcd4", weight = 0.25 }: { type: Lin
 };
 
 const LayerManager: React.FC<LayerManagerProps> = ({ 
-    layers, lineTypeDefinitions, activeLayer, onClose, onUpdateLayer, onAddLayer, onRemoveLayer, onSetActive, onOpenLineTypes, onOpenColorSelector
+    layers, lineTypeDefinitions, activeLayer, onClose, onUpdateLayer, onAddLayer, onRemoveLayer, onSetActive, onOpenLineTypes, onOpenColorSelector, onPurgeEmpty
 }) => {
   const [newLayerName, setNewLayerName] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -167,6 +168,54 @@ const LayerManager: React.FC<LayerManagerProps> = ({
             <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.15em] text-neutral-300">Layer Properties</span>
         </div>
         <button onClick={onClose} className="w-8 h-8 sm:w-6 sm:h-6 flex items-center justify-center hover:bg-white/5 rounded-full text-neutral-600 hover:text-white transition-all"><X size={18} /></button>
+      </div>
+
+      {/* Layer Actions Toolbar */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-white/5 bg-[#0e0e10] shrink-0">
+        <div className="flex items-center gap-2">
+          <button 
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              Object.keys(layers).forEach(id => onUpdateLayer(id, { locked: true }));
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-800/80 hover:bg-amber-600/15 active:scale-95 text-neutral-400 hover:text-amber-500 border border-white/5 hover:border-amber-500/20 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all"
+            title="Lock all layers in current drawing"
+          >
+            <Lock size={11} className="stroke-[2.5]" />
+            Lock All
+          </button>
+          <button 
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              Object.keys(layers).forEach(id => onUpdateLayer(id, { locked: false }));
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-800/80 hover:bg-cyan-500/15 active:scale-95 text-neutral-400 hover:text-cyan-400 border border-white/5 hover:border-cyan-500/20 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all"
+            title="Unlock all layers in current drawing"
+          >
+            <Unlock size={11} className="stroke-[2.5]" />
+            Unlock All
+          </button>
+          
+          {onPurgeEmpty && (
+            <button 
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onPurgeEmpty();
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-800/80 hover:bg-red-500/15 active:scale-95 text-neutral-400 hover:text-red-400 border border-white/5 hover:border-red-500/20 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all"
+              title="Purge layers that contain zero shapes and are not currently active"
+            >
+              <Trash2 size={11} className="stroke-[2.5]" />
+              Purge Empty
+            </button>
+          )}
+        </div>
+        <div className="text-[8px] font-mono text-neutral-600 font-bold uppercase tracking-widest mr-1">
+          {Object.keys(layers).length} ACTIVE LAYERS
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto bg-[#0a0a0c] scrollbar-none">

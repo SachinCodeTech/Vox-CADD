@@ -127,34 +127,60 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
             
             let actualText = text;
             
-            // 1. Handle dimension measurement placeholder <>
-            // Note: measurement value should be injected before this or handled in caller
-
-            // 2. Clear known garbage names but be careful with * blocks (AutoCAD uses them for anonymous blocks/dimensions)
-            if (actualText.startsWith('A$C') && /A\$C[0-9A-F]{8,}/i.test(actualText)) {
+            // Rejects anonymized AutoCAD labels, handles & block references
+            if (/^\*[u|d|x|e|t|a][0-9]+/i.test(actualText) || /^\*[0-9]+/i.test(actualText) || /^[0-9a-f]{6,16}$/i.test(actualText)) {
                 return '';
             }
-            // Allow common dimension placeholders and small strings
+            if (/A\$C[0-9a-f]+/i.test(actualText) || actualText.startsWith('A$C')) {
+                return '';
+            }
+
+            // Clean AutoCAD formatting garbage and split on * to find actual text labels inside anonymous names
+            if (actualText.startsWith('A$') || actualText.includes('$')) {
+                const parts = actualText.split('*');
+                const lastPart = parts[parts.length - 1];
+                if (lastPart && lastPart.length >= 2 && !lastPart.startsWith('A$')) {
+                    actualText = lastPart;
+                } else {
+                    actualText = actualText.replace(/A\$\w+/gi, '');
+                }
+            }
+
+            // Allow common dimension placeholders and small strings (single letters like grids or labels)
             if (actualText === '<>' || actualText.length < 2) return actualText;
 
-            // 3. Robust MText/Regex cleanup 
-            // We want to keep \P as newline, but remove formatting
-            actualText = actualText
-                .replace(/\\P/g, "\n")
-                .replace(/\\L/g, "")
-                .replace(/\\l/g, "")
-                .replace(/\\U\+([0-9A-F]{4})/gi, (match, grp) => String.fromCharCode(parseInt(grp, 16)))
-                .replace(/\{/g, "")
-                .replace(/\}/g, "")
-                // Remove formatting groups like \fArial|b0|i0|c0|p34;
-                .replace(/\\[fACWHQTQ][^;]*;/g, "")
-                .replace(/\\S[^;]*;/g, "")
-                .replace(/\\/g, "");
+            // Robust MText / formatting cleanup
+            let lastText = "";
+            while (actualText !== lastText) {
+                lastText = actualText;
+                actualText = actualText
+                    .replace(/\{([^}]+)\}/gi, "$1") // Extract text inside braces nested
+                    .replace(/\\[fACWHQTQ][^;]*;/gi, "") // Remove style codes e.g. \fArial|b0|i0;
+                    .replace(/\\px[^;]*;/gi, "") // Paragraph spacing
+                    .replace(/\\pi[^;]*;/gi, "") // Indent
+                    .replace(/\\pd[^;]*;/gi, "") // Tabs
+                    .replace(/\\A[0-2];/gi, "") // Alignment
+                    .replace(/\\S([^;^]*)[^;]*;/gi, "$1") // Stack fractions and formulas gracefully
+                    .replace(/\\K[0-9a-fA-F]{6}/gi, "") // Color
+                    .replace(/\\[c|C][0-9]{1,10};/gi, "") // Color codes
+                    .replace(/\\[l|L]/gi, "") // Underline
+                    .replace(/\\[o|O]/gi, "") // Overline
+                    .replace(/\\P/gi, "\n") // Newlines
+                    .replace(/\\~([^;]*);/gi, "$1") // Non-breaking space
+                    .replace(/\\U\+([0-9A-F]{4})/gi, (match, grp) => String.fromCharCode(parseInt(grp, 16)));
+            }
 
-            // 4. Final trim
+            // Map standard AutoCAD control codes: %%c -> ⌀, %%d -> °, %%p -> ±, %%% -> %
+            actualText = actualText
+                .replace(/%%[cC]/g, '⌀')
+                .replace(/%%[dD]/g, '°')
+                .replace(/%%[pP]/g, '±')
+                .replace(/%%[uU]/g, '')
+                .replace(/%%[oO]/g, '')
+                .replace(/%%%/g, '%');
+
+            // final clean filter: if it's strictly numbers or just formatting residue, keep only standard text
             actualText = actualText.trim();
-            
-            // If it's just garbage characters from encoding errors, try to detect
             if (actualText.length > 50 && !actualText.includes(' ') && /[A-Z0-9]{20,}/.test(actualText)) {
                 return '';
             }
@@ -162,7 +188,7 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
             return actualText;
         };
 
-        const convertEntity = (ent: any): Shape | null => {
+        const convertEntity = (ent: any, isInsideBlock = false): Shape | null => {
             if (!ent) return null;
             
             // Handle layer as string or object
@@ -212,11 +238,11 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                         const start = ent.startPoint || ent.start_point || ent.points?.[0] || ent.start;
                         const end = ent.endPoint || ent.end_point || ent.points?.[1] || ent.end;
                         if (start && end && isValid(start.x) && isValid(start.y) && isValid(end.x) && isValid(end.y)) {
-                            // Anti-radiating-lines filter
+                            // Anti-radiating-lines filter (use 1e9 to avoid clipping actual sheet borders/grids)
                             const isStart0 = Math.abs(start.x) < 1e-6 && Math.abs(start.y) < 1e-6;
                             const isEnd0 = Math.abs(end.x) < 1e-6 && Math.abs(end.y) < 1e-6;
                             const dist = Math.sqrt((start.x - end.x) ** 2 + (start.y - end.y) ** 2);
-                            if ((isStart0 || isEnd0) && dist > 1e5 && !(isStart0 && isEnd0)) return null;
+                            if (!isInsideBlock && (isStart0 || isEnd0) && dist > 1e9 && !(isStart0 && isEnd0)) return null;
                             
                             return { id: nextId(), type: 'line', layer, color, x1: start.x, y1: start.y, x2: end.x, y2: end.y, thickness, lineType, lineScale } as any;
                         }
@@ -234,24 +260,42 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             return { id: nextId(), type: 'arc', layer, color, x: arcCenter.x, y: arcCenter.y, radius: ent.radius || 1, startAngle: ent.startAngle || 0, endAngle: ent.endAngle || Math.PI, counterClockwise: false, thickness, lineType, lineScale } as any;
                         }
                         break;
-                    case type.includes('POLYLINE') || type.includes('LWPOLYLINE'):
+                    case type.includes('POLYLINE') || type.includes('LWPOLYLINE'): {
                         let vertices = (ent.vertices || ent.points || []).filter((v: any) => v && isValid(v.x) && isValid(v.y));
                         if (vertices.length > 2) {
-                            const hasManyNonZero = vertices.filter((v: any) => Math.abs(v.x) > 1e-6 || Math.abs(v.y) > 1e-6).length > vertices.length / 2;
-                            if (hasManyNonZero) {
-                                vertices = vertices.filter((v: any) => Math.abs(v.x) > 1e-6 || Math.abs(v.y) < 1e-6);
+                            let lastNonZero = vertices.length - 1;
+                            while (lastNonZero >= 0) {
+                                const v = vertices[lastNonZero];
+                                if (Math.abs(v.x) > 1e-6 || Math.abs(v.y) > 1e-6) {
+                                    break;
+                                }
+                                lastNonZero--;
                             }
+                            vertices = vertices.slice(0, lastNonZero + 2);
                         }
                         if (vertices.length > 1) {
                             return { id: nextId(), type: 'pline', layer, color, points: vertices.map((v: any) => ({ x: v.x, y: v.y, bulge: v.bulge || 0 })), closed: !!(ent.flag & 1) || !!ent.closed || !!ent.isClosed || !!(ent.flags & 1), thickness, lineType, lineScale } as any;
                         }
                         break;
-                    case type.includes('SPLINE'):
-                        const splPoints = (ent.controlPoints || ent.fitPoints || ent.vertices || ent.points || []).filter((v: any) => v && isValid(v.x) && isValid(v.y));
+                    }
+                    case type.includes('SPLINE'): {
+                        let splPoints = (ent.controlPoints || ent.fitPoints || ent.vertices || ent.points || []).filter((v: any) => v && isValid(v.x) && isValid(v.y));
+                        if (splPoints.length > 2) {
+                            let lastNonZero = splPoints.length - 1;
+                            while (lastNonZero >= 0) {
+                                const v = splPoints[lastNonZero];
+                                if (Math.abs(v.x) > 1e-6 || Math.abs(v.y) > 1e-6) {
+                                    break;
+                                }
+                                lastNonZero--;
+                            }
+                            splPoints = splPoints.slice(0, lastNonZero + 2);
+                        }
                         if (splPoints.length > 1) {
                             return { id: nextId(), type: 'spline', layer, color, points: splPoints.map((v: any) => ({ x: v.x, y: v.y })), closed: !!ent.closed || !!ent.isClosed || !!(ent.flags & 1), thickness, lineType, lineScale } as any;
                         }
                         break;
+                    }
                     case type.includes('TEXT') || type.includes('MTEXT') || type.includes('ATTRIB') || type.includes('ATTDEF'):
                         const pos = ent.position || ent.insertPoint || ent.basePoint || ent.insertionPoint || ent.location;
                         if (pos && isValid(pos.x) && isValid(pos.y)) {
@@ -308,19 +352,32 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                         }
                         break;
                     case type.includes('INSERT') || type.includes('BLOCK'):
-                        const insPoint = ent.insertPoint || ent.position || ent.insertionPoint;
-                        const bItem = ent.blockName || ent.name || ent.block || ent.blockRecord || ent.block_record;
+                        const insPoint = ent.insertPoint || ent.position || ent.insertionPoint || ent.insertion_point || ent.basePoint || ent.base_point || { x: 0, y: 0 };
+                        const bItem = ent.blockName || ent.name || ent.block || ent.blockRecord || ent.block_record || ent.block_record_id || ent.block_record_handle || ent.block_header || ent.block_header_handle || ent.block_header_id || ent.block_id || ent.block_handle;
                         if (insPoint && bItem) {
-                            // Extract block name or ID reliably
+                            // Extract block name or ID with recursive scan & multiple fallback keys
                             let blockId = '';
                             if (typeof bItem === 'string') {
                                 blockId = bItem;
-                            } else if (bItem && typeof bItem.name === 'string') {
-                                blockId = bItem.name;
-                            } else if (bItem && bItem.id) {
-                                blockId = String(bItem.id);
-                            } else if (ent.block_id) {
+                            } else if (bItem && typeof bItem === 'object') {
+                                const blockKeys = ['name', 'blockName', 'block_name', 'typename', 'id', 'handle', 'block_header_name', 'block_record_name'];
+                                for (const key of blockKeys) {
+                                    if (bItem[key] !== undefined && typeof bItem[key] === 'string' && bItem[key]) {
+                                        blockId = bItem[key];
+                                        break;
+                                    }
+                                }
+                                if (!blockId && bItem.id !== undefined) {
+                                    blockId = String(bItem.id);
+                                }
+                            }
+                            if (!blockId && ent.block_header_name) blockId = String(ent.block_header_name);
+                            if (!blockId && ent.block_record_name) blockId = String(ent.block_record_name);
+                            if (!blockId && ent.block_id !== undefined) {
                                 blockId = String(ent.block_id);
+                            }
+                            if (!blockId && ent.block_handle !== undefined) {
+                                blockId = String(ent.block_handle);
                             }
                             
                             if (blockId) {
@@ -341,12 +398,12 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             formattedDimText = cleanText(rawDimText.replace('<>', measurement.toFixed(2)));
                         }
 
-                        // Extract points common to many dimension types
-                        const d1 = ent.definitionPoint || ent.defPoint || ent.point1 || ent.extLine1;
-                        const d2 = ent.definitionPoint2 || ent.defPoint2 || ent.point2 || ent.extLine2;
-                        const d3 = ent.definitionPoint3 || ent.defPoint3 || ent.point3 || ent.dimLinePoint || ent.position;
-                        const d4 = ent.definitionPoint4 || ent.defPoint4 || ent.point4;
-                        const center = ent.center || ent.arcCenter;
+                        // Extract points common to many dimension types with maximum fallback protection
+                        const d1 = ent.definitionPoint || ent.defPoint || ent.def_point || ent.extLine1 || ent.ext_line1 || ent.point1;
+                        const d2 = ent.definitionPoint2 || ent.defPoint2 || ent.def_point2 || ent.defPoint_2 || ent.def_point_2 || ent.extLine2 || ent.ext_line2 || ent.point2;
+                        const d3 = ent.definitionPoint3 || ent.defPoint3 || ent.def_point3 || ent.defPoint_3 || ent.def_point_3 || ent.dimLinePoint || ent.dim_line_point || ent.position || ent.point3;
+                        const d4 = ent.definitionPoint4 || ent.defPoint4 || ent.def_point4 || ent.defPoint_4 || ent.def_point_4 || ent.point4;
+                        const center = ent.center || ent.arcCenter || ent.arc_center || ent.centerPoint || ent.center_point;
                         
                         // Fallbacks for dimension points
                         const x1 = (d1?.x ?? 0), y1 = (d1?.y ?? 0);
@@ -355,26 +412,26 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                         const x4 = (d4?.x ?? x2), y4 = (d4?.y ?? y2);
                         const cx = (center?.x ?? 0), cy = (center?.y ?? 0);
 
-                        const dimX = (d3?.x ?? (ent.textPosition?.x ?? (x1 + x2)/2));
-                        const dimY = (d3?.y ?? (ent.textPosition?.y ?? (y1 + y2)/2));
+                        const dimX = (d3?.x ?? (ent.textPosition?.x ?? (ent.text_position?.x ?? (ent.textPoint?.x ?? (ent.text_point?.x ?? (x1 + x2)/2)))));
+                        const dimY = (d3?.y ?? (ent.textPosition?.y ?? (ent.text_position?.y ?? (ent.textPoint?.y ?? (ent.text_point?.y ?? (y1 + y2)/2)))));
 
                         // Detect dimension type
                         let dimType: any = 'aligned';
-                        const dimFlags = ent.dimensionType || ent.dimType || 0;
+                        const dimFlags = ent.dimensionType !== undefined ? ent.dimensionType : (ent.dimType !== undefined ? ent.dimType : (ent.dim_type !== undefined ? ent.dim_type : 0));
                         const actualType = (dimFlags & 0x07); // Lower 3 bits often hold the type
 
-                        if (type.includes('LINEAR') || actualType === 0) dimType = 'linear';
-                        else if (type.includes('ALIGNED') || actualType === 1) dimType = 'aligned';
-                        else if (type.includes('ANG') || actualType === 2 || actualType === 5) dimType = 'angular';
-                        else if (type.includes('DIA') || actualType === 3) dimType = 'diameter';
-                        else if (type.includes('RAD') || actualType === 4) dimType = 'radius';
-                        else if (type.includes('ORD') || actualType === 6) dimType = 'ordinate';
-                        else if (actualType === 0x40) dimType = 'arc'; // Some variants use flags
+                        if (type.includes('RADIUS') || type.includes('RAD') || actualType === 4) dimType = 'radius';
+                        else if (type.includes('DIAMETER') || type.includes('DIA') || actualType === 3) dimType = 'diameter';
+                        else if (type.includes('ANGULAR') || type.includes('ANG') || actualType === 2 || actualType === 5) dimType = 'angular';
+                        else if (type.includes('ORD_DIM') || type.includes('ORD') || actualType === 6) dimType = 'ordinate';
+                        else if (type.includes('ARC') || actualType === 0x40) dimType = 'arc';
+                        else if (type.includes('LINEAR') || type.includes('ROT') || actualType === 0) dimType = 'linear';
+                        else dimType = 'aligned';
                         
-                        const dimH = ent.height || ent.textHeight || 2.5;
+                        const dimH = ent.height || ent.textHeight || ent.text_height || 2.5;
                         
-                        let angle1 = ent.startAngle || 0;
-                        let angle2 = ent.endAngle || 0;
+                        let angle1 = ent.startAngle || ent.start_angle || 0;
+                        let angle2 = ent.endAngle || ent.end_angle || 0;
                         
                         if (dimType === 'angular' || dimType === 'arc') {
                             // If angles aren't provided directly, calculate from definition points relative to center
@@ -403,7 +460,7 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                 stats.unsupported++;
             }
 
-            if (!['POINT', 'VERTEX', 'SEQEND'].includes(type) && !stats.counts[type]) {
+            if (!['POINT', 'VERTEX', 'SEQEND'].includes(type)) {
                 stats.unsupported++;
             }
             return null;
@@ -414,7 +471,7 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
         
         const processLayer = (l: any) => {
             if (!l) return;
-            let name = typeof l.name === 'string' ? l.name : (l.layerName || String(l.id || '0'));
+            let name = typeof l.name === 'string' ? l.name : (l.layerName || l.layer_name || String(l.id || '0'));
             
             // Normalize special AutoCAD layers
             const lowerName = name.toLowerCase();
@@ -424,7 +481,8 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
             // Extract ACI color - try multiple variants as provided by WASM
             const aci = l.color !== undefined ? l.color : 
                         (l.aci !== undefined ? l.aci : 
-                        (l.color_index !== undefined ? l.color_index : 7));
+                        (l.color_index !== undefined ? l.color_index : 
+                        (l.colorIndex !== undefined ? l.colorIndex : 7)));
             
             const rawLayerTrueColor = l.true_color || l.trueColor || l.truecolor || 0;
             const lColor = aciToHex(Math.abs(aci), rawLayerTrueColor !== 0 ? rawLayerTrueColor : undefined);
@@ -437,6 +495,9 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
             const flag = l.flag !== undefined ? l.flag : (l.flags !== undefined ? l.flags : (l.status || 0));
             
             // Standard CAD Layer flags: 1=Frozen, 2=Frozen by default, 4=Locked
+            const lineTypeVal = (l.lineType || l.linetype || l.linestyle || l.line_type || 'continuous');
+            const layerLineTypeStr = typeof lineTypeVal === 'string' ? lineTypeVal : (lineTypeVal?.name || lineTypeVal?.id || 'continuous');
+            
             layers[name] = { 
                 id: name, 
                 name: name, 
@@ -446,74 +507,81 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                 plottable: name.toLowerCase() !== 'defpoints' && (l.is_plottable !== false && l.plot !== false && l.isPlottable !== false), 
                 color: lColor, 
                 thickness: mapLineweight(l.lineweight !== undefined ? l.lineweight : (l.lineWeight !== undefined ? l.lineWeight : l.lineweight_enum)) || 0.25, 
-                lineType: (l.lineType || l.linetype || l.linestyle || 'continuous').toLowerCase() as any 
+                lineType: layerLineTypeStr.toLowerCase() as any 
             };
         };
-        if (db.layers && Array.isArray(db.layers)) {
-            const numLayers = db.layers.length;
+        
+        const rawLayersList = db.layers || db.layer_records || db.layerRecords || db.layer || [];
+        if (rawLayersList && Array.isArray(rawLayersList)) {
+            const numLayers = rawLayersList.length;
             for (let i = 0; i < numLayers; i++) {
                 if (i % 50 === 0) await new Promise(r => setTimeout(r, 0));
-                processLayer(db.layers[i]);
+                processLayer(rawLayersList[i]);
             }
+        } else if (rawLayersList && typeof rawLayersList === 'object') {
+            Object.values(rawLayersList).forEach(processLayer);
         }
 
         // Blocks Setup
-        const rawBlocks = db.blocks || db.block_records || db.blockRecords || [];
+        const rawBlocks = db.blocks || db.block_records || db.blockRecords || db.block_headers || db.blockHeaders || [];
         if (rawBlocks) {
+            const processBlockItem = (b: any, index: number) => {
+                if (!b) return;
+                let name = b.name || b.id || b.blockName || b.block_name || b.block_record_name;
+                if (!name && b.block_header) {
+                    name = b.block_header.name || b.block_header.id || b.block_header.handle;
+                }
+                if (!name && b.block_record) {
+                    name = b.block_record.name || b.block_record.id || b.block_record.handle;
+                }
+                if (typeof name !== 'string') {
+                    name = String(index);
+                }
+                if (name) {
+                    const bEntities = b.entities || b.objects || b.shapes || [];
+                    const blockShapes: Shape[] = [];
+                    if (Array.isArray(bEntities)) {
+                        bEntities.forEach((be: any) => {
+                            const s = convertEntity(be, true);
+                            if (s) blockShapes.push(s);
+                        });
+                    }
+                    const bp = b.basePoint || b.base_point || b.position || b.insertionPoint || b.insertion_point || { x: 0, y: 0 };
+                    const blockDef = { id: name, name: name, basePoint: { x: bp.x || 0, y: bp.y || 0 }, shapes: blockShapes };
+                    
+                    // Store block under multiple keys for resilient lookup
+                    blocks[name] = blockDef;
+                    blocks[name.toLowerCase().trim()] = blockDef;
+
+                    // Also store by handle/ID if it exists to allow lookups by numeric reference
+                    if (b.id && String(b.id) !== name) {
+                        blocks[String(b.id)] = blockDef;
+                        blocks[String(b.id).toLowerCase().trim()] = blockDef;
+                    }
+                    if (b.handle && String(b.handle) !== name) {
+                        blocks[String(b.handle)] = blockDef;
+                        blocks[String(b.handle).toLowerCase().trim()] = blockDef;
+                    }
+                    if (b.block_record_handle && String(b.block_record_handle) !== name) {
+                        blocks[String(b.block_record_handle)] = blockDef;
+                    }
+                    if (b.block_header_handle && String(b.block_header_handle) !== name) {
+                        blocks[String(b.block_header_handle)] = blockDef;
+                    }
+                }
+            };
+
             if (Array.isArray(rawBlocks)) {
                 const numRawBlocks = rawBlocks.length;
                 for (let i = 0; i < numRawBlocks; i++) {
                     if (i % 20 === 0) await new Promise(r => setTimeout(r, 0));
-                    const b = rawBlocks[i];
-                    let name = b.name || b.id || b.blockName;
-                    if (typeof name !== 'string') {
-                        if (name && name.name) name = name.name;
-                        else if (name && name.id) name = String(name.id);
-                        else name = String(i);
-                    }
-                    if (name) {
-                        const bEntities = b.entities || b.objects || [];
-                        const blockShapes: Shape[] = [];
-                        if (Array.isArray(bEntities)) {
-                            bEntities.forEach((be: any) => {
-                                const s = convertEntity(be);
-                                if (s) blockShapes.push(s);
-                            });
-                        }
-                        const bp = b.basePoint || b.position || { x: 0, y: 0 };
-                        const blockDef = { id: name, name: name, basePoint: { x: bp.x || 0, y: bp.y || 0 }, shapes: blockShapes };
-                        blocks[name] = blockDef;
-
-                        // Also store by handle/ID if it exists to allow lookups by numeric reference
-                        if (b.id && String(b.id) !== name) {
-                            blocks[String(b.id)] = blockDef;
-                        }
-                        if (b.handle && String(b.handle) !== name) {
-                            blocks[String(b.handle)] = blockDef;
-                        }
-                    }
+                    processBlockItem(rawBlocks[i], i);
                 }
             } else {
                 const bKeys = Object.keys(rawBlocks);
                 for (let i = 0; i < bKeys.length; i++) {
                     if (i % 20 === 0) await new Promise(r => setTimeout(r, 0));
-                    const name = bKeys[i];
-                    const b = rawBlocks[name];
-                    const bEntities = b.entities || b.objects || [];
-                    const blockShapes: Shape[] = [];
-                    if (Array.isArray(bEntities)) {
-                        bEntities.forEach((be: any) => {
-                            const s = convertEntity(be);
-                            if (s) blockShapes.push(s);
-                        });
-                    }
-                    const bp = b.basePoint || b.position || { x: 0, y: 0 };
-                    const blockDef = { id: name, name: name, basePoint: { x: bp.x || 0, y: bp.y || 0 }, shapes: blockShapes };
-                    blocks[name] = blockDef;
-                    
-                    // Handle numeric links
-                    if (b.id && String(b.id) !== name) blocks[String(b.id)] = blockDef;
-                    if (b.handle && String(b.handle) !== name) blocks[String(b.handle)] = blockDef;
+                    processBlockItem(rawBlocks[bKeys[i]], i);
                 }
             }
         }
@@ -563,3 +631,46 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
         throw error;
     }
 };
+
+/**
+ * Parses a DWG file or ArrayBuffer and returns the imported shapes.
+ */
+export const parseDwg = async (file: File | ArrayBuffer, defaultSettings?: AppSettings): Promise<Shape[]> => {
+    let buffer: ArrayBuffer;
+    if (file instanceof File) {
+        buffer = await file.arrayBuffer();
+    } else {
+        buffer = file;
+    }
+    const safeSettings = defaultSettings || {
+        limitsMin: { x: -10000, y: -10000 },
+        limitsMax: { x: 10000, y: 10000 },
+        drawingScale: 1.0,
+        activeLayer: '0',
+        activeColor: 'BYLAYER',
+        activeLineType: 'bylayer',
+        activeDimStyle: 'default',
+        dimStyles: {},
+        unit: 'mm' as const,
+        grid: true,
+        snap: true,
+        ortho: false,
+        polar: false,
+        osnapMode: 1,
+        polarAngle: 15,
+        metadata: {},
+        ctbFile: undefined
+    };
+    const proj = await dwgToProject(buffer, safeSettings as any as AppSettings);
+    return proj.entities;
+};
+
+export const DwgService = {
+    dwgToProject,
+    parseDwg,
+    sniffDwgHeader,
+    initDwgService
+};
+
+export default DwgService;
+

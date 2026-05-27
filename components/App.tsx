@@ -32,7 +32,7 @@ import { generateId, hitTestGrip, getAllShapesBounds, getShapeBounds, scaleShape
 import { getCommandFromAI, connectLiveAgent } from '../services/geminiService';
 import { shapesToDXF, dxfToProject } from '../services/dxfService';
 import { shapesToVox, voxToProject, createEmptyVoxProject, calculateVoxProjectStats } from '../services/voxService';
-import { dwgToProject } from '../services/DwgService';
+import { dwgToProject, DwgService } from '../services/DwgService';
 import { 
   CADCommand, CommandEngine, LineCommand, DoubleLineCommand, CircleCommand, RectCommand, PolyCommand, 
   ArcCommand, MoveCommand, EraseCommand, DistanceCommand, AreaCommand, 
@@ -43,14 +43,16 @@ import {
   HatchCommand, LeaderCommand, PanCommand, OffsetCommand, TrimCommand, FilletCommand, ChamferCommand, EllipseCommand, PolygonCommand, MatchPropertiesCommand,
   DonutCommand, PointCommand,
   SelectAllCommand, CopyClipCommand, CutClipCommand, PasteClipCommand, SplineCommand, SketchCommand, StretchCommand, SelectCommand,
-  ArrayCommand, BlockCommand, InsertCommand, FilterCommand, FindCommand, ViewportCommand, LayoutCommand, GripEditCommand, ImportCommand
+  ArrayCommand, BlockCommand, InsertCommand, FilterCommand, FindCommand, ViewportCommand, LayoutCommand, GripEditCommand, ImportCommand, TableCommand
 } from '../services/commandEngine';
-import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType, BlockDefinition, LayoutDefinition, LayoutViewport, LineTypeDefinition, NamedView } from '../types';
-import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive, AlertTriangle, Cpu, Move, Copy, Maximize2, FlipHorizontal, Trash2, History, Palette, Check, Settings2, Terminal, Camera, Sparkles } from 'lucide-react';
+import { Shape, ViewState, AppSettings, LayerConfig, Point, UnitType, BlockDefinition, LayoutDefinition, LayoutViewport, LineTypeDefinition, NamedView, DimensionShape, LineShape, CircleShape, RectShape, TextShape } from '../types';
+import { Menu, X, Sliders, Layers, FileText, Calculator, Target, Weight, FileEdit, Grid3X3, Layers2, FilePlus, Save, RotateCw, FolderOpen, Share2, XCircle, HardDrive, AlertTriangle, Cpu, Move, Copy, Maximize2, FlipHorizontal, Trash2, History, Palette, Check, Settings2, Terminal, Camera, Sparkles, Box } from 'lucide-react';
 
 import VoxIcon from './VoxIcon';
 import ImportSummaryDialog from './ImportSummaryDialog';
 import ViewManager from './ViewManager';
+import BlockLibraryPanel, { PREDEFINED_BLOCKS } from './BlockLibraryPanel';
+import WallAlignmentPanel from './WallAlignmentPanel';
 import { storageService } from '../services/storageService';
 import { cloudStorageService } from '../services/cloudStorageService';
 import { trackFileMetadata, syncUserMetadata, onAuthChange, logAppEvent } from '../services/firebaseService';
@@ -72,6 +74,7 @@ const INITIAL_SETTINGS: AppSettings = {
   gridSpacing: 100, 
   gridMajorInterval: 5,
   snapSpacing: 10,
+  gridSnap: false,
   polarTrackingEnabled: true,
   polarAngles: [90, 45, 30],
   snapOptions: { 
@@ -126,7 +129,7 @@ const INITIAL_LAYERS_CONFIG: Record<string, LayerConfig> = {
 };
 
 export type ToolbarCategory = 'Draw' | 'Modify' | 'Anno' | 'View' | 'Tools' | 'History' | 'Edit';
-type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 'file' | 'mainmenu' | 'drawing_props' | 'help' | 'about' | 'privacy' | 'new_file' | 'dimstyle' | 'linetypes' | 'views' | 'ai_drafting';
+type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 'file' | 'mainmenu' | 'drawing_props' | 'help' | 'about' | 'privacy' | 'new_file' | 'dimstyle' | 'linetypes' | 'views' | 'ai_drafting' | 'blocks' | 'wall_align';
 
 const STORAGE_PREFIX = 'voxcadd_file_v1_';
 const REGISTRY_KEY = 'voxcadd_recent_files';
@@ -141,6 +144,149 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
+};
+
+const findMostRecentRectangularBoundary = (layers: Record<string, Shape[]>): { xMin: number, yMin: number, xMax: number, yMax: number } | null => {
+  // Candidate layers in order of relevance for walls
+  const wallLayers = ['A-WALL', 'A-WALL-INT', '0', 'A-SKETCH'];
+  const otherLayers = Object.keys(layers).filter(l => !wallLayers.includes(l));
+  const searchLayers = [...wallLayers, ...otherLayers];
+
+  for (const layerName of searchLayers) {
+    const shapes = layers[layerName];
+    if (!shapes || shapes.length === 0) continue;
+
+    // Traverse from latest (end of array) to earliest
+    for (let i = shapes.length - 1; i >= 0; i--) {
+      const s = shapes[i];
+      if (!s) continue;
+
+      // Case 1: Direct 'rect' shape
+      if (s.type === 'rect') {
+        const r = s as any;
+        if (r.width !== 0 && r.height !== 0) {
+          return {
+            xMin: Math.min(r.x, r.x + r.width),
+            xMax: Math.max(r.x, r.x + r.width),
+            yMin: Math.min(r.y, r.y + r.height),
+            yMax: Math.max(r.y, r.y + r.height)
+          };
+        }
+      }
+
+      // Case 2: Polyline (poly, pline, polygon) with 4 or 5 vertices forming a rectangle
+      if (s.type === 'poly' || s.type === 'pline' || s.type === 'polygon') {
+        const p = s as any;
+        if (p.points && p.points.length >= 4) {
+          const pts: Point[] = p.points.map((pt: any) => {
+            if (typeof pt === 'object' && pt !== null && 'x' in pt && 'y' in pt) {
+              return pt as Point;
+            } else if (Array.isArray(pt) && pt.length >= 2) {
+              return { x: pt[0], y: pt[1] };
+            }
+            return null;
+          }).filter((pt: any): pt is Point => pt !== null);
+
+          if (pts.length >= 4) {
+            const xs = pts.map(pt => pt.x);
+            const ys = pts.map(pt => pt.y);
+            const xMin = Math.min(...xs);
+            const xMax = Math.max(...xs);
+            const yMin = Math.min(...ys);
+            const yMax = Math.max(...ys);
+
+            const isRect = pts.every(pt => 
+              (Math.abs(pt.x - xMin) < 5.0 || Math.abs(pt.x - xMax) < 5.0) &&
+              (Math.abs(pt.y - yMin) < 5.0 || Math.abs(pt.y - yMax) < 5.0)
+            );
+            if (isRect && (xMax - xMin) > 10.0 && (yMax - yMin) > 10.0) {
+              return { xMin, xMax, yMin, yMax };
+            }
+          }
+        }
+      }
+
+      // Case 3: Double Line 'dline' forming a closed box
+      if (s.type === 'dline') {
+        const dl = s as any;
+        if (dl.points && dl.points.length >= 4) {
+          const pts = dl.points;
+          const xs = pts.map((pt: any) => pt.x);
+          const ys = pts.map((pt: any) => pt.y);
+          const xMin = Math.min(...xs);
+          const xMax = Math.max(...xs);
+          const yMin = Math.min(...ys);
+          const yMax = Math.max(...ys);
+          
+          const isRect = pts.every((pt: any) => 
+            (Math.abs(pt.x - xMin) < 5.0 || Math.abs(pt.x - xMax) < 5.0) &&
+            (Math.abs(pt.y - yMin) < 5.0 || Math.abs(pt.y - yMax) < 5.0)
+          );
+          if (isRect && (xMax - xMin) > 10.0 && (yMax - yMin) > 10.0) {
+            return { xMin, xMax, yMin, yMax };
+          }
+        }
+      }
+    }
+  }
+
+  // Case 4: Group of 4 connected perpendicular lines in a wall layer
+  for (const layerName of ['A-WALL', 'A-WALL-INT', '0']) {
+    const shapes = layers[layerName];
+    if (!shapes || shapes.length < 4) continue;
+
+    const lines = shapes.filter(s => s.type === 'line') as any[];
+    if (lines.length < 4) continue;
+
+    const sliceCount = Math.min(lines.length, 12);
+    const recentLines = lines.slice(-sliceCount);
+
+    for (let i = 0; i < recentLines.length; i++) {
+      for (let j = i + 1; j < recentLines.length; j++) {
+        for (let k = j + 1; k < recentLines.length; k++) {
+          for (let l = k + 1; l < recentLines.length; l++) {
+            const cand = [recentLines[i], recentLines[j], recentLines[k], recentLines[l]];
+            
+            const isOrtho = cand.every(line => 
+              Math.abs(line.x1 - line.x2) < 5.0 || Math.abs(line.y1 - line.y2) < 5.0
+            );
+            if (!isOrtho) continue;
+
+            const tolerance = 25.0;
+            const uniquePoints: Point[] = [];
+            const addPt = (p: Point) => {
+              if (!uniquePoints.some(up => Math.hypot(up.x - p.x, up.y - p.y) < tolerance)) {
+                uniquePoints.push(p);
+              }
+            };
+            cand.forEach(line => {
+              addPt({ x: line.x1, y: line.y1 });
+              addPt({ x: line.x2, y: line.y2 });
+            });
+
+            if (uniquePoints.length === 4) {
+              const xs = uniquePoints.map(p => p.x);
+              const ys = uniquePoints.map(p => p.y);
+              const xMin = Math.min(...xs);
+              const xMax = Math.max(...xs);
+              const yMin = Math.min(...ys);
+              const yMax = Math.max(...ys);
+
+              const formsRect = uniquePoints.every(p => 
+                (Math.abs(p.x - xMin) < tolerance || Math.abs(p.x - xMax) < tolerance) &&
+                (Math.abs(p.y - yMin) < tolerance || Math.abs(p.y - yMax) < tolerance)
+              );
+              if (formsRect && (xMax - xMin) > tolerance && (yMax - yMin) > tolerance) {
+                return { xMin, xMax, yMin, yMax };
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return null;
 };
 
 const App: React.FC = () => {
@@ -334,14 +480,15 @@ const App: React.FC = () => {
                                 const file = new File([blob], fileName, { type: mimeType });
                                 await navigator.share({ ...shareData, files: [file] });
                                 setLogMessage("SHARE_SUCCESS");
-                            } catch (e) {
-                                console.error("Share failed", e);
+                            } catch (e: any) {
+                                console.warn("Share failed. Downloading file as fallback.", e);
                                 // Fallback to download if sharing failed or cancelled
                                 const url = URL.createObjectURL(blob);
                                 const a = document.createElement('a');
                                 a.href = url;
                                 a.download = fileName;
                                 a.click();
+                                setLogMessage("INFO: Sharing restricted by browser iframe. File downloaded instead.");
                             }
                         } else {
                             const url = URL.createObjectURL(blob);
@@ -841,6 +988,84 @@ const App: React.FC = () => {
     };
   }, []);
 
+  const fitToScreen = useCallback((currentShapes: any[]) => {
+    if (!currentShapes || currentShapes.length === 0) return;
+
+    let minX = Infinity, minY = Infinity;
+    let maxX = -Infinity, maxY = -Infinity;
+
+    currentShapes.forEach(shape => {
+      if (!shape) return;
+      if (shape.type === 'line' && shape.points) {
+        for (let i = 0; i < shape.points.length; i += 2) {
+          minX = Math.min(minX, shape.points[i]);
+          minY = Math.min(minY, shape.points[i+1]);
+          maxX = Math.max(maxX, shape.points[i]);
+          maxY = Math.max(maxY, shape.points[i+1]);
+        }
+      } else if (shape.type === 'line') {
+        minX = Math.min(minX, shape.x1 !== undefined ? shape.x1 : (shape.x ?? 0), shape.x2 !== undefined ? shape.x2 : (shape.x ?? 0));
+        minY = Math.min(minY, shape.y1 !== undefined ? shape.y1 : (shape.y ?? 0), shape.y2 !== undefined ? shape.y2 : (shape.y ?? 0));
+        maxX = Math.max(maxX, shape.x1 !== undefined ? shape.x1 : (shape.x ?? 0), shape.x2 !== undefined ? shape.x2 : (shape.x ?? 0));
+        maxY = Math.max(maxY, shape.y1 !== undefined ? shape.y1 : (shape.y ?? 0), shape.y2 !== undefined ? shape.y2 : (shape.y ?? 0));
+      } else if ((shape.type === 'pline' || shape.type === 'spline' || shape.type === 'hatch') && Array.isArray(shape.points)) {
+        shape.points.forEach((p: any) => {
+          if (p && typeof p.x === 'number' && typeof p.y === 'number') {
+            minX = Math.min(minX, p.x);
+            minY = Math.min(minY, p.y);
+            maxX = Math.max(maxX, p.x);
+            maxY = Math.max(maxY, p.y);
+          }
+        });
+      } else if (shape.type === 'circle' && typeof shape.x === 'number' && typeof shape.y === 'number' && typeof shape.radius === 'number') {
+        minX = Math.min(minX, shape.x - shape.radius);
+        minY = Math.min(minY, shape.y - shape.radius);
+        maxX = Math.max(maxX, shape.x + shape.radius);
+        maxY = Math.max(maxY, shape.y + shape.radius);
+      } else if (shape.type === 'rect' && typeof shape.x === 'number' && typeof shape.y === 'number' && typeof shape.width === 'number' && typeof shape.height === 'number') {
+        minX = Math.min(minX, shape.x);
+        minY = Math.min(minY, shape.y);
+        maxX = Math.max(maxX, shape.x + shape.width);
+        maxY = Math.max(maxY, shape.y + shape.height);
+      } else if ((shape.type === 'text' || shape.type === 'mtext' || shape.type === 'block') && typeof shape.x === 'number' && typeof shape.y === 'number') {
+        minX = Math.min(minX, shape.x);
+        minY = Math.min(minY, shape.y);
+        maxX = Math.max(maxX, shape.x + 50);
+        maxY = Math.max(maxY, shape.y + 20);
+      }
+    });
+
+    if (minX === Infinity || minY === Infinity || maxX === -Infinity || maxY === -Infinity) {
+      return;
+    }
+
+    // Add some padding
+    const padding = 50;
+    minX -= padding;
+    minY -= padding;
+    maxX += padding;
+    maxY += padding;
+
+    // Calculate scale and center
+    const stageWidth = window.innerWidth - 300;   // adjust according to your layout
+    const stageHeight = window.innerHeight - 150;
+
+    const scaleX = stageWidth / (maxX - minX);
+    const scaleY = stageHeight / (maxY - minY);
+    const scale = Math.min(scaleX, scaleY) * 0.95;
+
+    // You can use this scale and center to zoom the stage
+    console.log(`📐 Auto Fit Applied: Scale ≈ ${scale.toFixed(2)}`);
+
+    const centerX = (maxX + minX) / 2;
+    const centerY = (maxY + minY) / 2;
+    setView({
+       scale: scale / (settingsRef.current.drawingScale || 1.0),
+       originX: -centerX * (scale / (settingsRef.current.drawingScale || 1.0)),
+       originY: centerY * (scale / (settingsRef.current.drawingScale || 1.0))
+    });
+  }, [setView]);
+
   const handleOpenFile = async (fileName: string, content: string | ArrayBuffer, source: string = "storage") => {
     if (navigator.vibrate) navigator.vibrate(20);
     const isDxf = fileName.toLowerCase().endsWith('.dxf');
@@ -997,7 +1222,9 @@ const App: React.FC = () => {
                 }, 500);
 
                 // Zoom extents if bounds exist
-                if (project.bounds) {
+                if (isDwg && project.entities) {
+                    setTimeout(() => fitToScreen(project.entities), 100);
+                } else if (project.bounds) {
                     setTimeout(() => handleAction('zoomExtents'), 100);
                 }
 
@@ -1158,6 +1385,56 @@ const App: React.FC = () => {
       case 'toggleDrawingProps': setActivePanel(activePanel === 'drawing_props' ? 'none' : 'drawing_props'); break;
       case 'toggleHelp': setActivePanel(activePanel === 'help' ? 'none' : 'help'); break;
       case 'toggleAiDrafting': setActivePanel(activePanel === 'ai_drafting' ? 'none' : 'ai_drafting'); break;
+      case 'toggleBlocks': setActivePanel(activePanel === 'blocks' ? 'none' : 'blocks'); break;
+      case 'toggleWallAlignment': setActivePanel(activePanel === 'wall_align' ? 'none' : 'wall_align'); break;
+      case 'dropBlock': {
+        const { blockId, x, y, blockJson } = payload;
+        let finalBlockId = blockId;
+        
+        if (blockJson) {
+          try {
+            const parsed = JSON.parse(blockJson);
+            const blockName = parsed.name || blockId;
+            if (!blocksRef.current[blockName]) {
+              setBlocks(prev => ({ ...prev, [blockName]: parsed }));
+              blocksRef.current[blockName] = parsed;
+            }
+            finalBlockId = blockName;
+          } catch(e) {
+            console.error("Failed to parse dropped block JSON", e);
+          }
+        } else if (!blocksRef.current[blockId] && PREDEFINED_BLOCKS[blockId]) {
+          const pb = PREDEFINED_BLOCKS[blockId];
+          setBlocks(prev => ({ ...prev, [blockId]: pb }));
+          blocksRef.current[blockId] = pb;
+        }
+
+        const currentActiveLayer = settingsRef.current.currentLayer || '0';
+        const instance: Shape = {
+          id: Math.random().toString(36).substr(2, 9),
+          type: 'block',
+          blockId: finalBlockId,
+          x: x,
+          y: y,
+          scaleX: 1,
+          scaleY: 1,
+          rotation: 0,
+          layer: currentActiveLayer,
+          color: 'BYLAYER'
+        } as any;
+
+        setLayers(prev => {
+          const next = {
+            ...prev,
+            [currentActiveLayer]: [...(prev[currentActiveLayer] || []), instance]
+          };
+          layersRef.current = next;
+          return next;
+        });
+        setLogMessage(`INSERTED: ${finalBlockId}`);
+        commitToHistory();
+        break;
+      }
       case 'interpret_sketch': {
         const triggerSketchInterpretation = async (providedImage?: string) => {
            setIsAiThinking(true);
@@ -1262,11 +1539,12 @@ const App: React.FC = () => {
             const centerX = (bounds.xMax + bounds.xMin) / 2;
             const centerY = (bounds.yMax + bounds.yMin) / 2;
             
-            const padding = 1.1; 
+            const padding = 1.25; 
             const scale = Math.min(targetW / (w * padding), targetH / (h * padding));
+            const drawingScaleFactor = settingsRef.current.drawingScale || 1.0;
             
             setView({ 
-                scale, 
+                scale: scale / drawingScaleFactor, 
                 originX: -centerX * scale, 
                 originY: centerY * scale 
             });
@@ -1361,17 +1639,32 @@ const App: React.FC = () => {
         setActivePanel('new_file'); 
         break;
       case 'close': {
-        // Clear history and reset to default
-        setLayers({ '0': [], 'defpoints': [] });
-        setLayerConfig(INITIAL_LAYERS_CONFIG);
-        setSettings(INITIAL_SETTINGS);
-        setCurrentFileName("Drawing 1.vox");
-        setFileHandle(null);
-        setHistory([]);
-        setRedoStack([]);
-        setActivePanel('none');
-        updateRecentFiles("Drawing 1.vox");
-        setLogMessage("WORKSPACE_RESET_SUCCESS");
+        const shapeCount = Object.values(layersRef.current || {}).flat().length;
+        const doClose = () => {
+          // Clear history and reset to default
+          setLayers({ '0': [], 'defpoints': [] });
+          setLayerConfig(INITIAL_LAYERS_CONFIG);
+          setSettings(INITIAL_SETTINGS);
+          setCurrentFileName("Drawing 1.vox");
+          setFileHandle(null);
+          setHistory([]);
+          setRedoStack([]);
+          setActivePanel('none');
+          updateRecentFiles("Drawing 1.vox");
+          setLogMessage("WORKSPACE_RESET_SUCCESS");
+        };
+
+        if (shapeCount > 0) {
+          setPromptDialog({
+            title: 'Close Workspace',
+            message: 'Are you sure you want to close this drawing? Any unsaved changes will be permanently lost.',
+            initialValue: '',
+            type: 'confirm',
+            onConfirm: doClose
+          });
+        } else {
+          doClose();
+        }
         break;
       }
       case 'open':
@@ -1402,7 +1695,38 @@ const App: React.FC = () => {
             const ext = targetName.split('.').pop() || 'vox';
             const finalNewName = newName.toLowerCase().endsWith(`.${ext}`) ? newName : `${newName}.${ext}`;
 
-            // Migrate storage via IndexedDB
+            // Check if finalNewName already exists!
+            const exists = recentFiles.some(f => f.name.toLowerCase() === finalNewName.toLowerCase() && f.name !== targetName);
+            if (exists) {
+              setPromptDialog({
+                title: 'File Already Exists',
+                message: `A file named "${finalNewName}" already exists. Would you like to overwrite it?`,
+                initialValue: '',
+                type: 'confirm',
+                onConfirm: async () => {
+                  // Delete existing file
+                  await storageService.deleteLarge(`${STORAGE_PREFIX}${finalNewName}`);
+                  // Rename target
+                  await storageService.renameLarge(`${STORAGE_PREFIX}${targetName}`, `${STORAGE_PREFIX}${finalNewName}`);
+                  
+                  setRecentFiles(prev => {
+                    const filtered = prev.filter(f => f.name.toLowerCase() !== finalNewName.toLowerCase());
+                    const updated = filtered.map(f => f.name === targetName ? { ...f, name: finalNewName } : f);
+                    localStorage.setItem(REGISTRY_KEY, JSON.stringify(updated));
+                    return updated;
+                  });
+
+                  if (targetName === currentFileName) {
+                    setCurrentFileName(finalNewName);
+                  }
+                  
+                  setLogMessage(`SUCCESS: OVERWRITTEN AND RENAMED TO ${finalNewName.toUpperCase()}`);
+                }
+              });
+              return;
+            }
+
+            // Normal rename if no conflict
             await storageService.renameLarge(`${STORAGE_PREFIX}${targetName}`, `${STORAGE_PREFIX}${finalNewName}`);
             
             // Update registry
@@ -1422,11 +1746,19 @@ const App: React.FC = () => {
         break;
       }
       case 'deleteRecent': {
-        const filtered = recentFiles.filter(f => f.name !== payload);
-        setRecentFiles(filtered);
-        localStorage.setItem(REGISTRY_KEY, JSON.stringify(filtered));
-        storageService.deleteLarge(`${STORAGE_PREFIX}${payload}`);
-        setLogMessage(`FILE_DELETED: ${payload}`);
+        setPromptDialog({
+          title: 'Delete Recent Drawing',
+          message: `Are you sure you want to permanently delete "${payload}"? This action cannot be undone.`,
+          initialValue: '',
+          type: 'confirm',
+          onConfirm: () => {
+            const filtered = recentFiles.filter(f => f.name !== payload);
+            setRecentFiles(filtered);
+            localStorage.setItem(REGISTRY_KEY, JSON.stringify(filtered));
+            storageService.deleteLarge(`${STORAGE_PREFIX}${payload}`);
+            setLogMessage(`FILE_DELETED: ${payload}`);
+          }
+        });
         break;
       }
       case 'downloadRecent': {
@@ -1941,6 +2273,493 @@ const App: React.FC = () => {
       return ns;
   };
 
+  const ensureLayer = (lName: string, color: string, lineType: string = 'continuous', thickness: number = 0.25) => {
+    if (!layerConfigRef.current[lName]) {
+      setLayerConfig(prev => {
+        if (prev[lName]) return prev;
+        const next = {
+          ...prev,
+          [lName]: {
+            id: lName,
+            name: lName,
+            visible: true,
+            locked: false,
+            frozen: false,
+            plottable: true,
+            color: color,
+            thickness: thickness,
+            lineType: lineType
+          }
+        };
+        layerConfigRef.current = next;
+        return next;
+      });
+    }
+  };
+
+  const executeStructuralGrid = (colSize: number) => {
+    if (isNaN(colSize) || colSize <= 0) {
+      setLogMessage("ERR: INVALID_COLUMN_SIZE");
+      setCommandHistory(prev => [...prev, "ERROR: Structural grid column size must be a positive number."]);
+      return;
+    }
+
+    // Grid size (spacing) is colSize * 10
+    const S = colSize * 10;
+    
+    // Ensure layers exist
+    ensureLayer('A-WALL', '#f44336', 'continuous', 0.5);
+    ensureLayer('A-GRID', '#7f8c8d', 'center', 0.18);
+    ensureLayer('A-DIM', '#00bcd4', 'continuous', 0.18);
+
+    const wallLayer = 'A-WALL';
+    const gridLayer = 'A-GRID';
+    const dimLayer = 'A-DIM';
+
+    const wallColor = layerConfigRef.current[wallLayer]?.color || '#f44336';
+    const gridColor = layerConfigRef.current[gridLayer]?.color || '#7f8c8d';
+    const dimColor = layerConfigRef.current[dimLayer]?.color || '#00bcd4';
+
+    const wallShapes: Shape[] = [];
+    const gridShapes: Shape[] = [];
+    
+    // 1. Create 4 columns centered at (0,0), (S,0), (S,S), (0,S)
+    const corners = [
+      { cx: 0, cy: 0 },
+      { cx: S, cy: 0 },
+      { cx: S, cy: S },
+      { cx: 0, cy: S }
+    ];
+
+    corners.forEach(corner => {
+      const colShape: RectShape = {
+        id: generateId(),
+        type: 'rect',
+        layer: wallLayer,
+        color: wallColor,
+        x: corner.cx - colSize / 2,
+        y: corner.cy - colSize / 2,
+        width: colSize,
+        height: colSize
+      };
+      wallShapes.push(colShape);
+    });
+
+    // 2. Create Grid lines extended by S * 0.15
+    const ext = S * 0.15;
+    const bubbleSize = Math.max(150, colSize * 0.5);
+    
+    // Vertical grid lines
+    const vG1: LineShape = {
+      id: generateId(),
+      type: 'line',
+      layer: gridLayer,
+      color: gridColor,
+      x1: 0,
+      y1: -ext,
+      x2: 0,
+      y2: S + ext
+    };
+    const vG2: LineShape = {
+      id: generateId(),
+      type: 'line',
+      layer: gridLayer,
+      color: gridColor,
+      x1: S,
+      y1: -ext,
+      x2: S,
+      y2: S + ext
+    };
+
+    // Horizontal grid lines
+    const hG1: LineShape = {
+      id: generateId(),
+      type: 'line',
+      layer: gridLayer,
+      color: gridColor,
+      x1: -ext,
+      y1: 0,
+      x2: S + ext,
+      y2: 0
+    };
+    const hG2: LineShape = {
+      id: generateId(),
+      type: 'line',
+      layer: gridLayer,
+      color: gridColor,
+      x1: -ext,
+      y1: S,
+      x2: S + ext,
+      y2: S
+    };
+
+    gridShapes.push(vG1, vG2, hG1, hG2);
+
+    // 3. Grid Bubbles & Labels
+    const bubbleLabelA: CircleShape = {
+      id: generateId(),
+      type: 'circle',
+      layer: gridLayer,
+      color: gridColor,
+      x: -ext - bubbleSize,
+      y: 0,
+      radius: bubbleSize
+    };
+    const textLabelA: TextShape = {
+      id: generateId(),
+      type: 'text',
+      layer: gridLayer,
+      color: gridColor,
+      x: -ext - bubbleSize,
+      y: 0,
+      size: bubbleSize * 1.0,
+      content: 'A',
+      attachmentPoint: 5,
+      fontFamily: 'standard'
+    };
+
+    const bubbleLabelB: CircleShape = {
+      id: generateId(),
+      type: 'circle',
+      layer: gridLayer,
+      color: gridColor,
+      x: -ext - bubbleSize,
+      y: S,
+      radius: bubbleSize
+    };
+    const textLabelB: TextShape = {
+      id: generateId(),
+      type: 'text',
+      layer: gridLayer,
+      color: gridColor,
+      x: -ext - bubbleSize,
+      y: S,
+      size: bubbleSize * 1.0,
+      content: 'B',
+      attachmentPoint: 5,
+      fontFamily: 'standard'
+    };
+
+    const bubbleLabel1: CircleShape = {
+      id: generateId(),
+      type: 'circle',
+      layer: gridLayer,
+      color: gridColor,
+      x: 0,
+      y: S + ext + bubbleSize,
+      radius: bubbleSize
+    };
+    const textLabel1: TextShape = {
+      id: generateId(),
+      type: 'text',
+      layer: gridLayer,
+      color: gridColor,
+      x: 0,
+      y: S + ext + bubbleSize,
+      size: bubbleSize * 1.0,
+      content: '1',
+      attachmentPoint: 5,
+      fontFamily: 'standard'
+    };
+
+    const bubbleLabel2: CircleShape = {
+      id: generateId(),
+      type: 'circle',
+      layer: gridLayer,
+      color: gridColor,
+      x: S,
+      y: S + ext + bubbleSize,
+      radius: bubbleSize
+    };
+    const textLabel2: TextShape = {
+      id: generateId(),
+      type: 'text',
+      layer: gridLayer,
+      color: gridColor,
+      x: S,
+      y: S + ext + bubbleSize,
+      size: bubbleSize * 1.0,
+      content: '2',
+      attachmentPoint: 5,
+      fontFamily: 'standard'
+    };
+
+    gridShapes.push(
+      bubbleLabelA, textLabelA,
+      bubbleLabelB, textLabelB,
+      bubbleLabel1, textLabel1,
+      bubbleLabel2, textLabel2
+    );
+
+    // 4. Dimensions measuring the grid nodes on A-DIM layer
+    const styleId = settingsRef.current.activeDimStyle || 'default';
+    const dimOffset = S * 0.12;
+
+    const lowerDim: DimensionShape = {
+      id: generateId(),
+      type: 'dimension',
+      dimType: 'linear',
+      layer: dimLayer,
+      color: dimColor,
+      x1: 0,
+      y1: 0,
+      x2: S,
+      y2: 0,
+      dimX: S / 2,
+      dimY: -dimOffset,
+      text: '<>',
+      styleId: styleId
+    };
+
+    const leftDim: DimensionShape = {
+      id: generateId(),
+      type: 'dimension',
+      dimType: 'linear',
+      layer: dimLayer,
+      color: dimColor,
+      x1: 0,
+      y1: 0,
+      x2: 0,
+      y2: S,
+      dimX: -dimOffset,
+      dimY: S / 2,
+      text: '<>',
+      styleId: styleId
+    };
+
+    // Update layers
+    setLayers(prev => {
+      const next = { ...prev };
+      next[wallLayer] = [...(next[wallLayer] || []), ...wallShapes];
+      next[gridLayer] = [...(next[gridLayer] || []), ...gridShapes];
+      next[dimLayer] = [...(next[dimLayer] || []), lowerDim, leftDim];
+      layersRef.current = next;
+      return next;
+    });
+
+    setCommandHistory(prev => [
+      ...prev,
+      `BUILDING DYNAMIC STRUCTURAL GRID (${S/1000}m x ${S/1000}m)`,
+      `  > Placed 4 columns size ${colSize}mm x ${colSize}mm on layer A-WALL`,
+      `  > Placed centerline grid lines A, B, 1, 2 on layer A-GRID`,
+      `  > Auto-measured grid boundaries on layer A-DIM`,
+      `> la A-WALL`,
+      `> rect centroid at (0,0), (${S},0), (${S},${S}), (0,${S})`,
+      `> la A-GRID`,
+      `> centerline grid intersections A-1, A-2, B-1, B-2`
+    ]);
+
+    setLogMessage("SUCCESS: STRUCTURAL_GRID_GENERATED");
+    
+    // Zoom extents so the user can see everything beautifully!
+    setTimeout(() => {
+      executeCommand('ze');
+      commitToHistory();
+    }, 100);
+  };
+
+  const executeAutoDim = () => {
+    const boundary = findMostRecentRectangularBoundary(layersRef.current);
+    if (!boundary) {
+      setLogMessage("ERR: NO_RECTANGULAR_ROOM_FOUND");
+      setCommandHistory(prev => [...prev, "ERROR: No rectangular room boundary found to dimension."]);
+      return;
+    }
+
+    const { xMin, yMin, xMax, yMax } = boundary;
+    const width = xMax - xMin;
+    const height = yMax - yMin;
+    const offset = Math.max(250, Math.min(width, height) * 0.12);
+
+    const dimLayer = 'A-DIM';
+    const color = layerConfigRef.current[dimLayer]?.color || '#00bcd4';
+    const styleId = settingsRef.current.activeDimStyle || 'default';
+
+    const lowerDim: DimensionShape = {
+      id: generateId(),
+      type: 'dimension',
+      dimType: 'linear',
+      layer: dimLayer,
+      color: color,
+      x1: xMin,
+      y1: yMin,
+      x2: xMax,
+      y2: yMin,
+      dimX: (xMin + xMax) / 2,
+      dimY: yMin - offset,
+      text: '<>',
+      styleId: styleId
+    };
+
+    const upperDim: DimensionShape = {
+      id: generateId(),
+      type: 'dimension',
+      dimType: 'linear',
+      layer: dimLayer,
+      color: color,
+      x1: xMin,
+      y1: yMax,
+      x2: xMax,
+      y2: yMax,
+      dimX: (xMin + xMax) / 2,
+      dimY: yMax + offset,
+      text: '<>',
+      styleId: styleId
+    };
+
+    const leftDim: DimensionShape = {
+      id: generateId(),
+      type: 'dimension',
+      dimType: 'linear',
+      layer: dimLayer,
+      color: color,
+      x1: xMin,
+      y1: yMin,
+      x2: xMin,
+      y2: yMax,
+      dimX: xMin - offset,
+      dimY: (yMin + yMax) / 2,
+      text: '<>',
+      styleId: styleId
+    };
+
+    const rightDim: DimensionShape = {
+      id: generateId(),
+      type: 'dimension',
+      dimType: 'linear',
+      layer: dimLayer,
+      color: color,
+      x1: xMax,
+      y1: yMin,
+      x2: xMax,
+      y2: yMax,
+      dimX: xMax + offset,
+      dimY: (yMin + yMax) / 2,
+      text: '<>',
+      styleId: styleId
+    };
+
+    const c1 = `dimlinear ${xMin.toFixed(1)},${yMin.toFixed(1)} ${xMax.toFixed(1)},${yMin.toFixed(1)} ${((xMin + xMax) / 2).toFixed(1)},${(yMin - offset).toFixed(1)}`;
+    const c2 = `dimlinear ${xMin.toFixed(1)},${yMax.toFixed(1)} ${xMax.toFixed(1)},${yMax.toFixed(1)} ${((xMin + xMax) / 2).toFixed(1)},${(yMax + offset).toFixed(1)}`;
+    const c3 = `dimlinear ${xMin.toFixed(1)},${yMin.toFixed(1)} ${xMin.toFixed(1)},${yMax.toFixed(1)} ${(xMin - offset).toFixed(1)},${((yMin + yMax) / 2).toFixed(1)}`;
+    const c4 = `dimlinear ${xMax.toFixed(1)},${yMin.toFixed(1)} ${xMax.toFixed(1)},${yMax.toFixed(1)} ${(xMax + offset).toFixed(1)},${((yMin + yMax) / 2).toFixed(1)}`;
+
+    setCommandHistory(prev => [
+      ...prev,
+      `Executing autodim for room boundaries: (W: ${width.toFixed(0)}, H: ${height.toFixed(0)})`,
+      `> la A-DIM`,
+      `> ${c1}`,
+      `> ${c2}`,
+      `> ${c3}`,
+      `> ${c4}`
+    ]);
+
+    setLayers(prev => {
+      const next = { ...prev };
+      next[dimLayer] = [...(next[dimLayer] || []), lowerDim, upperDim, leftDim, rightDim];
+      layersRef.current = next;
+      return next;
+    });
+
+    setLogMessage("SUCCESS: WALLS_AUTO_DIMENSIONED");
+    setTimeout(() => {
+      commitToHistory();
+    }, 50);
+  };
+
+  const getWallsGeometryDescription = (): string => {
+    const wallLayers = ['A-WALL', 'A-WALL-INT'];
+    const wallShapes: Shape[] = [];
+    wallLayers.forEach(l => {
+      if (layersRef.current[l]) {
+        wallShapes.push(...layersRef.current[l]);
+      }
+    });
+
+    if (wallShapes.length === 0 && layersRef.current['0']) {
+      wallShapes.push(...layersRef.current['0'].filter(s => s.type === 'rect' || s.type === 'line' || s.type === 'dline'));
+    }
+
+    if (wallShapes.length === 0) {
+      return "No explicit A-WALL shapes drawn yet.";
+    }
+
+    return wallShapes.map(s => {
+      if (s.type === 'rect') {
+        return `Rect (x: ${s.x.toFixed(0)}, y: ${s.y.toFixed(0)}, w: ${s.width.toFixed(0)}, h: ${s.height.toFixed(0)})`;
+      }
+      if (s.type === 'line') {
+        return `Line (from: ${s.x1.toFixed(0)},${s.y1.toFixed(0)} to: ${s.x2.toFixed(0)},${s.y2.toFixed(0)})`;
+      }
+      if (s.type === 'dline') {
+        return `DoubleLine (${s.points?.map(p => `(${p.x.toFixed(0)},${p.y.toFixed(0)})`).join(' -> ')})`;
+      }
+      if (s.type === 'poly' || s.type === 'pline') {
+        return `${s.type.toUpperCase()} (${(s as any).points?.map((p: any) => `(${p.x.toFixed(0)},${p.y.toFixed(0)})`).join(' -> ')})`;
+      }
+      return `${s.type.toUpperCase()}`;
+    }).join(', ');
+  };
+
+  const executeAiSuggestLayout = async () => {
+    const wallsDesc = getWallsGeometryDescription();
+    if (wallsDesc === "No explicit A-WALL shapes drawn yet.") {
+      setLogMessage("ERR: NO_A-WALL_GEOMETRY");
+      setCommandHistory(prev => [...prev, "ERROR: No A-WALL geometry found. Please draw some walls on A-WALL layer first."]);
+      return;
+    }
+
+    setIsAiThinking(true);
+    setLogMessage("INFO: AI analyzing walls...");
+
+    const prompt = `Analyze the current A-WALL elements: ${wallsDesc}.
+We need to generate an AI-suggested interior layout preview.
+Find the rectangular boundary of this room and generate realistic furniture layout (a bed, desk, nightstands, wardrobe, table, partition, or chairs) using 'rect' and 'line' elements on 'A-FURN' (color: #4caf50 or green) or 'A-WALL-INT' (color: #8d6e63 or brown) layers.
+Ensure all generated shapes fit perfectly interior to the room dimensions and boundary, without overlapping existing walls.
+The room interior area can be derived from the bounding box of the walls.
+Output ONLY standard CAD commands like:
+la A-FURN
+rect 1000,1000 2500,3000
+line 1000,1500 2500,1500
+la A-WALL-INT
+rect 3000,1000 3200,2000
+
+Just issue commands. Ensure exact coordinate parameters can be processed by our command input.
+Use only RECT and LINE commands.`;
+
+    try {
+      const context = getAiContextSummary() + `\nWall Geometry: ${wallsDesc}`;
+      const res = await getCommandFromAI(prompt, context);
+      
+      if (res.commands && res.commands.length > 0) {
+        setCommandHistory(prev => [...prev, "AI SUGGESTED INTERIOR LAYOUT PREVIEW:"]);
+        
+        res.commands.forEach(cmdStr => {
+          const trimmed = cmdStr.trim();
+          if (!trimmed) return;
+          setCommandHistory(prev => [...prev, `AI> ${trimmed.toUpperCase()}`]);
+          executeCommand(trimmed);
+        });
+
+        setLogMessage("SUCCESS: INTERIOR_PREVIEW_GENERATED");
+        setCommandHistory(prev => [...prev, "AI suggest layout applied to A-FURN/A-WALL-INT layers. Press 'U' or Undo to revert."]);
+        
+        setTimeout(() => {
+          commitToHistory();
+        }, 100);
+
+      } else {
+        setLogMessage("ERR: AI_GENERATION_FAILED");
+        setCommandHistory(prev => [...prev, "AI command generation returned empty layout."]);
+      }
+    } catch (e: any) {
+      console.error(e);
+      setLogMessage(`ERR: AI_SUGGESTION_FAILED`);
+    } finally {
+      setIsAiThinking(false);
+    }
+  };
+
   // Helper to rescales entity coordinates when standard units are changed
 
   const executeCommand = useCallback((cmdStr: string) => {
@@ -2003,6 +2822,91 @@ const App: React.FC = () => {
         return; 
     }
 
+    if (cmdKey === 'autodim') {
+        executeAutoDim();
+        setCommandInput('');
+        return;
+    }
+
+    if (cmdKey === 'structgrid' || cmdKey === 'gridbuild' || (cmdKey === 'grid' && args.trim().length > 0)) {
+        const colSize = parseFloat(args) || 300;
+        executeStructuralGrid(colSize);
+        setCommandInput('');
+        return;
+    }
+
+    if (cmdKey === 'dimstyle' || cmdKey === 'dst') {
+        const cmdParts = args.trim().split(/\s+/);
+        let styleName = '';
+        let scaleFactor = 100;
+        
+        if (cmdParts[0]?.toLowerCase() === 'create') {
+            styleName = cmdParts[1] || '';
+            scaleFactor = parseFloat(cmdParts[2]) || 100;
+        } else if (cmdParts[0] && !isNaN(parseFloat(cmdParts[0]))) {
+            scaleFactor = parseFloat(cmdParts[0]);
+            styleName = `scale_1_${scaleFactor}`;
+        } else if (cmdParts[0]) {
+            styleName = cmdParts[0];
+            scaleFactor = parseFloat(cmdParts[1]) || 100;
+        }
+
+        if (!styleName) {
+            setActivePanel('dimstyle');
+            setLogMessage("INFO: DIMSTYLE_PANEL_OPENED. Type 'dimstyle create <name> <scale>' to create.");
+            setCommandInput('');
+            return;
+        }
+
+        const id = styleName.toLowerCase().replace(/\s+/g, '_');
+        
+        const baseArrow = 3.0;
+        const baseText = 3.5;
+        const baseOffset = 1.25;
+        const baseExtend = 1.75;
+        const baseOffsetL = 1.25;
+
+        const newStyle = {
+            id: id,
+            name: styleName.toUpperCase(),
+            arrowSize: baseArrow * scaleFactor,
+            textSize: baseText * scaleFactor,
+            textOffset: baseOffset * scaleFactor,
+            extendLine: baseExtend * scaleFactor,
+            offsetLine: baseOffsetL * scaleFactor,
+            precision: 1,
+            textPlacement: 'above' as const,
+            arrowType: 'closed' as const,
+            arrowScale: 1.0,
+        };
+
+        setSettings(prev => ({
+            ...prev,
+            dimStyles: {
+                ...prev.dimStyles,
+                [id]: newStyle
+            },
+            activeDimStyle: id
+        }));
+
+        setLogMessage(`SUCCESS: DIMSTYLE_${styleName.toUpperCase()}_CREATED`);
+        setCommandHistory(prev => [
+            ...prev,
+            `DIMSTYLE: Selected/Created "${styleName.toUpperCase()}" with Scale factor ${scaleFactor}`,
+            `  > Arrow size: ${newStyle.arrowSize}`,
+            `  > Text height: ${newStyle.textSize}`,
+            `  > Lines extend: ${newStyle.extendLine}, offset: ${newStyle.offsetLine}`
+        ]);
+        setCommandInput('');
+        return;
+    }
+
+    if (cmdKey === 'aisuggest' || cmdKey === 'ai_suggest_interior' || cmdKey === 'suggestlayout') {
+        executeAiSuggestLayout();
+        setCommandInput('');
+        return;
+    }
+
     // Handle sub-commands for Circle, Arc, Ellipse
     const subCommands = ['2p', '3p', 'ttr', 'center', 'tan'];
     if (subCommands.includes(cmdKey)) {
@@ -2062,6 +2966,7 @@ const App: React.FC = () => {
       'fi': FilterCommand, 'filter': FilterCommand,
       'find': FindCommand, 'vports': ViewportCommand, 'viewport': ViewportCommand, 'layout': LayoutCommand,
       'import': ImportCommand, 'import_blocks': ImportCommand,
+      'table': TableCommand, 'tb': TableCommand,
     };
     
     const CommandClass = commandMap[cmdKey];
@@ -2190,7 +3095,7 @@ const App: React.FC = () => {
         setActiveCommandName(undefined);
     }
     setCommandInput('');
-  }, [undo, commitToHistory, showCircleOptions, handleAction, lockedMousePoint, lastCommandName, activeCommandName]);
+  }, [undo, commitToHistory, showCircleOptions, handleAction, lockedMousePoint, lastCommandName, activeCommandName, executeAutoDim, executeAiSuggestLayout, executeStructuralGrid]);
 
   // Global Keyboard Shortcuts (Moved below executeCommand to resolve block-scope lookup)
   useEffect(() => {
@@ -2272,6 +3177,11 @@ const App: React.FC = () => {
                     e.preventDefault();
                     setSettings(prev => ({ ...prev, ortho: !prev.ortho }));
                     setLogMessage(settingsRef.current.ortho ? "ORTHO_OFF" : "ORTHO_ON");
+                    break;
+                case 'F9':
+                    e.preventDefault();
+                    setSettings(prev => ({ ...prev, gridSnap: !prev.gridSnap }));
+                    setLogMessage(settingsRef.current.gridSnap ? "SNAP_OFF" : "SNAP_ON");
                     break;
                 case 'F10':
                     e.preventDefault();
@@ -2359,7 +3269,15 @@ const App: React.FC = () => {
           layersRef.current = next;
           return next;
         }),
-        setPreview: setPreviewShapes,
+        setPreview: (shapes) => {
+          (window as any).__activePreviewShapes = shapes;
+          if (!(window as any).__previewTimer) {
+            (window as any).__previewTimer = requestAnimationFrame(() => {
+              setPreviewShapes((window as any).__activePreviewShapes);
+              (window as any).__previewTimer = null;
+            });
+          }
+        },
         addLog: (msg) => setLogMessage(msg),
         setMessage: (msg) => {
           if (msg === "Command Finished") { 
@@ -2383,6 +3301,11 @@ const App: React.FC = () => {
         saveToViewHistory,
         getViewHistory: () => viewHistory,
         onFinish: () => { 
+          (window as any).__activePreviewShapes = null;
+          if ((window as any).__previewTimer) {
+            cancelAnimationFrame((window as any).__previewTimer);
+            (window as any).__previewTimer = null;
+          }
           setPreviewShapes(null); 
           setCommandPrompt("COMMAND:"); 
           setIsCommandActive(false); 
@@ -2701,6 +3624,7 @@ const App: React.FC = () => {
     { id: 'views', icon: Camera, action: 'toggleViews', activeOn: 'views' },
     { id: 'drawing_props', icon: FileText, action: 'toggleDrawingProps', activeOn: 'drawing_props' },
     { id: 'properties', icon: Sliders, action: 'toggleProperties', activeOn: 'properties' },
+    { id: 'blocks', icon: Box, action: 'toggleBlocks', activeOn: 'blocks' },
     { id: 'calculator', icon: Calculator, action: 'toggleCalculator', activeOn: 'calculator' }
   ];
 
@@ -3156,6 +4080,55 @@ const App: React.FC = () => {
                       }));
                   }} 
                   onOpenLineTypes={() => setActivePanel('linetypes')}
+                  onPurgeEmpty={() => {
+                    const activeLayers = new Set<string>();
+                    (Object.values(layers) as any[]).forEach(shapesList => {
+                      if (Array.isArray(shapesList)) {
+                        shapesList.forEach(s => {
+                          if (s?.layer) activeLayers.add(s.layer);
+                        });
+                      }
+                    });
+                    activeLayers.add('0');
+                    activeLayers.add('defpoints');
+                    activeLayers.add(settings.currentLayer);
+
+                    const layersToPurge: string[] = [];
+                    const purgedNames: string[] = [];
+
+                    Object.keys(layerConfig).forEach(layerId => {
+                      if (!activeLayers.has(layerId)) {
+                        layersToPurge.push(layerId);
+                        purgedNames.push(layerConfig[layerId]?.name || layerId);
+                      }
+                    });
+
+                    if (layersToPurge.length === 0) {
+                      setLogMessage("PURGE: NO UNUSED LAYERS FOUND");
+                      return;
+                    }
+
+                    setPromptDialog({
+                      title: 'Purge Empty Layers',
+                      message: `Are you sure you want to purge ${layersToPurge.length} empty and inactive layer(s)? (${purgedNames.join(', ')})`,
+                      type: 'confirm',
+                      initialValue: '',
+                      onConfirm: () => {
+                        setLayerConfig(prev => {
+                          const n = { ...prev };
+                          layersToPurge.forEach(layerId => delete n[layerId]);
+                          return n;
+                        });
+                        setLayers(prev => {
+                          const n = { ...prev };
+                          layersToPurge.forEach(layerId => delete n[layerId]);
+                          return n;
+                        });
+                        setLogMessage(`PURGED ${layersToPurge.length} EMPTY LAYERS: ${purgedNames.join(', ')}`);
+                        setTimeout(() => commitToHistory(), 50);
+                      }
+                    });
+                  }}
                 />
               </motion.div>
             </motion.div>
@@ -3214,6 +4187,161 @@ const App: React.FC = () => {
                     onOpenColorSelector={(currentColor, onSelect, title) => setColorSelector({ currentColor, onSelect, title })}
                     activeLayout={activeTab !== 'model' ? layouts.find(l => l.id === activeTab) : undefined}
                     onUpdateLayout={(id, upd) => setLayouts(prev => prev.map(l => l.id === id ? { ...l, ...upd } : l))}
+                  />
+                </motion.div>
+             </motion.div>
+          )}
+
+          {activePanel === 'blocks' && (
+             <motion.div 
+               key="panel-blocks-overlay"
+               initial={{ opacity: 0 }}
+               animate={{ opacity: 1 }}
+               exit={{ opacity: 0 }}
+               className="fixed inset-0 z-[1000] flex items-center justify-center sm:p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+             >
+                <motion.div 
+                  initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                  animate={{ scale: 1, opacity: 1, y: 0 }}
+                  exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                  className="pointer-events-auto w-full h-full sm:h-auto sm:w-auto flex items-center justify-center p-2 sm:p-0"
+                >
+                  <BlockLibraryPanel 
+                    blocks={blocks}
+                    selectedCount={selectedIds.length}
+                    onClose={() => setActivePanel('none')}
+                    onInsertBlock={(blockId) => {
+                      if (!blocksRef.current[blockId] && PREDEFINED_BLOCKS[blockId]) {
+                        const pb = PREDEFINED_BLOCKS[blockId];
+                        setBlocks(prev => ({ ...prev, [blockId]: pb }));
+                        blocksRef.current[blockId] = pb;
+                      }
+                      setActivePanel('none');
+                      executeCommand("insert " + blockId);
+                    }}
+                    onDeleteBlock={(blockId) => {
+                      setBlocks(prev => {
+                        const next = { ...prev };
+                        delete next[blockId];
+                        blocksRef.current = next;
+                        return next;
+                      });
+                      setLogMessage(`BLOCK_DELETED: ${blockId}`);
+                    }}
+                    onCreateBlockFromSelection={(name) => {
+                      const selectedShapes = (Object.values(layersRef.current).flat() as Shape[]).filter(s => selectedIds.includes(s.id));
+                      if (selectedShapes.length === 0) {
+                        setLogMessage("ERR: NO_SHAPES_SELECTED");
+                        return;
+                      }
+                      
+                      // Calculate center bounding box automatically
+                      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                      selectedShapes.forEach(s => {
+                        if (s.type === 'line') {
+                          minX = Math.min(minX, s.x1, s.x2);
+                          maxX = Math.max(maxX, s.x1, s.x2);
+                          minY = Math.min(minY, s.y1, s.y2);
+                          maxY = Math.max(maxY, s.y1, s.y2);
+                        } else if ('x' in s && 'y' in s) {
+                          const x = (s as any).x;
+                          const y = (s as any).y;
+                          const r = (s as any).radius || (s as any).width || 10;
+                          minX = Math.min(minX, x - r);
+                          maxX = Math.max(maxX, x + r);
+                          minY = Math.min(minY, y - r);
+                          maxY = Math.max(maxY, y + r);
+                        }
+                      });
+                      
+                      const basePoint = (minX !== Infinity) ? { x: (minX + maxX)/2, y: (minY + maxY)/2 } : { x: 0, y: 0 };
+                      
+                      // Clone and translate shapes relative to base point
+                      const copiedShapes = selectedShapes.map(s => {
+                        const ns = JSON.parse(JSON.stringify(s));
+                        ns.id = Math.random().toString(36).substr(2, 9);
+                        if (ns.type === 'line') {
+                          ns.x1 -= basePoint.x; ns.x2 -= basePoint.x;
+                          ns.y1 -= basePoint.y; ns.y2 -= basePoint.y;
+                        } else if ('x' in ns && 'y' in ns) {
+                          ns.x -= basePoint.x;
+                          ns.y -= basePoint.y;
+                        }
+                        return ns;
+                      });
+                      
+                      const blockDef: BlockDefinition = {
+                        id: Math.random().toString(36).substr(2, 9),
+                        name,
+                        basePoint,
+                        shapes: copiedShapes
+                      };
+                      
+                      const styleLayer = settingsRef.current.currentLayer || '0';
+                      const instance: Shape = {
+                        id: Math.random().toString(36).substr(2, 9),
+                        type: 'block',
+                        blockId: name,
+                        x: basePoint.x,
+                        y: basePoint.y,
+                        scaleX: 1,
+                        scaleY: 1,
+                        rotation: 0,
+                        layer: styleLayer,
+                        color: 'BYLAYER'
+                      } as any;
+                      
+                      setBlocks(prev => {
+                        const next = { ...prev, [name]: blockDef };
+                        blocksRef.current = next;
+                        return next;
+                      });
+                      
+                      setLayers(prev => {
+                        const next = { ...prev };
+                        Object.keys(next).forEach(l => {
+                          next[l] = next[l].filter(s => !selectedIds.includes(s.id));
+                        });
+                        next[styleLayer] = [...(next[styleLayer] || []), instance];
+                        layersRef.current = next;
+                        return next;
+                      });
+                      
+                      setSelectedIds([]);
+                      setLogMessage(`BLOCK_CREATED: ${name}`);
+                      commitToHistory();
+                    }}
+                  />
+                </motion.div>
+             </motion.div>
+          )}
+
+          {activePanel === 'wall_align' && (
+             <motion.div 
+               key="panel-wall-align-overlay"
+               initial={{ opacity: 0 }}
+               animate={{ opacity: 1 }}
+               exit={{ opacity: 0 }}
+               className="fixed inset-0 z-[1000] flex items-center justify-center sm:p-4 bg-black/40 backdrop-blur-[2px] pointer-events-none"
+             >
+                <motion.div 
+                  initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                  animate={{ scale: 1, opacity: 1, y: 0 }}
+                  exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                  className="pointer-events-auto w-full h-full sm:h-auto sm:w-auto flex items-center justify-center p-2 sm:p-0"
+                >
+                  <WallAlignmentPanel 
+                    layers={layers}
+                    onClose={() => setActivePanel('none')}
+                    onUpdateWallShapes={(newShapes) => {
+                      setLayers(prev => {
+                        const next = { ...prev, 'A-WALL': newShapes };
+                        layersRef.current = next;
+                        return next;
+                      });
+                      setLogMessage("WALL: ALIGNMENT RECORRECTED AND ALIGNED");
+                      setTimeout(() => commitToHistory(), 50);
+                    }}
                   />
                 </motion.div>
              </motion.div>

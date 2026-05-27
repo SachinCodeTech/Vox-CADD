@@ -347,12 +347,28 @@ export const isPointInsideShape = (p: Point, s: Shape): boolean => {
     }
 };
 
+export const findBlock = (blockId: string, blocks?: Record<string, BlockDefinition>): BlockDefinition | null => {
+    if (!blocks || !blockId) return null;
+    const direct = blocks[blockId];
+    if (direct) return direct;
+    
+    const blockIdToFind = blockId.toLowerCase().trim();
+    if (blocks[blockIdToFind]) return blocks[blockIdToFind];
+    
+    const found = Object.values(blocks).find((b: any) => 
+        ((b && b.name) || '').toLowerCase().trim() === blockIdToFind || 
+        ((b && b.id) || '').toLowerCase().trim() === blockIdToFind ||
+        String((b && b.handle) || '').toLowerCase().trim() === blockIdToFind
+    );
+    return found || null;
+};
+
 export const hitTestShape = (x: number, y: number, s: Shape, threshold: number, blocks?: Record<string, BlockDefinition>): boolean => {
   switch (s.type) {
     case 'line': return distToSegment(x, y, s.x1, s.y1, s.x2, s.y2) < threshold;
     case 'block':
-      if (blocks && blocks[s.blockId]) {
-        const block = blocks[s.blockId];
+      const block = findBlock(s.blockId, blocks);
+      if (block) {
         const dx = x - s.x, dy = y - s.y;
         const cos = Math.cos(s.rotation || 0), sin = Math.sin(s.rotation || 0);
         // Inverse transform to local coordinate space
@@ -540,8 +556,8 @@ export const getShapeBounds = (s: Shape, blocks?: Record<string, BlockDefinition
             bounds = { xMin: Math.min(s.x1, s.x2), yMin: Math.min(s.y1, s.y2), xMax: Math.max(s.x1, s.x2), yMax: Math.max(s.y1, s.y2) };
             break;
         case 'block':
-            if (blocks && blocks[s.blockId]) {
-                const block = blocks[s.blockId];
+            const block = findBlock(s.blockId, blocks);
+            if (block) {
                 if (block.shapes.length === 0) {
                     bounds = { xMin: s.x - 1, yMin: s.y - 1, xMax: s.x + 1, yMax: s.y + 1 };
                 } else {
@@ -1824,7 +1840,8 @@ const SNAP_PRIORITY: Record<string, number> = {
     'ext': 8,
     'par': 9,
     'near': 10,
-    'node': 11
+    'node': 11,
+    'grid': 12
 };
 
 export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts: number, trackingPoints: SnapPoint[], settings?: any): SnapPoint | null => {
@@ -1837,6 +1854,16 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
             candidates.push({ x, y, type, lastPoint: lp });
         }
     };
+
+    // --- 0. GRID SNAP ---
+    if (settings?.gridSnap) {
+        const snapS = settings.snapSpacing || (settings.gridSpacing / 10) || 10;
+        if (snapS > 0) {
+            const snapX = Math.round(p.x / snapS) * snapS;
+            const snapY = Math.round(p.y / snapS) * snapS;
+            addCandidate(snapX, snapY, 'grid');
+        }
+    }
 
     const polarTrackingActive = options.polar && settings?.polarTrackingEnabled;
     const polarAngles = settings?.polarAngles || [90, 45];
