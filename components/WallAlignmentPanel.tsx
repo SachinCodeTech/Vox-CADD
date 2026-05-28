@@ -170,6 +170,47 @@ export default function WallAlignmentPanel({ layers, onClose, onUpdateWallShapes
     setHasScanned(false);
   };
 
+  // Perform alignment correction for a single shape on A-WALL layer
+  const executeSingleAlignment = (targetId: string) => {
+    const updated = wallShapes.map((s: any) => {
+      if (s.id !== targetId || s.type !== 'line') return s;
+
+      const dx = s.x2 - s.x1;
+      const dy = s.y2 - s.y1;
+      const length = Math.sqrt(dx * dx + dy * dy);
+      if (length < 5.0) return s;
+
+      let angleRad = Math.atan2(dy, dx);
+      let angleDeg = (angleRad * 180) / Math.PI;
+      if (angleDeg < 0) angleDeg += 180;
+      if (angleDeg >= 180) angleDeg -= 180;
+
+      // Find nearest 45 degree target
+      const targetDeg = Math.round(angleDeg / 45) * 45;
+
+      const mx = (s.x1 + s.x2) / 2;
+      const my = (s.y1 + s.y2) / 2;
+      const targetRad = (targetDeg * Math.PI) / 180;
+
+      const newX1 = mx - (length / 2) * Math.cos(targetRad);
+      const newY1 = my - (length / 2) * Math.sin(targetRad);
+      const newX2 = mx + (length / 2) * Math.cos(targetRad);
+      const newY2 = my + (length / 2) * Math.sin(targetRad);
+
+      return {
+        ...s,
+        x1: Math.round(newX1 * 100) / 100,
+        y1: Math.round(newY1 * 100) / 100,
+        x2: Math.round(newX2 * 100) / 100,
+        y2: Math.round(newY2 * 100) / 100
+      };
+    });
+
+    onUpdateWallShapes(updated);
+    // Remove fixed issue from local state
+    setIssues(prev => prev.filter(iss => iss.id !== targetId));
+  };
+
   useEffect(() => {
     runScan();
   }, [layers]);
@@ -252,6 +293,19 @@ export default function WallAlignmentPanel({ layers, onClose, onUpdateWallShapes
                       </span>
                     </div>
                     <p className="text-[9px] text-neutral-300 font-medium leading-normal">{iss.description}</p>
+                    <div className="flex gap-1.5 mt-1">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          executeSingleAlignment(iss.id);
+                        }}
+                        className="flex items-center gap-1.5 px-2 py-1 bg-cyan-500/10 hover:bg-cyan-500 text-cyan-400 hover:text-black rounded text-[8px] font-black uppercase tracking-wider border border-cyan-500/15 transition-all cursor-pointer"
+                      >
+                        <Wand2 size={9} />
+                        Quick Fix
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
