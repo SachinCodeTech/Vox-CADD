@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { X, Check, Ruler, Plus, Trash2, Settings2 } from 'lucide-react';
 import { AppSettings, DimensionStyle } from '../types';
 import { formatDimensionValue } from '../services/cadService';
@@ -42,26 +42,82 @@ const DimStyleManager: React.FC<DimStyleManagerProps> = ({ settings, onUpdateSet
   const styles = settings.dimStyles;
   const activeStyle = styles[activeStyleId] || Object.values(styles)[0];
 
+  const [isCreating, setIsCreating] = useState(false);
+  const [newStyleName, setNewStyleName] = useState('');
+  const [newArrowType, setNewArrowType] = useState<'closed' | 'open' | 'tick' | 'dot'>('closed');
+  const [newTextSize, setNewTextSize] = useState(12);
+  const [newOffsetLine, setNewOffsetLine] = useState(5);
+
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const isDragging = useRef(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const handleMove = (e: MouseEvent | TouchEvent) => {
+        if (!isDragging.current) return;
+        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+        setPos({ x: clientX - dragStart.current.x, y: clientY - dragStart.current.y });
+    };
+    const handleEnd = () => { isDragging.current = false; };
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleEnd);
+    window.addEventListener('touchmove', handleMove, { passive: false });
+    window.addEventListener('touchend', handleEnd);
+    return () => {
+        window.removeEventListener('mousemove', handleMove);
+        window.removeEventListener('mouseup', handleEnd);
+        window.removeEventListener('touchmove', handleMove);
+        window.removeEventListener('touchend', handleEnd);
+    };
+  }, []);
+
+  const startDrag = (clientX: number, clientY: number) => {
+    isDragging.current = true;
+    dragStart.current = { x: clientX - pos.x, y: clientY - pos.y };
+  };
+
   const updateStyle = (id: string, updates: Partial<DimensionStyle>) => {
     const newStyles = { ...styles, [id]: { ...styles[id], ...updates } };
     onUpdateSettings({ ...settings, dimStyles: newStyles });
   };
 
   const addStyle = () => {
-    const name = window.prompt('Enter style name:');
-    if (!name) return;
-    const id = name.toLowerCase().replace(/\s+/g, '_');
+    setIsCreating(true);
+    setNewStyleName('');
+    setNewTextSize(activeStyle.textSize || 12);
+    setNewOffsetLine(activeStyle.offsetLine || 5);
+    setNewArrowType(activeStyle.arrowType || 'closed');
+  };
+
+  const handleCreateStyle = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newStyleName.trim()) return;
+    const id = newStyleName.trim().toLowerCase().replace(/\s+/g, '_');
+    
+    if (styles[id]) {
+      alert(`A dimension style with name "${newStyleName.trim()}" already exists.`);
+      return;
+    }
+
     const newStyle: DimensionStyle = {
       ...activeStyle,
       id,
-      name,
+      name: newStyleName.trim().toUpperCase(),
+      arrowType: newArrowType,
+      textSize: newTextSize,
+      offsetLine: newOffsetLine,
+      arrowSize: Math.max(3, newTextSize * 0.8),
     };
+
     onUpdateSettings({ 
         ...settings, 
         dimStyles: { ...styles, [id]: newStyle },
         activeDimStyle: id
     });
     setActiveStyleId(id);
+    setIsCreating(false);
+    setNewStyleName('');
   };
 
   const removeStyle = (id: string) => {
@@ -80,9 +136,101 @@ const DimStyleManager: React.FC<DimStyleManagerProps> = ({ settings, onUpdateSet
   };
 
   return (
-    <div className="bg-[#0e0e11] border border-white/10 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[80vh] font-sans">
+    <div 
+      className="relative bg-[#0e0e11] border border-white/10 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[80vh] font-sans"
+      style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, zIndex: 1100 }}
+    >
+      {/* Create custom style Modal overlay */}
+      {isCreating && (
+        <div className="absolute inset-0 bg-[#060608]/90 backdrop-blur-md z-50 flex items-center justify-center p-6 animate-in fade-in duration-350">
+          <form onSubmit={handleCreateStyle} className="bg-[#121215] border border-white/10 rounded-2xl w-full max-w-sm overflow-hidden shadow-[0_32px_120px_rgba(0,0,0,0.9)] flex flex-col p-6 space-y-4">
+              <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                  <div className="flex items-center gap-2 text-cyan-400">
+                      <Plus size={16} />
+                      <span className="text-[10px] font-black uppercase tracking-widest font-sans">New Custom Dimension Style</span>
+                  </div>
+                  <button type="button" onClick={() => setIsCreating(false)} className="text-neutral-500 hover:text-white transition-colors p-1 hover:bg-white/5 rounded-full">
+                      <X size={14} />
+                  </button>
+              </div>
+
+              <div className="space-y-4 text-left">
+                  <div className="space-y-1.5 flex flex-col">
+                      <label className="text-[8px] font-black uppercase text-neutral-500 tracking-widest pl-1">Style Name</label>
+                      <input 
+                          type="text"
+                          required
+                          placeholder="e.g. ISO-25, MECHANICAL"
+                          value={newStyleName}
+                          onChange={e => setNewStyleName(e.target.value)}
+                          className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[10px] uppercase font-bold text-white outline-none focus:border-cyan-500/50 transition-all placeholder:text-neutral-700 focus:bg-white/10"
+                      />
+                  </div>
+
+                  <div className="space-y-1.5 flex flex-col">
+                      <label className="text-[8px] font-black uppercase text-neutral-500 tracking-widest pl-1">Arrow Type</label>
+                      <select 
+                          value={newArrowType}
+                          onChange={e => setNewArrowType(e.target.value as any)}
+                          className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[10px] uppercase font-bold text-white outline-none focus:border-cyan-500/50 transition-all font-sans"
+                      >
+                          <option value="closed">Closed Filled</option>
+                          <option value="open">Open</option>
+                          <option value="tick">Architectural Tick</option>
+                          <option value="dot">Dot</option>
+                      </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5 flex flex-col">
+                          <label className="text-[8px] font-black uppercase text-neutral-500 tracking-widest pl-1">Text Height</label>
+                          <input 
+                              type="number"
+                              required
+                              min="1"
+                              value={newTextSize}
+                              onChange={e => setNewTextSize(parseFloat(e.target.value) || 12)}
+                              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[10px] font-mono text-white outline-none focus:border-cyan-500/50 transition-all"
+                          />
+                      </div>
+
+                      <div className="space-y-1.5 flex flex-col">
+                          <label className="text-[8px] font-black uppercase text-neutral-500 tracking-widest pl-1">Ext. Line Offset</label>
+                          <input 
+                              type="number"
+                              required
+                              value={newOffsetLine}
+                              onChange={e => setNewOffsetLine(parseFloat(e.target.value) || 5)}
+                              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[10px] font-mono text-white outline-none focus:border-cyan-500/50 transition-all"
+                          />
+                      </div>
+                  </div>
+              </div>
+
+              <div className="pt-4 flex gap-2">
+                  <button 
+                      type="button"
+                      onClick={() => setIsCreating(false)}
+                      className="flex-1 py-2.5 bg-neutral-900 border border-white/5 hover:bg-neutral-800 rounded-xl text-[9px] font-black uppercase tracking-widest text-neutral-400 hover:text-white transition-all active:scale-95"
+                  >
+                      Cancel
+                  </button>
+                  <button 
+                      type="submit"
+                      className="flex-1 py-2.5 bg-cyan-600 text-black rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-cyan-500 transition-all active:scale-95 shadow-md shadow-cyan-950/20"
+                  >
+                      Save Style
+                  </button>
+              </div>
+          </form>
+        </div>
+      )}
       {/* Header */}
-      <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between bg-[#121214]">
+      <div 
+        className="px-6 py-4 border-b border-white/5 flex items-center justify-between bg-[#121214] cursor-grab active:cursor-grabbing touch-none shrink-0"
+        onMouseDown={e => startDrag(e.clientX, e.clientY)}
+        onTouchStart={e => e.touches.length > 0 && startDrag(e.touches[0].clientX, e.touches[0].clientY)}
+      >
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-cyan-500/10 flex items-center justify-center text-cyan-500 border border-cyan-500/20">
               <Ruler size={22} />

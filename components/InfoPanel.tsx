@@ -244,9 +244,12 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ type, onClose, onSwitch }) => {
   return (
     <div 
       className="relative w-[340px] max-w-[95vw] bg-[#0a0a0c] border border-white/10 rounded-2xl shadow-[0_25px_60px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden select-none font-sans"
+      style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, zIndex: 1000 }}
     >
       <div 
-        className="flex justify-between items-center p-4 border-b border-white/5 bg-white/5 shrink-0"
+        className="flex justify-between items-center p-4 border-b border-white/5 bg-white/5 cursor-grab active:cursor-grabbing touch-none shrink-0"
+        onMouseDown={e => startDrag(e.clientX, e.clientY)}
+        onTouchStart={e => e.touches.length > 0 && startDrag(e.touches[0].clientX, e.touches[0].clientY)}
       >
         <div className="flex items-center gap-2 pointer-events-none">
           {type === 'help' && <HelpCircle size={18} className="text-cyan-400" />}

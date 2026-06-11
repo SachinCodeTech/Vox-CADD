@@ -161,12 +161,13 @@ const CtbManager: React.FC<CtbManagerProps> = ({ isOpen, onClose, settings, onUp
 
   return (
     <div 
-      className="relative w-full sm:w-[940px] sm:max-w-[98vw] h-full sm:h-[82vh] sm:max-h-[720px] bg-[#0c0c0e]/98 backdrop-blur-3xl sm:rounded-2xl shadow-[0_60px_150px_rgba(0,0,0,1)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-500 border border-white/10 select-none font-sans"
-      style={{ transform: window.innerWidth > 640 ? `translate(${pos.x}px, ${pos.y}px)` : undefined, zIndex: 1100 }}
+      className="relative w-[94vw] sm:w-[940px] sm:max-w-[98vw] h-[82vh] sm:h-[82vh] sm:max-h-[720px] bg-[#0c0c0e]/98 backdrop-blur-3xl rounded-3xl shadow-[0_60px_150px_rgba(0,0,0,1)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-500 border border-white/10 select-none font-sans"
+      style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, zIndex: 1100 }}
     >
       <div 
-        className="flex justify-between items-center px-4 py-2.5 border-b border-white/5 bg-[#0a0a0c] sm:cursor-grab active:sm:cursor-grabbing touch-none shrink-0"
-        onMouseDown={e => window.innerWidth > 640 && startDrag(e.clientX, e.clientY)}
+        className="flex justify-between items-center px-4 py-2.5 border-b border-white/5 bg-[#0a0a0c] cursor-grab active:cursor-grabbing touch-none shrink-0"
+        onMouseDown={e => startDrag(e.clientX, e.clientY)}
+        onTouchStart={e => e.touches.length > 0 && startDrag(e.touches[0].clientX, e.touches[0].clientY)}
       >
         <div className="flex items-center gap-3 pointer-events-none">
           <div className="w-8 h-8 rounded-lg bg-cyan-400 flex items-center justify-center text-black shadow-[0_0_15px_rgba(0,188,212,0.2)]">

@@ -31,6 +31,35 @@ const CalculatorPanel: React.FC<CalculatorPanelProps> = ({ onClose }) => {
     const [toUnit, setToUnit] = useState('in');
     const [convResult, setConvResult] = useState('');
 
+    const [pos, setPos] = useState({ x: 0, y: 0 });
+    const isDragging = useRef(false);
+    const dragStart = useRef({ x: 0, y: 0 });
+
+    useEffect(() => {
+        const handleMove = (e: MouseEvent | TouchEvent) => {
+            if (!isDragging.current) return;
+            const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+            const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+            setPos({ x: clientX - dragStart.current.x, y: clientY - dragStart.current.y });
+        };
+        const handleEnd = () => { isDragging.current = false; };
+        window.addEventListener('mousemove', handleMove);
+        window.addEventListener('mouseup', handleEnd);
+        window.addEventListener('touchmove', handleMove, { passive: false });
+        window.addEventListener('touchend', handleEnd);
+        return () => {
+            window.removeEventListener('mousemove', handleMove);
+            window.removeEventListener('mouseup', handleEnd);
+            window.removeEventListener('touchmove', handleMove);
+            window.removeEventListener('touchend', handleEnd);
+        };
+    }, []);
+
+    const startDrag = (clientX: number, clientY: number) => {
+        isDragging.current = true;
+        dragStart.current = { x: clientX - pos.x, y: clientY - pos.y };
+    };
+
     const safeCalculate = (expression: string): string => {
         try {
             let sanitized = expression
@@ -82,9 +111,14 @@ const CalculatorPanel: React.FC<CalculatorPanelProps> = ({ onClose }) => {
     return (
         <div 
             className="relative w-80 max-w-[calc(100vw-40px)] bg-[#35353a] border border-white/10 rounded-2xl shadow-[0_30px_100px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden select-none font-sans"
+            style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, zIndex: 160 }}
         >
             {/* Professional Header */}
-            <div className="flex justify-between items-center p-3 border-b border-white/5 bg-[#35353a]">
+            <div 
+                className="flex justify-between items-center p-3 border-b border-white/5 bg-[#35353a] cursor-grab active:cursor-grabbing touch-none shrink-0"
+                onMouseDown={e => startDrag(e.clientX, e.clientY)}
+                onTouchStart={e => e.touches.length > 0 && startDrag(e.touches[0].clientX, e.touches[0].clientY)}
+            >
                 <div className="flex items-center gap-2.5">
                     <div className="w-8 h-8 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
                         <CalculatorIcon size={18} />

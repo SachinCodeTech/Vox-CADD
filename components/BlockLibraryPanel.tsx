@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { X, Search, PlusCircle, Box, AlertCircle, Copy, Trash2, ArrowDown } from 'lucide-react';
 import { BlockDefinition, Point, Shape } from '../types';
 
@@ -152,13 +152,83 @@ export default function BlockLibraryPanel({
   const [activeTab, setActiveTab] = useState<'standard' | 'custom'>('standard');
   const [searchQuery, setSearchQuery] = useState('');
   const [newBlockName, setNewBlockName] = useState('');
+  const [sortBy, setSortBy] = useState<'name' | 'shapes_desc' | 'source' | 'creation'>('name');
+  const [filterCategory, setFilterCategory] = useState<'ALL' | 'ARCH' | 'FURN' | 'SITE'>('ALL');
+
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const isDragging = useRef(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const handleMove = (e: MouseEvent | TouchEvent) => {
+        if (!isDragging.current) return;
+        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+        setPos({ x: clientX - dragStart.current.x, y: clientY - dragStart.current.y });
+    };
+    const handleEnd = () => { isDragging.current = false; };
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleEnd);
+    window.addEventListener('touchmove', handleMove, { passive: false });
+    window.addEventListener('touchend', handleEnd);
+    return () => {
+        window.removeEventListener('mousemove', handleMove);
+        window.removeEventListener('mouseup', handleEnd);
+        window.removeEventListener('touchmove', handleMove);
+        window.removeEventListener('touchend', handleEnd);
+    };
+  }, []);
+
+  const startDrag = (clientX: number, clientY: number) => {
+    isDragging.current = true;
+    dragStart.current = { x: clientX - pos.x, y: clientY - pos.y };
+  };
 
   const currentLibrary = activeTab === 'standard' ? PREDEFINED_BLOCKS : blocks;
   
-  const filteredBlocksList = Object.entries(currentLibrary).filter(([key, b]) => 
-    b.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    key.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Tag blocks classification helper
+  const getBlockCategory = (key: string): 'ARCH' | 'FURN' | 'SITE' => {
+    const k = key.toLowerCase();
+    if (k.includes('door') || k.includes('window') || k.includes('wall')) return 'ARCH';
+    if (k.includes('dining') || k.includes('chair') || k.includes('sofa') || k.includes('bed') || k.includes('desk') || k.includes('table')) return 'FURN';
+    return 'SITE';
+  };
+
+  const getBlockDateString = (b: BlockDefinition, key: string): string => {
+    if (key.startsWith('pre_') || PREDEFINED_BLOCKS[key]) return 'System Predefined';
+    // Simulated/Real creation date based on block id structure
+    return 'User Generated';
+  };
+
+  // Filter & Sort
+  const filteredBlocksList = Object.entries(currentLibrary)
+    .filter(([key, b]) => {
+      const matchesSearch = b.name.toLowerCase().includes(searchQuery.toLowerCase()) || key.toLowerCase().includes(searchQuery.toLowerCase());
+      if (!matchesSearch) return false;
+      
+      if (filterCategory === 'ALL') return true;
+      return getBlockCategory(key) === filterCategory;
+    })
+    .sort((a, b) => {
+      const [keyA, valA] = a;
+      const [keyB, valB] = b;
+      
+      if (sortBy === 'name') {
+        return valA.name.localeCompare(valB.name);
+      } else if (sortBy === 'shapes_desc') {
+        return valB.shapes.length - valA.shapes.length;
+      } else if (sortBy === 'source') {
+        const isPreA = keyA.startsWith('pre_') || PREDEFINED_BLOCKS[keyA] ? 1 : 0;
+        const isPreB = keyB.startsWith('pre_') || PREDEFINED_BLOCKS[keyB] ? 1 : 0;
+        return isPreB - isPreA;
+      } else {
+        // Creation date: Predefined first, then Custom definitions ordered
+        const isPreA = keyA.startsWith('pre_') || PREDEFINED_BLOCKS[keyA] ? 1 : 0;
+        const isPreB = keyB.startsWith('pre_') || PREDEFINED_BLOCKS[keyB] ? 1 : 0;
+        if (isPreA !== isPreB) return isPreB - isPreA;
+        return valA.name.localeCompare(valB.name); // Sort by name within groups
+      }
+    });
 
   const handleDragStart = (e: React.DragEvent, key: string, b: BlockDefinition) => {
     e.dataTransfer.setData('application/x-cad-block', key);
@@ -177,9 +247,16 @@ export default function BlockLibraryPanel({
   };
 
   return (
-    <div className="relative w-full sm:w-[480px] sm:max-w-[95vw] h-full sm:h-[85vh] sm:max-h-[680px] glass-panel sm:rounded-[1.5rem] shadow-[0_40px_100px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-300 border border-white/5 bg-[#0b0b0d]/95 backdrop-blur-2xl">
+    <div 
+      className="relative w-[94vw] sm:w-[480px] sm:max-w-[95vw] h-[82vh] sm:h-[85vh] sm:max-h-[680px] glass-panel rounded-3xl shadow-[0_40px_100px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-300 border border-white/5 bg-[#0b0b0d]/95 backdrop-blur-2xl"
+      style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, zIndex: 150 }}
+    >
       {/* Panel Header */}
-      <div className="flex justify-between items-center px-5 py-4 border-b border-white/5 bg-[#121215] shrink-0">
+      <div 
+        className="flex justify-between items-center px-5 py-4 border-b border-white/5 bg-[#121215] cursor-grab active:cursor-grabbing touch-none shrink-0"
+        onMouseDown={e => startDrag(e.clientX, e.clientY)}
+        onTouchStart={e => e.touches.length > 0 && startDrag(e.touches[0].clientX, e.touches[0].clientY)}
+      >
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded bg-cyan-500/10 flex items-center justify-center text-cyan-400">
             <Box size={16} className="stroke-[2.5]" />
@@ -221,17 +298,74 @@ export default function BlockLibraryPanel({
         </button>
       </div>
 
-      {/* Search Filter */}
-      <div className="px-4 py-3 bg-[#0d0d10] border-b border-white/5 flex gap-2 shrink-0">
-        <div className="relative flex-1">
-          <Search size={12} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-500" />
-          <input
-            type="text"
-            placeholder="SEARCH BLOCKS..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="w-full bg-black/55 border border-white/5 rounded-xl py-2 px-9 text-[10px] text-neutral-300 font-mono focus:border-cyan-500 focus:bg-black placeholder-neutral-600 outline-none transition-all uppercase"
-          />
+      {/* Search Filter and Sorting Controls */}
+      <div className="px-4 py-3 bg-[#0d0d10] border-b border-white/5 space-y-2.5 shrink-0">
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search size={12} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-500" />
+            <input
+              type="text"
+              placeholder="SEARCH BLOCKS..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full bg-black/55 border border-white/5 rounded-xl py-2 px-9 text-[10px] text-neutral-300 font-mono focus:border-cyan-500 focus:bg-black placeholder-neutral-600 outline-none transition-all uppercase"
+            />
+          </div>
+          
+          <select
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value as any)}
+            className="bg-black/55 border border-white/5 rounded-xl px-2.5 py-2 text-[10px] text-neutral-300 font-mono tracking-wider outline-none focus:border-cyan-500 transition-all cursor-pointer uppercase shrink-0 w-[110px]"
+          >
+            <option value="name">SORT: NAME</option>
+            <option value="shapes_desc">SORT: COMPLEX</option>
+            <option value="source">SORT: SOURCE</option>
+            <option value="creation">SORT: DATE</option>
+          </select>
+        </div>
+
+        {/* Classification Quick Filter Tags */}
+        <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-none">
+          <button
+            onClick={() => setFilterCategory('ALL')}
+            className={`px-3 py-1 text-[8px] font-black uppercase rounded-lg transition-all shrink-0 ${
+              filterCategory === 'ALL'
+                ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/25'
+                : 'bg-black/30 text-neutral-500 border border-transparent hover:text-neutral-300'
+            }`}
+          >
+            ALL CATEGORIES
+          </button>
+          <button
+            onClick={() => setFilterCategory('ARCH')}
+            className={`px-3 py-1 text-[8px] font-black uppercase rounded-lg transition-all shrink-0 ${
+              filterCategory === 'ARCH'
+                ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/25'
+                : 'bg-black/30 text-neutral-500 border border-transparent hover:text-neutral-300'
+            }`}
+          >
+            Architectural
+          </button>
+          <button
+            onClick={() => setFilterCategory('FURN')}
+            className={`px-3 py-1 text-[8px] font-black uppercase rounded-lg transition-all shrink-0 ${
+              filterCategory === 'FURN'
+                ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/25'
+                : 'bg-black/30 text-neutral-500 border border-transparent hover:text-neutral-300'
+            }`}
+          >
+            Furniture
+          </button>
+          <button
+            onClick={() => setFilterCategory('SITE')}
+            className={`px-3 py-1 text-[8px] font-black uppercase rounded-lg transition-all shrink-0 ${
+              filterCategory === 'SITE'
+                ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/25'
+                : 'bg-black/30 text-neutral-500 border border-transparent hover:text-neutral-300'
+            }`}
+          >
+            Site & Utility
+          </button>
         </div>
       </div>
 
@@ -287,7 +421,10 @@ export default function BlockLibraryPanel({
         {/* Grid of Blocks */}
         {filteredBlocksList.length > 0 ? (
           <div className="grid grid-cols-2 gap-3 pb-4">
-            {filteredBlocksList.map(([key, b]) => (
+            {filteredBlocksList.map(([key, b]) => {
+              const cat = getBlockCategory(key);
+              const dateClass = getBlockDateString(b, key);
+              return (
               <div
                 key={b.id || key}
                 draggable
@@ -299,6 +436,16 @@ export default function BlockLibraryPanel({
                 <div className="w-full aspect-[4/3] rounded-xl bg-black/60 border border-white/[0.03] flex items-center justify-center relative overflow-hidden group-hover:bg-black/90 transition-all duration-300">
                   <Box size={24} className="text-neutral-600 group-hover:text-cyan-400 stroke-[1.5] transition-all group-hover:scale-110 duration-500" />
                   
+                  {/* Category mini tag indicator */}
+                  <span className="absolute top-1.5 left-1.5 py-0.5 px-1.5 rounded-md bg-cyan-950/45 border border-cyan-500/10 text-[5.5px] font-mono text-cyan-400 group-hover:bg-cyan-900/60 transition-all">
+                    {cat}
+                  </span>
+
+                  {/* Creation indicator */}
+                  <span className="absolute top-1.5 right-1.5 py-0.5 px-1.5 rounded-md bg-black/55 border border-white/5 text-[5px] font-mono text-neutral-500 group-hover:text-neutral-400 transition-all">
+                    {dateClass}
+                  </span>
+
                   {/* Base Insertion Coordinates indicator */}
                   <span className="absolute bottom-1.5 left-1.5 py-0.5 px-1.5 rounded bg-neutral-900/80 border border-white/5 text-[6px] font-mono text-cyan-500/80 group-hover:text-cyan-400">
                     BASE: {b.basePoint ? `${b.basePoint.x}, ${b.basePoint.y}` : '0, 0'}
@@ -321,7 +468,7 @@ export default function BlockLibraryPanel({
                 </div>
 
                 {/* Hover Action Indicators overlay */}
-                <div className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-all flex gap-1">
+                <div className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-all flex gap-1 animate-in slide-in-from-top-1 duration-200">
                   {activeTab === 'custom' && (
                     <button
                       title="Delete block definition"
@@ -339,7 +486,7 @@ export default function BlockLibraryPanel({
                   </div>
                 </div>
               </div>
-            ))}
+            );})}
           </div>
         ) : (
           <div className="text-center py-12 text-neutral-600 space-y-2">

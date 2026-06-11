@@ -1,6 +1,6 @@
 
-import { Shape, Point, AppSettings, LayerConfig, LineShape, CircleShape, RectShape, ArcShape, PolyShape, TextShape, MTextShape, EllipseShape, DimensionShape, AngularDimensionShape, PointShape, InfiniteLineShape, DonutShape, LeaderShape, ViewState, DoubleLineShape, DLineJustification, TextJustification, LineType, BlockDefinition, LayoutDefinition, LayoutViewport, DimensionType, BlockShape, HatchShape } from '../types';
-import { generateId, getCircleFrom3Points, formatLength, formatAngle, parseLength, hitTestShape, distance, calculateDimensionValue, getTrimmedShapes, moveShape, resolvePointInput, calculateArea, offsetShape, getPolygonPoints, stretchShape, getShapesInRect, rotateShape, scaleShape, mirrorShape, getExtendedShapes, filletLines, chamferLines, modifyShapeByGrip, isPointInsideShape, getShapeBoundaryPoints, isShapeClosed, getShapeBounds, extractBoundaryFromShapes, getAllShapesBounds, joinShapes, getInfiniteLineCircleIntersections, getCircleCircleIntersections, getIntersection, projectPointOnLine, distSq } from './cadService';
+import { Shape, Point, AppSettings, LayerConfig, LineShape, CircleShape, RectShape, ArcShape, PolyShape, TextShape, MTextShape, EllipseShape, DimensionShape, AngularDimensionShape, PointShape, InfiniteLineShape, DonutShape, LeaderShape, ViewState, DoubleLineShape, DLineJustification, TextJustification, LineType, BlockDefinition, LayoutDefinition, LayoutViewport, DimensionType, BlockShape, HatchShape, SectionLineShape } from '../types';
+import { generateId, getCircleFrom3Points, formatLength, formatAngle, parseLength, hitTestShape, distance, calculateDimensionValue, getTrimmedShapes, moveShape, resolvePointInput, calculateArea, offsetShape, getPolygonPoints, stretchShape, getShapesInRect, rotateShape, scaleShape, mirrorShape, getExtendedShapes, filletLines, chamferLines, modifyShapeByGrip, isPointInsideShape, getShapeBoundaryPoints, isShapeClosed, getShapeBounds, extractBoundaryFromShapes, getAllShapesBounds, joinShapes, getInfiniteLineCircleIntersections, getCircleCircleIntersections, getIntersection, projectPointOnLine, distSq, getPointsAlongPath, getShapeSegments } from './cadService';
 
 export interface CommandContext {
     getSettings: () => AppSettings;
@@ -47,13 +47,28 @@ export class ViewportCommand implements CADCommand {
             this.ctx.setMessage("VIEWPORT Specify opposite corner:");
         } else {
             const id = generateId();
+            const snapEnabled = this.ctx.getSettings().snapViewportToGrid;
+            
+            let xMin = Math.min(this.p1.x, p.x);
+            let yMin = Math.min(this.p1.y, p.y);
+            let xMax = Math.max(this.p1.x, p.x);
+            let yMax = Math.max(this.p1.y, p.y);
+
+            if (snapEnabled) {
+                const spacing = 10; // 10mm paper margin grid spacing
+                xMin = Math.round(xMin / spacing) * spacing;
+                yMin = Math.round(yMin / spacing) * spacing;
+                xMax = Math.round(xMax / spacing) * spacing;
+                yMax = Math.round(yMax / spacing) * spacing;
+            }
+
             const vp: LayoutViewport = {
                 id,
-                x: Math.min(this.p1.x, p.x),
-                y: Math.min(this.p1.y, p.y),
-                width: Math.abs(p.x - this.p1.x),
-                height: Math.abs(p.y - this.p1.y),
-                viewState: { scale: 0.01, originX: 0, originY: 0 }
+                x: xMin,
+                y: yMin,
+                width: Math.max(10, xMax - xMin),
+                height: Math.max(10, yMax - yMin),
+                viewState: { scale: 0.05, originX: 0, originY: 0 }
             };
             const activeTabId = this.ctx.getActiveTab();
             this.ctx.setLayouts(this.ctx.getLayouts().map(l => 
@@ -64,13 +79,27 @@ export class ViewportCommand implements CADCommand {
     }
     onMove(p: Point) {
         if (this.p1) {
+            const snapEnabled = this.ctx.getSettings().snapViewportToGrid;
+            let xMin = Math.min(this.p1.x, p.x);
+            let yMin = Math.min(this.p1.y, p.y);
+            let xMax = Math.max(this.p1.x, p.x);
+            let yMax = Math.max(this.p1.y, p.y);
+
+            if (snapEnabled) {
+                const spacing = 10;
+                xMin = Math.round(xMin / spacing) * spacing;
+                yMin = Math.round(yMin / spacing) * spacing;
+                xMax = Math.round(xMax / spacing) * spacing;
+                yMax = Math.round(yMax / spacing) * spacing;
+            }
+
             this.ctx.setPreview([{
                 id: 'preview',
                 type: 'rect',
-                x: Math.min(this.p1.x, p.x),
-                y: Math.min(this.p1.y, p.y),
-                width: Math.abs(p.x - this.p1.x),
-                height: Math.abs(p.y - this.p1.y),
+                x: xMin,
+                y: yMin,
+                width: Math.max(10, xMax - xMin),
+                height: Math.max(10, yMax - yMin),
                 isPreview: true,
                 layer: '0',
                 color: '#888'
@@ -94,12 +123,102 @@ type TangentEntity = { type: 'line', p1: Point, p2: Point } | { type: 'circle', 
 
 let clipboardBuffer: Shape[] = [];
 let clipboardBasePoint: Point = { x: 0, y: 0 };
+export let activeCommandContext: CommandContext | null = null;
 
-const applyOrthoConstraint = (p: Point, anchor: Point, enabled: boolean, snapped: boolean): Point => {
+const applyOrthoConstraint = (p: Point, anchor: Point, enabled: boolean, snapped: boolean, settings?: AppSettings): Point => {
     if (!enabled || snapped) return p;
+    const currentSettings = settings || activeCommandContext?.getSettings();
+    if (currentSettings?.isometricGrid) {
+        const dx = p.x - anchor.x;
+        const dy = p.y - anchor.y;
+        const len = Math.hypot(dx, dy);
+        if (len < 1e-4) return p;
+        const angle = Math.atan2(dy, dx);
+        
+        // Isometric angles: 30, 90, 150, 210, 270, 330 degrees (increments of 60 degrees starting from 30)
+        const isoAngles = [
+            Math.PI / 6,
+            Math.PI / 2,
+            5 * Math.PI / 6,
+            -5 * Math.PI / 6,
+            -Math.PI / 2,
+            -Math.PI / 6
+        ];
+        
+        let bestAngle = isoAngles[0];
+        let minDiff = Infinity;
+        for (const targetAngle of isoAngles) {
+            let diff = Math.abs(angle - targetAngle);
+            if (diff > Math.PI) diff = 2 * Math.PI - diff;
+            if (diff < minDiff) {
+                minDiff = diff;
+                bestAngle = targetAngle;
+            }
+        }
+        return {
+            x: anchor.x + len * Math.cos(bestAngle),
+            y: anchor.y + len * Math.sin(bestAngle)
+        };
+    }
     const dx = Math.abs(p.x - anchor.x);
     const dy = Math.abs(p.y - anchor.y);
     return dx > dy ? { x: p.x, y: anchor.y } : { x: anchor.x, y: p.y };
+};
+
+const applyDraftingConstraints = (p: Point, anchor: Point, ctx: CommandContext, snapped: boolean): Point => {
+    const settings = ctx.getSettings();
+    if (settings.geometricConstraintsEnabled && !snapped) {
+        const allLayers = ctx.getLayers();
+        const activeLayerName = settings.currentLayer;
+        const shapes = allLayers[activeLayerName] || [];
+        
+        const dx_new = p.x - anchor.x;
+        const dy_new = p.y - anchor.y;
+        const len = Math.sqrt(dx_new * dx_new + dy_new * dy_new);
+        if (len < 1e-4) return p;
+        const theta_new = Math.atan2(dy_new, dx_new);
+        
+        let bestTargetAngle: number | null = null;
+        let minDiff = 0.08; // ~4.5 degrees tolerance
+        
+        for (const shape of shapes) {
+            if (shape.type === 'line') {
+                const s = shape as LineShape;
+                const dx_ref = s.x2 - s.x1;
+                const dy_ref = s.y2 - s.y1;
+                const len_ref = Math.sqrt(dx_ref * dx_ref + dy_ref * dy_ref);
+                if (len_ref < 1e-4) continue;
+                const theta_ref = Math.atan2(dy_ref, dx_ref);
+                
+                // Parallel angles
+                const parallelAngles = [theta_ref, theta_ref + Math.PI, theta_ref - Math.PI, theta_ref + 2 * Math.PI, theta_ref - 2 * Math.PI];
+                for (const targetAng of parallelAngles) {
+                    const diff = Math.abs(theta_new - targetAng);
+                    if (diff < minDiff) {
+                        minDiff = diff;
+                        bestTargetAngle = targetAng;
+                    }
+                }
+                
+                // Perpendicular angles
+                const perpAngles = [theta_ref + Math.PI / 2, theta_ref - Math.PI / 2, theta_ref + 3 * Math.PI / 2, theta_ref - 3 * Math.PI / 2];
+                for (const targetAng of perpAngles) {
+                    const diff = Math.abs(theta_new - targetAng);
+                    if (diff < minDiff) {
+                        minDiff = diff;
+                        bestTargetAngle = targetAng;
+                    }
+                }
+            }
+        }
+        if (bestTargetAngle !== null) {
+            return {
+                x: anchor.x + len * Math.cos(bestTargetAngle),
+                y: anchor.y + len * Math.sin(bestTargetAngle)
+            };
+        }
+    }
+    return applyOrthoConstraint(p, anchor, settings.ortho, snapped, settings);
 };
 
 const getStyleSettings = (ctx: CommandContext, commandName?: string) => {
@@ -135,11 +254,13 @@ export class CommandEngine {
 
     constructor(ctx: CommandContext) { 
         this.ctx = ctx; 
+        activeCommandContext = ctx;
         this.ctx.start = (cmd: CADCommand) => this.start(cmd);
     }
     
     start(cmd: CADCommand) { 
         try {
+            activeCommandContext = this.ctx;
             this.cancel(); 
             this.active = cmd; 
             cmd.onStart(); 
@@ -151,11 +272,13 @@ export class CommandEngine {
     }
     
     click(p: Point, snapped: boolean = false, shiftKey: boolean = false) { 
+        activeCommandContext = this.ctx;
         this.ctx.lastMousePoint = p;
         if (this.active) this.active.onClick(p, snapped, shiftKey);
     }
     
     move(p: Point, snapped: boolean = false, shiftKey: boolean = false) { 
+        activeCommandContext = this.ctx;
         this.ctx.lastMousePoint = p;
         if (this.active) this.active.onMove(p, snapped, shiftKey);
     }
@@ -186,7 +309,7 @@ export class LineCommand implements CADCommand {
     onClick(p: Point, snapped: boolean) {
         if (this.pts.length > 0) {
             const anchor = this.pts[this.pts.length - 1];
-            const finalP = applyOrthoConstraint(p, anchor, this.ctx.getSettings().ortho, snapped);
+            const finalP = applyDraftingConstraints(p, anchor, this.ctx, snapped);
             const id = this.addSegment(anchor, finalP);
             this.segmentIds.push(id);
             this.pts.push(finalP);
@@ -243,7 +366,7 @@ export class LineCommand implements CADCommand {
     onMove(p: Point, snapped: boolean) {
         if (this.pts.length > 0) {
             const anchor = this.pts[this.pts.length - 1];
-            const cp = applyOrthoConstraint(p, anchor, this.ctx.getSettings().ortho, snapped);
+            const cp = applyDraftingConstraints(p, anchor, this.ctx, snapped);
             const style = getStyleSettings(this.ctx, this.name);
             this.ctx.setPreview([{id:'p', type:'line', isPreview:true, layer: style.layer, color: style.color, x1:anchor.x, y1:anchor.y, x2:cp.x, y2:cp.y} as any]);
         }
@@ -258,7 +381,15 @@ export class LineCommand implements CADCommand {
 export class DoubleLineCommand implements CADCommand {
     name = "DLINE"; public pts: Point[] = []; public thickness: number = 230; public justification: DLineJustification = 'zero';
     private isDrawing = false;
-    constructor(public ctx: CommandContext) {}
+    constructor(public ctx: CommandContext) {
+        const settings = ctx.getSettings();
+        if (settings.doubleLineThickness !== undefined) {
+            this.thickness = settings.doubleLineThickness;
+        }
+        if (settings.doubleLineJustification !== undefined) {
+            this.justification = settings.doubleLineJustification as DLineJustification;
+        }
+    }
     onStart() { 
         this.ctx.setMessage("DLINE Specify start point or [Thickness/Justification]:"); 
     }
@@ -1806,6 +1937,302 @@ export class EraseCommand implements CADCommand {
     onCancel() { this.ctx.onFinish(); }
 }
 
+export class CleanCommand implements CADCommand {
+    name = "CLEAN";
+    constructor(public ctx: CommandContext) {}
+
+    onStart() {
+        const ids = this.ctx.getSelectedIds();
+        if (ids.length > 0) {
+            this.clean(ids);
+            this.ctx.onFinish();
+        } else {
+            this.ctx.setMessage("CLEAN Select objects to clean or type 'ALL':");
+        }
+    }
+
+    onInput(text: string): boolean {
+        if (text.toLowerCase() === 'all') {
+            const allIds = Object.values(this.ctx.getLayers()).flat().map(s => s.id);
+            this.clean(allIds);
+            this.ctx.onFinish();
+            return true;
+        }
+        return false;
+    }
+
+    onClick(p: Point) {
+        const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
+        const all = Object.values(this.ctx.getLayers()).flat();
+        const hit = all.find(s => hitTestShape(p.x, p.y, s, 20/ts, this.ctx.getBlocks()));
+        if (hit) {
+            this.ctx.setSelectedIds(prev => {
+                const list = Array.isArray(prev) ? prev : [];
+                return list.includes(hit.id) ? list : [...list, hit.id];
+            });
+            this.ctx.setMessage(`CLEAN ${this.ctx.getSelectedIds().length} objects selected. <Enter> to optimize:`);
+        }
+    }
+
+    onMove() {}
+
+    onEnter() {
+        const ids = this.ctx.getSelectedIds();
+        if (ids.length > 0) {
+            this.clean(ids);
+        } else {
+            const allIds = Object.values(this.ctx.getLayers()).flat().map(s => s.id);
+            this.clean(allIds);
+        }
+        this.ctx.onFinish();
+    }
+
+    onCancel() { this.ctx.onFinish(); }
+
+    private clean(ids: string[]) {
+        if (ids.length === 0) return;
+
+        this.ctx.setLayers(prev => {
+            const n = { ...prev };
+            
+            const allShapes: { shape: Shape, layerName: string }[] = [];
+            Object.entries(n).forEach(([layerName, shapes]) => {
+                shapes.forEach(s => {
+                    allShapes.push({ shape: s, layerName });
+                });
+            });
+
+            const selectedShapesAndLayer = allShapes.filter(item => ids.includes(item.shape.id));
+            const baseShapesAndLayer = allShapes.filter(item => !ids.includes(item.shape.id));
+
+            const selectedShapes = selectedShapesAndLayer.map(item => item.shape);
+
+            let zeroLengthLinesRemoved = 0;
+            const nonZeroSelectedShapes: Shape[] = [];
+            selectedShapes.forEach(shape => {
+                if (shape.type === 'line') {
+                    const l = shape as LineShape;
+                    const dx = l.x2 - l.x1;
+                    const dy = l.y2 - l.y1;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < 1e-4) {
+                        zeroLengthLinesRemoved++;
+                        return;
+                    }
+                }
+                nonZeroSelectedShapes.push(shape);
+            });
+
+            const isDuplicateGeometry = (s1: Shape, s2: Shape): boolean => {
+                if (s1.type !== s2.type) return false;
+                if (s1.layer !== s2.layer) return false;
+                if (s1.color !== s2.color) return false;
+                if (s1.lineType !== s2.lineType) return false;
+
+                const TOL = 0.05;
+                switch (s1.type) {
+                    case 'line': {
+                        const l1 = s1 as LineShape, l2 = s2 as LineShape;
+                        const matchNormal = Math.abs(l1.x1 - l2.x1) < TOL && Math.abs(l1.y1 - l2.y1) < TOL && Math.abs(l1.x2 - l2.x2) < TOL && Math.abs(l1.y2 - l2.y2) < TOL;
+                        const matchReverse = Math.abs(l1.x1 - l2.x2) < TOL && Math.abs(l1.y1 - l2.y2) < TOL && Math.abs(l1.x2 - l2.x1) < TOL && Math.abs(l1.y2 - l2.y1) < TOL;
+                        return matchNormal || matchReverse;
+                    }
+                    case 'circle': {
+                        const c1 = s1 as CircleShape, c2 = s2 as CircleShape;
+                        return Math.abs(c1.x - c2.x) < TOL && Math.abs(c1.y - c2.y) < TOL && Math.abs(c1.radius - c2.radius) < TOL;
+                    }
+                    case 'rect': {
+                        const r1 = s1 as RectShape, r2 = s2 as RectShape;
+                        return Math.abs(r1.x - r2.x) < TOL && Math.abs(r1.y - r2.y) < TOL && Math.abs(r1.width - r2.width) < TOL && Math.abs(r1.height - r2.height) < TOL;
+                    }
+                    case 'arc': {
+                        const a1 = s1 as ArcShape, a2 = s2 as ArcShape;
+                        return Math.abs(a1.x - a2.x) < TOL && Math.abs(a1.y - a2.y) < TOL && Math.abs(a1.radius - a2.radius) < TOL && Math.abs(a1.startAngle - a2.startAngle) < TOL && Math.abs(a1.endAngle - a2.endAngle) < TOL;
+                    }
+                    case 'point': {
+                        const p1 = s1 as PointShape, p2 = s2 as PointShape;
+                        return Math.abs(p1.x - p2.x) < TOL && Math.abs(p1.y - p2.y) < TOL;
+                    }
+                    case 'donut': {
+                        const d1 = s1 as DonutShape, d2 = s2 as DonutShape;
+                        return Math.abs(d1.x - d2.x) < TOL && Math.abs(d1.y - d2.y) < TOL && Math.abs(d1.innerRadius - d2.innerRadius) < TOL && Math.abs(d1.outerRadius - d2.outerRadius) < TOL;
+                    }
+                    case 'ellipse': {
+                        const e1 = s1 as EllipseShape, e2 = s2 as EllipseShape;
+                        return Math.abs(e1.x - e2.x) < TOL && Math.abs(e1.y - e2.y) < TOL && Math.abs(e1.rx - e2.rx) < TOL && Math.abs(e1.ry - e2.ry) < TOL && Math.abs(e1.rotation - e2.rotation) < TOL;
+                    }
+                    case 'text':
+                    case 'mtext': {
+                        const t1 = s1 as any, t2 = s2 as any;
+                        const sameContent = (t1.content || t1.text || "") === (t2.content || t2.text || "");
+                        return Math.abs(t1.x - t2.x) < TOL && Math.abs(t1.y - t2.y) < TOL && sameContent && Math.abs((t1.size || t1.height || 0) - (t2.size || t2.height || 0)) < TOL;
+                    }
+                    case 'pline':
+                    case 'poly':
+                    case 'spline':
+                    case 'polygon': {
+                        const p1 = s1 as PolyShape, p2 = s2 as PolyShape;
+                        if (!p1.points || !p2.points || p1.points.length !== p2.points.length) return false;
+                        
+                        const normPoints = (pts: any[]): Point[] => {
+                            if (pts.length === 0) return [];
+                            if (typeof pts[0] === 'number') {
+                                const list: Point[] = [];
+                                for (let i = 0; i < pts.length; i += 2) {
+                                    list.push({ x: pts[i], y: pts[i+1] });
+                                }
+                                return list;
+                            }
+                            return pts.map(pt => ({ x: pt.x, y: pt.y }));
+                        };
+                        const pts1 = normPoints(p1.points);
+                        const pts2 = normPoints(p2.points);
+                        if (pts1.length !== pts2.length) return false;
+                        
+                        let matchNormal = true;
+                        let matchReverse = true;
+                        const len = pts1.length;
+                        for (let i = 0; i < len; i++) {
+                            if (Math.abs(pts1[i].x - pts2[i].x) > TOL || Math.abs(pts1[i].y - pts2[i].y) > TOL) {
+                                matchNormal = false;
+                            }
+                            if (Math.abs(pts1[i].x - pts2[len - 1 - i].x) > TOL || Math.abs(pts1[i].y - pts2[len - 1 - i].y) > TOL) {
+                                matchReverse = false;
+                            }
+                        }
+                        return matchNormal || matchReverse;
+                    }
+                    default:
+                        return false;
+                }
+            };
+
+            const uniqueSelectedShapes: Shape[] = [];
+            let duplicatesRemoved = 0;
+            nonZeroSelectedShapes.forEach(shape => {
+                let isDup = false;
+                for (const existing of uniqueSelectedShapes) {
+                    if (isDuplicateGeometry(shape, existing)) {
+                        isDup = true;
+                        break;
+                    }
+                }
+                if (isDup) {
+                    duplicatesRemoved++;
+                } else {
+                    uniqueSelectedShapes.push(shape);
+                }
+            });
+
+            const checkCollinearMerge = (l1: LineShape, l2: LineShape): LineShape | null => {
+                const x1_1 = l1.x1, y1_1 = l1.y1, x2_1 = l1.x2, y2_1 = l1.y2;
+                const x1_2 = l2.x1, y1_2 = l2.y1, x2_2 = l2.x2, y2_2 = l2.y2;
+
+                const dx1 = x2_1 - x1_1;
+                const dy1 = y2_1 - y1_1;
+                const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+                if (len1 < 1e-4) return null;
+
+                const ux = dx1 / len1;
+                const uy = dy1 / len1;
+
+                const dist1 = Math.abs((x1_2 - x1_1) * uy - (y1_2 - y1_1) * ux);
+                const dist2 = Math.abs((x2_2 - x1_1) * uy - (y2_2 - y1_1) * ux);
+
+                const COLLINEAR_TOL = 0.05;
+                if (dist1 > COLLINEAR_TOL || dist2 > COLLINEAR_TOL) {
+                    return null;
+                }
+
+                const t_p2 = len1;
+                const t_q1 = (x1_2 - x1_1) * ux + (y1_2 - y1_1) * uy;
+                const t_q2 = (x2_2 - x1_1) * ux + (y2_2 - y1_1) * uy;
+
+                const min_q = Math.min(t_q1, t_q2);
+                const max_q = Math.max(t_q1, t_q2);
+
+                const overlapMin = Math.max(0, min_q);
+                const overlapMax = Math.min(len1, max_q);
+
+                if (overlapMin <= overlapMax + COLLINEAR_TOL) {
+                    const finalMin = Math.min(0, min_q);
+                    const finalMax = Math.max(len1, max_q);
+
+                    const mx1 = x1_1 + finalMin * ux;
+                    const my1 = y1_1 + finalMin * uy;
+                    const mx2 = x1_1 + finalMax * ux;
+                    const my2 = y1_1 + finalMax * uy;
+
+                    return {
+                        ...l1,
+                        x1: mx1,
+                        y1: my1,
+                        x2: mx2,
+                        y2: my2
+                    };
+                }
+
+                return null;
+            };
+
+            let lineShapes = uniqueSelectedShapes.filter(s => s.type === 'line') as LineShape[];
+            const otherShapes = uniqueSelectedShapes.filter(s => s.type !== 'line');
+
+            let linesModified = true;
+            while (linesModified) {
+                linesModified = false;
+                for (let i = 0; i < lineShapes.length; i++) {
+                    const l1 = lineShapes[i];
+                    if (!l1) continue;
+                    for (let j = i + 1; j < lineShapes.length; j++) {
+                        const l2 = lineShapes[j];
+                        if (!l2) continue;
+                        if (l1.layer !== l2.layer) continue;
+
+                        const merged = checkCollinearMerge(l1, l2);
+                        if (merged) {
+                            lineShapes[i] = merged;
+                            lineShapes.splice(j, 1);
+                            linesModified = true;
+                            j--;
+                        }
+                    }
+                }
+            }
+
+            const mergedLinesCount = uniqueSelectedShapes.filter(s => s.type === 'line').length - lineShapes.length;
+            const cleanedSelectedShapes = [...otherShapes, ...lineShapes];
+
+            const newLayers: Record<string, Shape[]> = {};
+            Object.keys(prev).forEach(layerName => {
+                newLayers[layerName] = [];
+            });
+
+            baseShapesAndLayer.forEach(item => {
+                if (!newLayers[item.layerName]) {
+                    newLayers[item.layerName] = [];
+                }
+                newLayers[item.layerName].push(item.shape);
+            });
+
+            cleanedSelectedShapes.forEach(shape => {
+                const layerName = shape.layer || '0';
+                if (!newLayers[layerName]) {
+                    newLayers[layerName] = [];
+                }
+                newLayers[layerName].push(shape);
+            });
+
+            const logMsg = `CLEAN: Removed ${zeroLengthLinesRemoved} zero-length lines, ${duplicatesRemoved} duplicate entities, and merged ${mergedLinesCount} overlapping collinear lines.`;
+            this.ctx.addLog(logMsg);
+
+            return newLayers;
+        });
+
+        this.ctx.setSelectedIds([]);
+    }
+}
+
 export class ZoomCommand implements CADCommand {
     name = "ZOOM"; public p1: Point | null = null;
     constructor(public ctx: CommandContext, private initialSub?: string) {}
@@ -2441,6 +2868,441 @@ export class DimensionCommand implements CADCommand {
     }
     onEnter() {}
     onCancel() { this.ctx.onFinish(); }
+}
+
+export class AutoDimensionCommand implements CADCommand {
+    name = "AUTODIM";
+    private offsetDistance: number = 15;
+
+    constructor(public ctx: CommandContext) {}
+
+    onStart() {
+        const appSettings = this.ctx.getSettings();
+        const baseH = (appSettings.drawingScale || 1.0) * 1.65;
+        this.offsetDistance = baseH * 10;
+        this.ctx.setMessage("AUTODIM Specify offset distance from objects <" + this.offsetDistance.toFixed(1) + ">:");
+    }
+
+    onInput(text: string): boolean {
+        const t = text.trim();
+        if (t === "") {
+            this.executeAutoDimension(this.offsetDistance);
+            return true;
+        }
+        const d = parseLength(t, this.ctx.getSettings());
+        if (!isNaN(d) && d > 0) {
+            this.offsetDistance = d;
+            this.executeAutoDimension(d);
+            return true;
+        } else {
+            this.ctx.addLog("Invalid distance dimension. Try again.");
+            return false;
+        }
+    }
+
+    onClick(p: Point) {
+        this.executeAutoDimension(this.offsetDistance);
+    }
+
+    private executeAutoDimension(distanceVal: number) {
+        const selectedIds = this.ctx.getSelectedIds();
+        if (selectedIds.length === 0) {
+            this.ctx.addLog("AUTODIM: No elements currently selected. Please select line segments first.");
+            this.ctx.onFinish();
+            return;
+        }
+
+        const allLayers = this.ctx.getLayers();
+        const allSelectedShapes: Shape[] = [];
+        for (const l in allLayers) {
+            allLayers[l].forEach(s => {
+                if (selectedIds.includes(s.id)) {
+                    allSelectedShapes.push(s);
+                }
+            });
+        }
+
+        const segments: { p1: Point, p2: Point }[] = [];
+        allSelectedShapes.forEach(s => {
+            if (s.type === 'line') {
+                segments.push({ p1: { x: s.x1, y: s.y1 }, p2: { x: s.x2, y: s.y2 } });
+            } else if (s.type === 'rect') {
+                const corners = [
+                    { x: s.x, y: s.y },
+                    { x: s.x + s.width, y: s.y },
+                    { x: s.x + s.width, y: s.y + s.height },
+                    { x: s.x, y: s.y + s.height }
+                ];
+                for (let i = 0; i < 4; i++) {
+                    segments.push({ p1: corners[i], p2: corners[(i + 1) % 4] });
+                }
+            } else if (s.type === 'pline' || s.type === 'polygon' || s.type === 'dline') {
+                const pts = s.points || [];
+                if (pts.length > 1) {
+                    for (let i = 0; i < pts.length - 1; i++) {
+                        segments.push({ p1: pts[i], p2: pts[i + 1] });
+                    }
+                    if (s.type === 'polygon' || (s as any).closed) {
+                        segments.push({ p1: pts[pts.length - 1], p2: pts[0] });
+                    }
+                }
+            }
+        });
+
+        if (segments.length === 0) {
+            this.ctx.addLog("AUTODIM: No valid line, rect, or polyline segments found in current selection.");
+            this.ctx.onFinish();
+            return;
+        }
+
+        let sumX = 0, sumY = 0, count = 0;
+        segments.forEach(seg => {
+            sumX += seg.p1.x + seg.p2.x;
+            sumY += seg.p1.y + seg.p2.y;
+            count += 2;
+        });
+        const centerX = sumX / count;
+        const centerY = sumY / count;
+
+        const style = getStyleSettings(this.ctx);
+        const appSettings = this.ctx.getSettings();
+        const dimLayer = 'A-DIM';
+
+        this.ctx.setLayers(prev => {
+            const next = { ...prev };
+            if (!next[dimLayer]) {
+                next[dimLayer] = [];
+            }
+
+            let addedCount = 0;
+            segments.forEach(seg => {
+                const { p1, p2 } = seg;
+                const dx = p2.x - p1.x;
+                const dy = p2.y - p1.y;
+                const len = Math.sqrt(dx * dx + dy * dy);
+                if (len < 0.1) return;
+
+                let ux = -dy / len;
+                let uy = dx / len;
+
+                const mx = (p1.x + p2.x) / 2;
+                const my = (p1.y + p2.y) / 2;
+
+                const vx = mx - centerX;
+                const vy = my - centerY;
+
+                if (vx * ux + vy * uy < 0) {
+                    ux = -ux;
+                    uy = -uy;
+                }
+
+                const dimX = mx + ux * distanceVal;
+                const dimY = my + uy * distanceVal;
+
+                const d: DimensionShape = {
+                    id: generateId(),
+                    type: 'dimension',
+                    dimType: 'aligned',
+                    layer: dimLayer,
+                    color: style.color || '#00f0ff',
+                    x1: p1.x,
+                    y1: p1.y,
+                    x2: p2.x,
+                    y2: p2.y,
+                    dimX,
+                    dimY,
+                    text: '<>',
+                    styleId: appSettings.activeDimStyle || 'standard'
+                };
+                next[dimLayer].push(d);
+                addedCount++;
+            });
+
+            this.ctx.addLog(`AUTODIM: Successfully auto-generated ${addedCount} aligned dimensions on layer '${dimLayer}'`);
+            return next;
+        });
+
+        this.ctx.onFinish();
+    }
+
+    onMove(p: Point) {}
+    onEnter() {}
+    onCancel() { this.ctx.onFinish(); }
+}
+
+export class SectionLineCommand implements CADCommand {
+    name = "SECTIONLINE";
+    public p1: Point | null = null;
+    public p2: Point | null = null;
+    public tag: string = "A";
+
+    constructor(public ctx: CommandContext) {}
+
+    onStart() {
+        this.ctx.setMessage("SECTIONLINE Specify first point of section cut:");
+    }
+
+    onClick(p: Point) {
+        if (!this.p1) {
+            this.p1 = p;
+            this.ctx.setMessage("SECTIONLINE Specify second point of section cut:");
+        } else if (!this.p2) {
+            this.p2 = p;
+            this.ctx.setMessage("SECTIONLINE Enter section tag identifier or [Enter for 'A'] <" + this.tag + ">:");
+        } else {
+            this.createSectionLine();
+        }
+    }
+
+    onInput(text: string): boolean {
+        if (this.p1 && this.p2) {
+            const val = text.trim();
+            if (val !== "") {
+                this.tag = val;
+            }
+            this.createSectionLine();
+            return true;
+        }
+        return false;
+    }
+
+    onMove(p: Point, snapped: boolean) {
+        if (this.p1 && !this.p2) {
+            const style = getStyleSettings(this.ctx);
+            this.ctx.setPreview([{
+                id: 'preview_section',
+                type: 'section',
+                layer: style.layer,
+                color: style.color || '#06b6d4',
+                x1: this.p1.x,
+                y1: this.p1.y,
+                x2: p.x,
+                y2: p.y,
+                tag: this.tag,
+                isPreview: true
+            } as any]);
+        }
+    }
+
+    private createSectionLine() {
+        if (this.p1 && this.p2) {
+            const style = getStyleSettings(this.ctx);
+            const annoLayer = 'A-ANNO-SECT';
+            const sectionLayer = 'A-SECT-VIEW';
+
+            // Calculate cutting line metrics
+            const dx = this.p2.x - this.p1.x;
+            const dy = this.p2.y - this.p1.y;
+            const len = Math.hypot(dx, dy);
+            if (len < 0.001) {
+                this.ctx.onFinish();
+                return;
+            }
+            const ux = dx / len;
+            const uy = dy / len;
+
+            // Get all shapes in drawing to check intersections
+            const layers = this.ctx.getLayers();
+            const allShapes = Object.values(layers).flat();
+            
+            interface InterInfo {
+                dist: number;
+                point: Point;
+                shape: Shape;
+            }
+            const intersections: InterInfo[] = [];
+
+            allShapes.forEach(s => {
+                if (!s || (s as any).isPreview || s.type === 'section' || s.type === 'text' || s.type === 'mtext' || s.type === 'dimension') {
+                    return;
+                }
+                const segments = getShapeSegments(s);
+                segments.forEach(seg => {
+                    const pt = getIntersection(this.p1!, this.p2!, seg.p1, seg.p2, false);
+                    if (pt) {
+                        const dX = pt.x - this.p1!.x;
+                        const dY = pt.y - this.p1!.y;
+                        const dist = dX * ux + dY * uy;
+                        if (dist >= 0 && dist <= len) {
+                            intersections.push({ dist, point: pt, shape: s });
+                        }
+                    }
+                });
+            });
+
+            // Keep unique intersections (merge points within 0.05 units)
+            const uniqueInters: InterInfo[] = [];
+            intersections.sort((a, b) => a.dist - b.dist);
+            intersections.forEach(item => {
+                const dup = uniqueInters.find(x => Math.abs(x.dist - item.dist) < 0.05);
+                if (!dup) {
+                    uniqueInters.push(item);
+                }
+            });
+
+            // Place section view below drawings (offset relative to bounds or selection center)
+            const bounds = getAllShapesBounds(allShapes);
+            const anchorY = bounds ? (bounds.yMin - 80) : (Math.min(this.p1.y, this.p2.y) - 100);
+            const anchorX = bounds ? bounds.xMin : Math.min(this.p1.x, this.p2.x);
+
+            const H = 30; // standard visual clearance height
+            const sectionShapes: Shape[] = [];
+
+            // 1. SECTION LABEL TITLE TEXT
+            const labelText: Shape = {
+                id: generateId(),
+                type: 'text',
+                layer: sectionLayer,
+                color: '#22d3ee', // Cyan label
+                x: anchorX + len / 2,
+                y: anchorY - 12,
+                text: `SECTION ${this.tag}-${this.tag}`,
+                height: 3.5,
+                justification: 'center'
+            } as any;
+            sectionShapes.push(labelText);
+
+            // 2. SUB-BASE / GROUND LEVEL LINE
+            const groundLine: Shape = {
+                id: generateId(),
+                type: 'line',
+                layer: sectionLayer,
+                color: '#a1a1aa',
+                x1: anchorX,
+                y1: anchorY,
+                x2: anchorX + len,
+                y2: anchorY
+            } as any;
+            sectionShapes.push(groundLine);
+
+            // 3. SLAB / CEILING LEVEL REF LINE
+            const ceilingLine: Shape = {
+                id: generateId(),
+                type: 'line',
+                layer: sectionLayer,
+                color: '#71717a',
+                x1: anchorX,
+                y1: anchorY + H,
+                x2: anchorX + len,
+                y2: anchorY + H
+            } as any;
+            sectionShapes.push(ceilingLine);
+
+            // 4. VERTICAL WALL PROFILES AND WALL SLICE HATCHING
+            let idx = 0;
+            while (idx < uniqueInters.length) {
+                const current = uniqueInters[idx];
+                let isDoubleWallHatch = false;
+                let wallW = 1.0;
+
+                // Watch for next intersected boundary to check if they outline a wall slice (thickness between 0.1 and 10 mm/units)
+                if (idx + 1 < uniqueInters.length) {
+                    const next = uniqueInters[idx + 1];
+                    const gap = next.dist - current.dist;
+                    if (gap > 0.05 && gap < 8.0) {
+                        isDoubleWallHatch = true;
+                        wallW = gap;
+                    }
+                }
+
+                const wx1 = anchorX + current.dist;
+                if (isDoubleWallHatch) {
+                    const wx2 = anchorX + uniqueInters[idx + 1].dist;
+                    
+                    // Draw face lines of the sliced wall
+                    const f1: Shape = {
+                        id: generateId(),
+                        type: 'line',
+                        layer: sectionLayer,
+                        color: '#f43f5e', // Red wall color
+                        x1: wx1,
+                        y1: anchorY,
+                        x2: wx1,
+                        y2: anchorY + H
+                    } as any;
+                    const f2: Shape = {
+                        id: generateId(),
+                        type: 'line',
+                        layer: sectionLayer,
+                        color: '#f43f5e',
+                        x1: wx2,
+                        y1: anchorY,
+                        x2: wx2,
+                        y2: anchorY + H
+                    } as any;
+                    sectionShapes.push(f1, f2);
+
+                    // Draw concrete/brick diagonal wall structural slice slice-pattern hatches
+                    const wallHatch: Shape = {
+                        id: generateId(),
+                        type: 'hatch',
+                        layer: sectionLayer,
+                        color: 'rgba(244, 63, 94, 0.2)',
+                        pattern: 'ansi31',
+                        scale: 1,
+                        rotation: 0,
+                        points: [
+                            { x: wx1, y: anchorY },
+                            { x: wx2, y: anchorY },
+                            { x: wx2, y: anchorY + H },
+                            { x: wx1, y: anchorY + H }
+                        ]
+                    } as any;
+                    sectionShapes.push(wallHatch);
+                    idx += 2;
+                } else {
+                    // Draw a single profile boundary vertical edge
+                    const verticalProfile: Shape = {
+                        id: generateId(),
+                        type: 'line',
+                        layer: sectionLayer,
+                        color: '#38bdf8', // sky active color
+                        x1: wx1,
+                        y1: anchorY,
+                        x2: wx1,
+                        y2: anchorY + H
+                    } as any;
+                    sectionShapes.push(verticalProfile);
+                    idx++;
+                }
+            }
+
+            // Create main SectionLine annotation
+            const s: SectionLineShape = {
+                id: generateId(),
+                type: 'section',
+                layer: annoLayer,
+                color: style.color || '#06b6d4',
+                x1: this.p1.x,
+                y1: this.p1.y,
+                x2: this.p2.x,
+                y2: this.p2.y,
+                tag: this.tag
+            };
+
+            this.ctx.setLayers(prev => {
+                const next = { ...prev };
+                if (!next[annoLayer]) next[annoLayer] = [];
+                if (!next[sectionLayer]) next[sectionLayer] = [];
+                next[annoLayer].push(s);
+                sectionShapes.forEach(shape => next[sectionLayer].push(shape));
+                return next;
+            });
+
+            this.ctx.addLog(`SECTIONLINE: Placed cutting plane '${this.tag}' and auto-generated 2D section view on layer '${sectionLayer}'`);
+            this.ctx.onFinish();
+        }
+    }
+
+    onEnter() {
+        if (this.p1 && this.p2) {
+            this.createSectionLine();
+        }
+    }
+
+    onCancel() {
+        this.ctx.onFinish();
+    }
 }
 
 export class TextCommand implements CADCommand {
@@ -4195,62 +5057,159 @@ export class GripEditCommand implements CADCommand {
 export class MatchPropertiesCommand implements CADCommand {
     name = "MATCHPROP";
     source: Shape | null = null;
+    p1: Point | null = null;
     constructor(public ctx: CommandContext) {}
     onStart() {
-        this.ctx.setMessage("MATCHPROP Select source object:");
+        this.ctx.setMessage("MATCHPROP AI: Select source object to copy properties:");
     }
     onClick(p: Point) {
         const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
         const all = Object.values(this.ctx.getLayers()).flat();
-        const hit = all.find(s => hitTestShape(p.x, p.y, s, 15/ts, this.ctx.getBlocks()));
-        if (!hit) return;
-
+        
         if (!this.source) {
+            const hit = all.find(s => hitTestShape(p.x, p.y, s, 15/ts, this.ctx.getBlocks()));
+            if (!hit) return;
             this.source = hit;
-            this.ctx.setMessage("MATCHPROP Select destination objects:");
+            this.ctx.setMessage("MATCHPROP AI: Source selected. Click to specify FIRST corner of target area:");
             this.ctx.setSelectedIds([hit.id]);
+        } else if (!this.p1) {
+            this.p1 = p;
+            this.ctx.setMessage("MATCHPROP AI: Specify OPPOSITE corner of target area to auto-match similar geometry:");
         } else {
+            // Opposite corner click
+            const xMin = Math.min(this.p1.x, p.x);
+            const xMax = Math.max(this.p1.x, p.x);
+            const yMin = Math.min(this.p1.y, p.y);
+            const yMax = Math.max(this.p1.y, p.y);
+
+            // Find similar shapes within this area
             const updates: Partial<Shape> = {
                 color: this.source.color,
                 layer: this.source.layer,
                 lineType: this.source.lineType,
                 thickness: this.source.thickness
             };
-            
-            // If it's a hatch, maybe match hatch properties too
-            if (this.source.type === 'hatch' && hit.type === 'hatch') {
-                (updates as HatchShape).pattern = this.source.pattern;
-                (updates as HatchShape).scale = this.source.scale;
-                (updates as HatchShape).rotation = this.source.rotation;
+            if (this.source.type === 'hatch') {
+                (updates as HatchShape).pattern = (this.source as HatchShape).pattern;
+                (updates as HatchShape).scale = (this.source as HatchShape).scale;
+                (updates as HatchShape).rotation = (this.source as HatchShape).rotation;
             }
 
+            let matchedCount = 0;
             this.ctx.setLayers(prev => {
                 const next = { ...prev };
-                let found = false;
                 Object.keys(next).forEach(l => {
-                    const idx = next[l].findIndex(s => s.id === hit.id);
-                    if (idx !== -1) {
-                        const updated = { ...next[l][idx], ...updates } as Shape;
-                        next[l] = [...next[l]];
-                        
-                        if (updated.layer !== l) {
-                            next[l].splice(idx, 1);
-                            const newL = updated.layer || '0';
-                            next[newL] = [...(next[newL] || []), updated];
+                    next[l] = next[l].map(s => {
+                        // Check if center or endpoints overlap with bounding box
+                        let inBounds = false;
+                        if (s.type === 'line') {
+                            const lShape = s as LineShape;
+                            inBounds = (lShape.x1 >= xMin && lShape.x1 <= xMax && lShape.y1 >= yMin && lShape.y1 <= yMax) ||
+                                       (lShape.x2 >= xMin && lShape.x2 <= xMax && lShape.y2 >= yMin && lShape.y2 <= yMax);
+                        } else if (s.type === 'circle') {
+                            const cShape = s as CircleShape;
+                            inBounds = (cShape.x >= xMin && cShape.x <= xMax && cShape.y >= yMin && cShape.y <= yMax);
+                        } else if (s.type === 'rect') {
+                            const rShape = s as RectShape;
+                            inBounds = (rShape.x >= xMin && rShape.x <= xMax && rShape.y >= yMin && rShape.y <= yMax);
                         } else {
-                            next[l][idx] = updated;
+                            // general midpoint check
+                            const sx = (s as any).x || (s as any).x1 || 0;
+                            const sy = (s as any).y || (s as any).y1 || 0;
+                            inBounds = (sx >= xMin && sx <= xMax && sy >= yMin && sy <= yMax);
                         }
-                        found = true;
+
+                        // Determine similarity (same geometry type and not the source itself)
+                        if (inBounds && s.type === this.source!.type && s.id !== this.source!.id) {
+                            matchedCount++;
+                            return { ...s, ...updates } as Shape;
+                        }
+                        return s;
+                    });
+
+                    // Trigger layers regrouping if the layer property changed
+                    if (updates.layer && updates.layer !== l) {
+                        const moves = next[l].filter(s => s.layer !== l);
+                        next[l] = next[l].filter(s => s.layer === l);
+                        const newL = updates.layer || '0';
+                        next[newL] = [...(next[newL] || []), ...moves];
                     }
                 });
                 return next;
             });
-            this.ctx.addLog("Properties matched");
+
+            this.ctx.addLog(`AI MATCHPROP: Auto-formatted ${matchedCount} similar ${this.source.type.toUpperCase()} entities within selection window!`);
+            this.ctx.setSelectedIds([]);
+            this.ctx.setPreview([]);
+            this.ctx.onFinish();
         }
     }
-    onMove(p: Point) {}
+    onMove(p: Point) {
+        if (this.source && this.p1) {
+            const xMin = Math.min(this.p1.x, p.x);
+            const xMax = Math.max(this.p1.x, p.x);
+            const yMin = Math.min(this.p1.y, p.y);
+            const yMax = Math.max(this.p1.y, p.y);
+
+            const previewItems: Shape[] = [
+                {
+                    id: 'area-preview',
+                    type: 'rect',
+                    x: xMin,
+                    y: yMin,
+                    width: xMax - xMin,
+                    height: yMax - yMin,
+                    layer: '0',
+                    color: '#06b6d4',
+                    lineType: 'dashed',
+                    thickness: 2,
+                    isPreview: true
+                } as any
+            ];
+
+            // Real-time similarity highlights
+            const all = Object.values(this.ctx.getLayers()).flat();
+            all.forEach(s => {
+                if (s.id === this.source!.id) return;
+                
+                let inBounds = false;
+                if (s.type === 'line') {
+                    const lShape = s as LineShape;
+                    inBounds = (lShape.x1 >= xMin && lShape.x1 <= xMax && lShape.y1 >= yMin && lShape.y1 <= yMax) ||
+                               (lShape.x2 >= xMin && lShape.x2 <= xMax && lShape.y2 >= yMin && lShape.y2 <= yMax);
+                } else if (s.type === 'circle') {
+                    const cShape = s as CircleShape;
+                    inBounds = (cShape.x >= xMin && cShape.x <= xMax && cShape.y >= yMin && cShape.y <= yMax);
+                } else if (s.type === 'rect') {
+                    const rShape = s as RectShape;
+                    inBounds = (rShape.x >= xMin && rShape.x <= xMax && rShape.y >= yMin && rShape.y <= yMax);
+                } else {
+                    const sx = (s as any).x || (s as any).x1 || 0;
+                    const sy = (s as any).y || (s as any).y1 || 0;
+                    inBounds = (sx >= xMin && sx <= xMax && sy >= yMin && sy <= yMax);
+                }
+
+                if (inBounds && s.type === this.source!.type) {
+                    // Create glowing highlight cloned shape
+                    previewItems.push({
+                        ...s,
+                        id: `glow-${s.id}`,
+                        color: '#f43f5e',
+                        thickness: 3,
+                        isPreview: true
+                    } as any);
+                }
+            });
+
+            this.ctx.setPreview(previewItems);
+        }
+    }
     onEnter() { this.ctx.onFinish(); }
-    onCancel() { this.ctx.onFinish(); }
+    onCancel() { 
+        this.ctx.setSelectedIds([]);
+        this.ctx.setPreview([]);
+        this.ctx.onFinish(); 
+    }
 }
 
 export class JoinCommand implements CADCommand {
@@ -4757,4 +5716,200 @@ export class TableCommand implements CADCommand {
     onCancel() {
         this.ctx.onFinish();
     }
+}
+
+export class PathArrayCommand implements CADCommand {
+    name = "ARRAYPATH";
+    selectingObjects = true;
+    selectingPath = false;
+    enteringSpacing = false;
+    
+    selectedToDuplicate: string[] = [];
+    pathShapeId: string | null = null;
+    spacingVal: number = 30;
+
+    constructor(public ctx: CommandContext) {}
+
+    onStart() {
+        const currentSelection = this.ctx.getSelectedIds();
+        if (currentSelection.length > 0) {
+            this.selectedToDuplicate = [...currentSelection];
+            this.selectingObjects = false;
+            this.selectingPath = true;
+            this.ctx.setMessage("ARRAYPATH: Select path curve (line, pline, spline, or arc):");
+        } else {
+            this.selectingObjects = true;
+            this.selectingPath = false;
+            this.ctx.setMessage("ARRAYPATH: Select object(s) to array:");
+        }
+    }
+
+    onClick(p: Point) {
+        const ts = this.ctx.getViewState().scale * this.ctx.getSettings().drawingScale;
+        const allShapes = Object.values(this.ctx.getLayers()).flat();
+
+        if (this.selectingObjects) {
+            const hit = allShapes.find(s => hitTestShape(p.x, p.y, s, 15/ts, this.ctx.getBlocks()));
+            if (hit) {
+                if (!this.selectedToDuplicate.includes(hit.id)) {
+                    this.selectedToDuplicate.push(hit.id);
+                }
+                this.ctx.setSelectedIds([...this.selectedToDuplicate]);
+                this.ctx.setMessage(`ARRAYPATH: ${this.selectedToDuplicate.length} object(s) selected. Press Enter to confirm:`);
+            }
+        } else if (this.selectingPath) {
+            const hit = allShapes.find(s => 
+                (s.type === 'line' || s.type === 'pline' || s.type === 'polygon' || s.type === 'poly' || s.type === 'spline' || s.type === 'arc') &&
+                hitTestShape(p.x, p.y, s, 15/ts, this.ctx.getBlocks())
+            );
+            if (hit) {
+                this.pathShapeId = hit.id;
+                this.selectingPath = false;
+                this.enteringSpacing = true;
+                this.ctx.setMessage("ARRAYPATH: Enter distance spacing between items (default <30>) or 'count <num>' for item count:");
+            } else {
+                this.ctx.addLog("ARRAYPATH: Invalid path curve selected. Please select a line, polyline, spline, or arc.");
+            }
+        } else {
+            this.executeArray(this.spacingVal);
+        }
+    }
+
+    onInput(text: string): boolean {
+        const t = text.trim().toLowerCase();
+        
+        if (this.selectingObjects) {
+            if (t === "") {
+                if (this.selectedToDuplicate.length === 0) {
+                    this.ctx.addLog("No objects selected.");
+                    this.ctx.onFinish();
+                } else {
+                    this.selectingObjects = false;
+                    this.selectingPath = true;
+                    this.ctx.setMessage("ARRAYPATH: Select path curve (line, pline, spline, or arc):");
+                }
+                return true;
+            }
+            return false;
+        }
+
+        if (this.enteringSpacing) {
+            if (t === "") {
+                this.executeArray(this.spacingVal);
+                return true;
+            }
+            
+            if (t.startsWith('count ')) {
+                const countNum = parseInt(t.substring(6).trim(), 10);
+                if (!isNaN(countNum) && countNum > 1) {
+                    this.executeArray(undefined, countNum);
+                    return true;
+                }
+            } else {
+                const spacing = parseLength(t, this.ctx.getSettings());
+                if (!isNaN(spacing) && spacing > 0) {
+                    this.executeArray(spacing);
+                    return true;
+                }
+            }
+            
+            this.ctx.addLog("Invalid input. Try again (e.g. 50 or 'count 10').");
+            return false;
+        }
+
+        return false;
+    }
+
+    onEnter() {
+        if (this.selectingObjects) {
+            if (this.selectedToDuplicate.length > 0) {
+                this.selectingObjects = false;
+                this.selectingPath = true;
+                this.ctx.setMessage("ARRAYPATH: Select path curve (line, pline, spline, or arc):");
+            } else {
+                this.ctx.onFinish();
+            }
+        } else if (this.enteringSpacing) {
+            this.executeArray(this.spacingVal);
+        } else {
+            this.ctx.onFinish();
+        }
+    }
+
+    private executeArray(spacing?: number, count?: number) {
+        if (this.selectedToDuplicate.length === 0 || !this.pathShapeId) {
+            this.ctx.onFinish();
+            return;
+        }
+
+        const allLayers = this.ctx.getLayers();
+        let pathShape: Shape | null = null;
+        const shapesToDuplicate: Shape[] = [];
+
+        for (const l in allLayers) {
+            allLayers[l].forEach(s => {
+                if (s.id === this.pathShapeId) {
+                    pathShape = s;
+                }
+                if (this.selectedToDuplicate.includes(s.id)) {
+                    shapesToDuplicate.push(s);
+                }
+            });
+        }
+
+        if (!pathShape) {
+            this.ctx.addLog("ARRAYPATH: Path shape not found.");
+            this.ctx.onFinish();
+            return;
+        }
+
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        shapesToDuplicate.forEach(s => {
+            const bounds = getShapeBounds(s);
+            if (bounds.xMin < minX) minX = bounds.xMin;
+            if (bounds.yMin < minY) minY = bounds.yMin;
+            if (bounds.xMax > maxX) maxX = bounds.xMax;
+            if (bounds.yMax > maxY) maxY = bounds.yMax;
+        });
+
+        const basePoint = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+        const pathPoints = getPointsAlongPath(pathShape, spacing || 30, count);
+
+        if (pathPoints.length === 0) {
+            this.ctx.addLog("ARRAYPATH: Failed to generate array points along selected path.");
+            this.ctx.onFinish();
+            return;
+        }
+
+        const style = getStyleSettings(this.ctx);
+        const activeLayer = style.layer || '0';
+
+        this.ctx.setLayers(prev => {
+            const next = { ...prev };
+            const newShapes: Shape[] = [];
+
+            pathPoints.forEach((pt, index) => {
+                const dx = pt.x - basePoint.x;
+                const dy = pt.y - basePoint.y;
+
+                shapesToDuplicate.forEach(origShape => {
+                    const cloned = {
+                        ...moveShape(origShape, dx, dy),
+                        id: generateId(),
+                        layer: activeLayer
+                    };
+                    newShapes.push(cloned);
+                });
+            });
+
+            next[activeLayer] = [...(next[activeLayer] || []), ...newShapes];
+            return next;
+        });
+
+        this.ctx.addLog(`ARRAYPATH: Successfully duplicated ${shapesToDuplicate.length} objects along path (generated ${pathPoints.length} copies)`);
+        this.ctx.onFinish();
+    }
+
+    onMove(p: Point) {}
+    onCancel() { this.ctx.onFinish(); }
 }

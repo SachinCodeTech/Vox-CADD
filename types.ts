@@ -14,7 +14,7 @@ export interface Point {
   bulge?: number; // Added for Arcs in Polylines
 }
 
-export type ShapeType = 'line' | 'dline' | 'circle' | 'rect' | 'text' | 'mtext' | 'arc' | 'pline' | 'poly' | 'spline' | 'dimension' | 'dimang' | 'ellipse' | 'polygon' | 'point' | 'ray' | 'xline' | 'donut' | 'leader' | 'block' | 'hatch';
+export type ShapeType = 'line' | 'dline' | 'circle' | 'rect' | 'text' | 'mtext' | 'arc' | 'pline' | 'poly' | 'spline' | 'dimension' | 'dimang' | 'ellipse' | 'polygon' | 'point' | 'ray' | 'xline' | 'donut' | 'leader' | 'block' | 'hatch' | 'section';
 
 export type LineType = 'continuous' | 'dashed' | 'dotted' | 'center' | 'dashdot' | 'border' | 'divide' | 'phantom' | 'zigzag' | 'hotwater' | 'hidden' | 'gasLine' | 'fenceLine' | 'tracks' | 'batt' | 'zigzag2' | 'dots2' | 'dash2' | 'bylayer' | 'byblock';
 
@@ -80,6 +80,16 @@ export interface DimensionShape extends BaseShape {
   angle2?: number;
   text: string;
   styleId?: string;
+}
+
+export interface SectionLineShape extends BaseShape {
+  type: 'section';
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  tag: string;
+  markerSize?: number;
 }
 
 export interface CircleShape extends BaseShape {
@@ -257,7 +267,7 @@ export interface LayoutDefinition {
   entities: Shape[]; // Title blocks, annotations in paper space
 }
 
-export type Shape = LineShape | DoubleLineShape | DimensionShape | CircleShape | RectShape | TextShape | MTextShape | ArcShape | PolyShape | EllipseShape | PointShape | LeaderShape | InfiniteLineShape | AngularDimensionShape | DonutShape | BlockShape | HatchShape;
+export type Shape = LineShape | DoubleLineShape | DimensionShape | CircleShape | RectShape | TextShape | MTextShape | ArcShape | PolyShape | EllipseShape | PointShape | LeaderShape | InfiniteLineShape | AngularDimensionShape | DonutShape | BlockShape | HatchShape | SectionLineShape;
 
 export interface ViewState {
   scale: number;
@@ -413,11 +423,18 @@ export interface AppSettings {
   limitsMin: Point;
   limitsMax: Point;
   metadata?: ProjectMetadata;
+  doubleLineThickness?: number;
+  doubleLineJustification?: 'top' | 'zero' | 'bottom';
   activeCtbId?: string;
   ctbFiles?: Record<string, CtbFile>;
   showCtbInView?: boolean;
   aiSuggestionsEnabled?: boolean;
   namedViews?: NamedView[];
+  snapViewportToGrid?: boolean;
+  geometricConstraintsEnabled?: boolean;
+  wallCleanupMode?: boolean;
+  isometricGrid?: boolean;
+  showSimulatedCollaborators?: boolean;
 }
 
 export interface VoxProject {

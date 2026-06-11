@@ -254,6 +254,37 @@ export const calculateVoxProjectStats = (project: Partial<VoxProject>): any => {
 
   const unusedLayers = Object.keys(layerUsage).filter(layerId => layerUsage[layerId] === 0);
 
+  // Advanced Stats calculations
+  let totalWallLength = 0;
+  let furnitureBlocksCount = 0;
+  const furnitureBlockCounts: Record<string, number> = {};
+  const furnitureKeywords = ['chair', 'table', 'tbl', 'desk', 'bed', 'sofa', 'furniture', 'furn', 'sink', 'toilet', 'tub', 'couch', 'chair', 'seat', 'armchair', 'stool'];
+
+  shapes.forEach(s => {
+    const type = s.type || '';
+    const layerUpper = (s.layer || '').toUpperCase();
+    const isWallLayer = layerUpper.includes('WALL') || layerUpper.includes('SECT');
+    
+    // Total Wall segment length (dline elements or lines/plines on Wall layers)
+    if (type === 'dline') {
+      totalWallLength += calculateShapeLength(s);
+    } else if (isWallLayer && ['line', 'pline', 'polygon'].includes(type)) {
+      totalWallLength += calculateShapeLength(s);
+    }
+
+    // Furniture block definition counts
+    if (type === 'block') {
+      const isFurnLayer = layerUpper.includes('FURN');
+      const blockIdUpper = ((s as any).blockId || '').toUpperCase();
+      const isFurnKeyword = furnitureKeywords.some(kw => blockIdUpper.includes(kw.toUpperCase()));
+      if (isFurnLayer || isFurnKeyword) {
+        furnitureBlocksCount++;
+        const blockName = (s as any).blockId || 'Furniture Component';
+        furnitureBlockCounts[blockName] = (furnitureBlockCounts[blockName] || 0) + 1;
+      }
+    }
+  });
+
   return {
     total: shapes.length,
     unsupported: counts['unknown'] || 0,
@@ -262,7 +293,13 @@ export const calculateVoxProjectStats = (project: Partial<VoxProject>): any => {
     unusedLayers,
     invisibleCount,
     totalLength: Math.round(totalLength * 100) / 100,
-    estimatedSizeKB: "0 KB"
+    estimatedSizeKB: "0 KB",
+    advancedStats: {
+      layerCounts: layerUsage,
+      totalWallLength: Math.round(totalWallLength * 100) / 100,
+      furnitureBlocksCount,
+      furnitureBlockCounts
+    }
   };
 };
 
@@ -374,6 +411,38 @@ class BinaryReader {
 }
 
 /**
+ * Increment revision number (e.g., REV-01 -> REV-02) and append a timestamp.
+ */
+export const incrementProjectRevision = (metadata: ProjectMetadata | undefined): ProjectMetadata => {
+  const currentMeta = metadata || { createdAt: new Date().toISOString(), lastModified: new Date().toISOString() };
+  
+  const prevRevision = currentMeta.revision || 'REV-00';
+  // Match number in formats like "REV-01", "REV-02", "V-1.0", "3", etc.
+  const match = prevRevision.match(/REV-(\d+)/i) || prevRevision.match(/REV\s*(\d+)/i) || prevRevision.match(/(\d+)/);
+  let revNum = 0;
+  if (match) {
+    revNum = parseInt(match[1] || match[0], 10);
+  }
+  
+  const nextRev = revNum + 1;
+  const pad = nextRev < 10 ? '0' + nextRev : String(nextRev);
+  
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const hh = String(now.getHours()).padStart(2, '0');
+  const min = String(now.getMinutes()).padStart(2, '0');
+  const timestampStr = `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+  
+  return {
+    ...currentMeta,
+    revision: `REV-${pad} (${timestampStr})`,
+    lastModified: now.toISOString()
+  };
+};
+
+/**
  * Serializes the whole drawing into .vox binary or string.
  */
 export const shapesToVox = (
@@ -387,6 +456,15 @@ export const shapesToVox = (
 ): string | Uint8Array => {
   const sanitizedEntities = shapes.map(s => sanitizeShape(s));
   const bounds = getAllShapesBounds(sanitizedEntities, blocks);
+
+  // Auto-increment the revision counter on save/serialization
+  const updatedMeta = incrementProjectRevision(settings.metadata);
+  if (settings.metadata) {
+    settings.metadata.revision = updatedMeta.revision;
+    settings.metadata.lastModified = updatedMeta.lastModified;
+  } else {
+    settings.metadata = updatedMeta;
+  }
   
   let layoutsRecord: Record<string, LayoutDefinition> = {};
   if (layouts) {
@@ -1060,3 +1138,95 @@ const mapVoxEntityToShape = (e: any): Shape => {
       return { ...base, ...e.data, type: (e.type || 'line').toLowerCase() } as Shape;
   }
 };
+
+export class VoxService {
+  static save(shapes: Shape[], projectName = "Untitled", existingMetadata?: any): string {
+    const defaultMeta = {
+      name: projectName,
+      author: "Sachin",
+      createdAt: new Date().toISOString(),
+      revision: "REV-00",
+      projectRevision: "V-1.0",
+      description: ""
+    };
+
+    const currentMeta = existingMetadata || defaultMeta;
+
+    // Increment revision
+    const prevRevision = currentMeta.revision || 'REV-00';
+    const match = prevRevision.match(/REV-(\d+)/i) || prevRevision.match(/REV\s*(\d+)/i) || prevRevision.match(/(\d+)/);
+    let revNum = 0;
+    if (match) {
+      revNum = parseInt(match[1] || match[0], 10);
+    }
+    const nextRev = revNum + 1;
+    const pad = nextRev < 10 ? '0' + nextRev : String(nextRev);
+
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const min = String(now.getMinutes()).padStart(2, '0');
+    const timestampStr = `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+
+    const updatedMetadata = {
+      ...currentMeta,
+      name: currentMeta.name || projectName,
+      createdAt: currentMeta.createdAt || now.toISOString(),
+      lastModified: now.toISOString(),
+      modifiedAt: now.toISOString(),
+      revision: `REV-${pad}`,
+      revisionTimestamp: timestampStr,
+      savedAt: now.toISOString(),
+      lastSavedTimestamp: timestampStr
+    };
+
+    // Propagate changes if existingMetadata is object
+    if (existingMetadata) {
+      existingMetadata.name = updatedMetadata.name;
+      existingMetadata.author = updatedMetadata.author;
+      existingMetadata.createdAt = updatedMetadata.createdAt;
+      existingMetadata.lastModified = updatedMetadata.lastModified;
+      existingMetadata.modifiedAt = updatedMetadata.modifiedAt;
+      existingMetadata.revision = updatedMetadata.revision;
+      existingMetadata.revisionTimestamp = updatedMetadata.revisionTimestamp;
+      existingMetadata.savedAt = updatedMetadata.savedAt;
+      existingMetadata.lastSavedTimestamp = updatedMetadata.lastSavedTimestamp;
+    }
+
+    const project = {
+      version: "2.0",
+      metadata: updatedMetadata,
+      settings: {
+        gridSize: 20,
+        snapEnabled: true,
+        units: "mm",
+      },
+      layers: [],
+      shapes: shapes,
+      statistics: {
+        totalEntities: shapes.length,
+        byType: shapes.reduce((acc, s) => {
+          acc[s.type] = (acc[s.type] || 0) + 1;
+          return acc;
+        }, {} as Record<string, number>),
+      },
+    };
+
+    return JSON.stringify(project, null, 2);
+  }
+
+  static load(jsonString: string): { shapes: Shape[]; metadata: any } {
+    try {
+      const project = JSON.parse(jsonString);
+      return {
+        shapes: project.shapes || project.entities || [],
+        metadata: project.metadata || project.meta || { name: project.fileName || "Imported Project" },
+      };
+    } catch (e) {
+      console.error("Vox load failed", e);
+      return { shapes: [], metadata: {} };
+    }
+  }
+}

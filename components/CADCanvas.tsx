@@ -1,9 +1,13 @@
 
 import React, { useRef, useEffect, useState, useCallback, useMemo, useImperativeHandle, forwardRef } from 'react';
+import { AlertCircle, Ruler, Layers, Activity, ChevronDown, ChevronUp, Eye, EyeOff, X } from 'lucide-react';
 import { Shape, ViewState, AppSettings, SnapPoint, LayerConfig, Point, MTextShape, BlockDefinition, LayoutDefinition, LineTypeDefinition, LineType, CtbFile } from '../types';
-import { hitTestShape, findBestSnap, formatLength, formatAngle, formatDimensionValue, calculateDimensionValue, getShapesInRect, getShapeBounds, isRectIntersecting, formatDualLength, isShapeClosed, isPointInsideShape, getPolylineOffsetPoints, calculateShapeLength, distance, getAllShapesBounds, projectPointOnLine } from '../services/cadService';
+import { hitTestShape, findBestSnap, formatLength, formatAngle, formatDimensionValue, calculateDimensionValue, getShapesInRect, getShapeBounds, isRectIntersecting, formatDualLength, isShapeClosed, isPointInsideShape, getPolylineOffsetPoints, calculateShapeLength, distance, getAllShapesBounds, projectPointOnLine, calculateArea, getShapeBoundaryPoints, formatDualArea } from '../services/cadService';
 import { resolveShapeProperties, resolveColor, resolveLineWeight, resolveLineType } from '../services/propertyService';
 import { DrawingSpatialIndex } from '../services/spatialIndex';
+
+
+const MAX_RENDERED_ENTITIES = 15000; // Limit for performance
 
 
 interface CADCanvasProps {
@@ -39,6 +43,7 @@ interface CADCanvasProps {
   commandInput?: string;
   aiRecommendation?: string | null;
   isContextMenuOpen?: boolean;
+  collaborators?: any[];
 }
 
 export interface CADCanvasHandle {
@@ -53,7 +58,8 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     setLogMessage, onObjectContextMenu, isPlotting = false,
     commandInput = '',
     aiRecommendation = null,
-    isContextMenuOpen = false
+    isContextMenuOpen = false,
+    collaborators = []
 }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
@@ -91,14 +97,106 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   }));
 
   const [isPanning, setIsPanning] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [selectionRect, setSelectionRect] = useState<{ start: Point, end: Point, crossing: boolean } | null>(null);
   const [highlightedIds, setHighlightedIds] = useState<string[]>([]);
+  const [showConfirmCancel, setShowConfirmCancel] = useState(false);
+  const [isHudExpanded, setIsHudExpanded] = useState(() => {
+    return localStorage.getItem('voxcadd_hud_expanded') !== 'false';
+  });
+  const [isHudVisible, setIsHudVisible] = useState(() => {
+    return localStorage.getItem('voxcadd_hud_visible') !== 'false';
+  });
+  const [isHudDismissed, setIsHudDismissed] = useState(() => {
+    return localStorage.getItem('voxcadd_hud_dismissed') === 'true';
+  });
+  const [hudPos, setHudPos] = useState({ x: 0, y: 0 });
+  const isDraggingHud = useRef(false);
+  const dragStartHud = useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const handleHudMove = (e: MouseEvent | TouchEvent) => {
+      if (!isDraggingHud.current) return;
+      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+      setHudPos({ x: clientX - dragStartHud.current.x, y: clientY - dragStartHud.current.y });
+    };
+    const handleHudEnd = () => {
+      isDraggingHud.current = false;
+    };
+    window.addEventListener('mousemove', handleHudMove);
+    window.addEventListener('mouseup', handleHudEnd);
+    window.addEventListener('touchmove', handleHudMove, { passive: false });
+    window.addEventListener('touchend', handleHudEnd);
+    return () => {
+      window.removeEventListener('mousemove', handleHudMove);
+      window.removeEventListener('mouseup', handleHudEnd);
+      window.removeEventListener('touchmove', handleHudMove);
+      window.removeEventListener('touchend', handleHudEnd);
+    };
+  }, []);
+
+  // Sync toolbar HUD toggle to automatically restore stats panel accessibility
+  useEffect(() => {
+    if (settings.showHUD) {
+      setIsHudDismissed(false);
+      localStorage.setItem('voxcadd_hud_dismissed', 'false');
+      setIsHudVisible(true);
+      localStorage.setItem('voxcadd_hud_visible', 'true');
+    }
+  }, [settings.showHUD]);
+
+  const startDraggingHud = (clientX: number, clientY: number) => {
+    isDraggingHud.current = true;
+    dragStartHud.current = { x: clientX - hudPos.x, y: clientY - hudPos.y };
+  };
+
+  const hudStats = useMemo(() => {
+    let totalShapes = 0;
+    let totalLength = 0;
+    
+    if (layers) {
+      Object.entries(layers).forEach(([layerId, shapesList]) => {
+        const list = shapesList as Shape[];
+        if (!list) return;
+        totalShapes += list.length;
+        
+        list.forEach(s => {
+          if (s && ['line', 'pline', 'polygon', 'spline', 'dline', 'circle', 'rect', 'arc', 'ellipse'].includes(s.type)) {
+            totalLength += calculateShapeLength(s);
+          }
+        });
+      });
+    }
+
+    return {
+      totalShapes,
+      totalLength
+    };
+  }, [layers]);
+  
+  const activeRotationBlockId = useRef<string | null>(null);
+  const initialBlockAngle = useRef<number>(0);
+  const initialPointerAngle = useRef<number>(0);
+  const [isRotatingBlock, setIsRotatingBlock] = useState(false);
+
+  const getBlockRotationHandlePos = (s: any) => {
+    const ts = view.scale * settings.drawingScale;
+    const stickLen = 35 / ts; 
+    const angle = (s.rotation || 0) + Math.PI / 2;
+    return {
+        x: (s.x || 0) + stickLen * Math.cos(angle),
+        y: (s.y || 0) + stickLen * Math.sin(angle)
+    };
+  };
+
   const trackingPoints = useRef<SnapPoint[]>([]);
   const lastAcquireTime = useRef<number>(0);
   const pointerStartPos = useRef<Point>({ x: 0, y: 0 });
   const lastPos = useRef<Point>({ x: 0, y: 0 });
   const worldCursorRef = useRef<Point>({ x: 0, y: 0 });
   const activeSnapRef = useRef<SnapPoint | null>(null);
+  const hoveredShapeRef = useRef<Shape | null>(null);
   const activePointers = useRef<Map<number, Point>>(new Map());
   const initialPinchDist = useRef<number | null>(null);
   const initialPanMid = useRef<Point | null>(null);
@@ -148,7 +246,8 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   const getAllShapesForSelection = useCallback(() => allSelectableShapes, [allSelectableShapes]);
 
   const calculateScreenToWorld = (sx: number, sy: number, v: ViewState, w: number, h: number): Point => {
-    const ts = v.scale * settings.drawingScale;
+    let ts = v.scale * settings.drawingScale;
+    if (isNaN(ts) || !isFinite(ts) || ts <= 1e-12) ts = 1e-12;
     return { x: (sx - w/2 - v.originX)/ts, y: -(sy - h/2 - v.originY)/ts };
   };
 
@@ -174,7 +273,8 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                 const relX = papX - vp.x;
                 const relY = papY - vp.y;
                 
-                const vts = vp.viewState.scale;
+                let vts = vp.viewState.scale;
+                if (isNaN(vts) || !isFinite(vts) || vts <= 1e-12) vts = 1e-12;
                 return {
                     x: (relX - vp.width/2 - vp.viewState.originX) / vts,
                     y: (vp.height/2 + vp.viewState.originY - relY) / vts
@@ -187,7 +287,9 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
 
   const worldToScreen = (wx: number, wy: number): Point => {
       const canvas = canvasRef.current; if (!canvas || !view) return { x: 0, y: 0 };
-      const r = getPixelRatio(), w = canvas.width/r, h = canvas.height/r, ts = view.scale * settings.drawingScale;
+      const r = getPixelRatio(), w = canvas.width/r, h = canvas.height/r;
+      let ts = view.scale * settings.drawingScale;
+      if (isNaN(ts) || !isFinite(ts) || ts <= 1e-12) ts = 1e-12;
       const isModel = activeTab === 'model';
 
       if (isModel) {
@@ -197,7 +299,8 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
             const layout = layouts.find(l => l.id === activeTab);
             const vp = layout?.viewports.find(v => v.id === activeViewportId);
             if (vp && layout) {
-                const vts = vp.viewState.scale;
+                let vts = vp.viewState.scale;
+                if (isNaN(vts) || !isFinite(vts) || vts <= 1e-12) vts = 1e-12;
                 
                 const papX_rel = (wx * vts + vp.viewState.originX) + vp.width/2;
                 const papY_rel = (-wy * vts + vp.viewState.originY) + vp.height/2;
@@ -246,7 +349,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     ctx.restore();
   };
 
-  const updateCursorAndSnaps = (x: number, y: number, shiftKey?: boolean) => {
+  const updateCursorAndSnaps = (x: number, y: number, shiftKey?: boolean, isTouch?: boolean) => {
     const wp = screenToWorld(x, y);
     worldCursorRef.current = wp;
     const ts = view.scale * settings.drawingScale;
@@ -255,7 +358,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     const osnapActive = shiftKey ? !settings.snap : settings.snap;
     
     if (osnapActive && (activeTab === 'model' || isViewportActive)) {
-      const searchRadius = Math.max(0.001, 30 / ts);
+      const searchRadius = Math.max(0.001, (isTouch ? 55 : 30) / ts);
       const queryBox = {
           xMin: wp.x - searchRadius,
           yMin: wp.y - searchRadius,
@@ -271,7 +374,12 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           tps.push({ x: basePoint.x, y: basePoint.y, type: 'polar' });
       }
 
-      const s = findBestSnap(wp, allRenderable, settings.snapOptions, ts, tps, settings);
+      const s = findBestSnap(wp, allRenderable, settings.snapOptions, ts, tps, settings, isTouch);
+
+      // Find hovered shape for translucent dashed line highlight
+      const tolerance = 15 / ts; 
+      const hovered = allRenderable.find(shape => hitTestShape(wp.x, wp.y, shape, tolerance, blocks));
+      hoveredShapeRef.current = hovered || null;
 
       // Acquire logic: if hover over a snap point for 500ms, toggle tracking
       if (s && ['end', 'mid', 'cen', 'quad', 'int', 'node', 'gcen'].includes(s.type)) {
@@ -304,10 +412,41 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       activeSnapRef.current = s;
     } else {
       activeSnapRef.current = null;
+      hoveredShapeRef.current = null;
     }
     if (onMouseMove) {
-      const targetP = activeSnapRef.current ? {x: activeSnapRef.current.x, y: activeSnapRef.current.y} : wp;
-      onMouseMove(targetP.x, targetP.y, !!activeSnapRef.current, shiftKey);
+      let targetP = activeSnapRef.current ? {x: activeSnapRef.current.x, y: activeSnapRef.current.y} : wp;
+      let snapped = !!activeSnapRef.current;
+      if (!activeSnapRef.current && settings.gridSnap) {
+        const snapS = settings.snapSpacing || settings.gridSpacing || 10;
+        if (snapS > 0) {
+          if (settings.isometricGrid) {
+            const k = Math.round(wp.x / snapS);
+            let bestP = { x: wp.x, y: wp.y };
+            let minDist = Infinity;
+            for (let offset = -1; offset <= 1; offset++) {
+              const c = k + offset;
+              const m = Math.round(0.5 * ((wp.y * Math.sqrt(3)) / snapS - c));
+              const px = c * snapS;
+              const py = ((c + 2 * m) * snapS) / Math.sqrt(3);
+              const dist = Math.hypot(px - wp.x, py - wp.y);
+              if (dist < minDist) {
+                minDist = dist;
+                bestP = { x: px, y: py };
+              }
+            }
+            targetP = bestP;
+            snapped = true;
+          } else {
+            targetP = {
+              x: Math.round(wp.x / snapS) * snapS,
+              y: Math.round(wp.y / snapS) * snapS
+            };
+            snapped = true;
+          }
+        }
+      }
+      onMouseMove(targetP.x, targetP.y, snapped, shiftKey);
     }
   };
 
@@ -395,7 +534,8 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                   yMax: cy + halfVpH
               };
               const vShapes = renderingSpatialIndex.query(vpBounds);
-              vShapes.forEach(s => drawShape(ctx, s, vts));
+              const visibleVShapes = vShapes.slice(0, MAX_RENDERED_ENTITIES);
+              visibleVShapes.forEach(s => drawShape(ctx, s, vts));
               
               const layoutPreviewShapes = (window as any).__activePreviewShapes || previewShapes;
               if (isActive && isCommandActive && layoutPreviewShapes) {
@@ -423,7 +563,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     
       if (settings.grid) {
         const sMin = calculateScreenToWorld(0, 0, view, w, h);
-        const sMax = calculateScreenToWorld(w*r, h*r, view, w, h);
+        const sMax = calculateScreenToWorld(w, h, view, w, h);
         
         let g = settings.gridSpacing;
         const majorEvery = settings.gridMajorInterval || 5;
@@ -432,49 +572,149 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         const ts_adj = ts;
         while (g * ts_adj < 5) g *= 5;
         
-        // Minor Grid Lines
-        ctx.lineWidth = 0.5 / ts;
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
-        ctx.beginPath();
-        for(let x=Math.floor(sMin.x/g)*g; x<=sMax.x; x+=g){ 
-            if (Math.abs(x % (g * majorEvery)) > 0.001 && Math.abs(x) > 0.001) {
-                ctx.moveTo(x, sMin.y); ctx.lineTo(x, sMax.y); 
-            }
-        }
-        for(let y=Math.floor(sMax.y/g)*g; y<=sMin.y; y+=g){ 
-            if (Math.abs(y % (g * majorEvery)) > 0.001 && Math.abs(y) > 0.001) {
-                ctx.moveTo(sMin.x, y); ctx.lineTo(sMax.x, y); 
-            }
-        }
-        ctx.stroke();
+        if (settings.isometricGrid) {
+            const left = sMin.x;
+            const right = sMax.x;
+            const bottom = sMax.y;
+            const top = sMin.y;
 
-        // Major Grid Lines
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
-        ctx.beginPath();
-        for(let x=Math.floor(sMin.x/(g * majorEvery))*(g * majorEvery); x<=sMax.x; x+=(g * majorEvery)){
-            if (Math.abs(x) > 0.001) {
-                ctx.moveTo(x, sMin.y); ctx.lineTo(x, sMax.y);
+            // 1. Draw Vertical lines
+            ctx.lineWidth = 0.5 / ts;
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
+            ctx.beginPath();
+            for (let x = Math.floor(left / g) * g; x <= right; x += g) {
+                if (Math.abs(x % (g * majorEvery)) > 0.001 && Math.abs(x) > 0.001) {
+                    ctx.moveTo(x, bottom); ctx.lineTo(x, top);
+                }
             }
-        }
-        for(let y=Math.floor(sMax.y/(g * majorEvery))*(g * majorEvery); y<=sMin.y; y+=(g * majorEvery)){
-            if (Math.abs(y) > 0.001) {
-                ctx.moveTo(sMin.x, y); ctx.lineTo(sMax.x, y);
-            }
-        }
-        ctx.stroke();
+            ctx.stroke();
 
-        // Main Axes (Origin Lines)
-        ctx.strokeStyle = "rgba(0, 188, 212, 0.3)"; // Subtle Cyan for Origin
-        ctx.beginPath();
-        if (0 >= sMin.x && 0 <= sMax.x) { ctx.moveTo(0, sMin.y); ctx.lineTo(0, sMax.y); }
-        if (0 >= sMax.y && 0 <= sMin.y) { ctx.moveTo(sMin.x, 0); ctx.lineTo(sMax.x, 0); }
-        ctx.stroke();
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
+            ctx.beginPath();
+            for (let x = Math.floor(left / (g * majorEvery)) * (g * majorEvery); x <= right; x += (g * majorEvery)) {
+                if (Math.abs(x) > 0.001) {
+                    ctx.moveTo(x, bottom); ctx.lineTo(x, top);
+                }
+            }
+            ctx.stroke();
+
+            // 2. Draw 30-degree lines (slope = 1 / sqrt(3))
+            // Equation: sqrt(3)*y - x = 2*k*g => x = sqrt(3)*y - 2*k*g
+            const V1 = Math.sqrt(3) * bottom - left;
+            const V2 = Math.sqrt(3) * bottom - right;
+            const V3 = Math.sqrt(3) * top - left;
+            const V4 = Math.sqrt(3) * top - right;
+            const Vmin = Math.min(V1, V2, V3, V4);
+            const Vmax = Math.max(V1, V2, V3, V4);
+
+            const kMin = Math.floor(Vmin / (2 * g)) - 1;
+            const kMax = Math.ceil(Vmax / (2 * g)) + 1;
+
+            ctx.lineWidth = 0.5 / ts;
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
+            ctx.beginPath();
+            for (let k = kMin; k <= kMax; k++) {
+                if (Math.abs(k % majorEvery) !== 0) {
+                    ctx.moveTo(Math.sqrt(3) * bottom - 2 * k * g, bottom);
+                    ctx.lineTo(Math.sqrt(3) * top - 2 * k * g, top);
+                }
+            }
+            ctx.stroke();
+
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
+            ctx.beginPath();
+            for (let k = kMin; k <= kMax; k++) {
+                if (Math.abs(k % majorEvery) === 0) {
+                    ctx.moveTo(Math.sqrt(3) * bottom - 2 * k * g, bottom);
+                    ctx.lineTo(Math.sqrt(3) * top - 2 * k * g, top);
+                }
+            }
+            ctx.stroke();
+
+            // 3. Draw 150-degree lines (slope = -1 / sqrt(3))
+            // Equation: sqrt(3)*y + x = 2*m*g => x = 2*m*g - sqrt(3)*y
+            const W1 = Math.sqrt(3) * bottom + left;
+            const W2 = Math.sqrt(3) * bottom + right;
+            const W3 = Math.sqrt(3) * top + left;
+            const W4 = Math.sqrt(3) * top + right;
+            const Wmin = Math.min(W1, W2, W3, W4);
+            const Wmax = Math.max(W1, W2, W3, W4);
+
+            const mMin = Math.floor(Wmin / (2 * g)) - 1;
+            const mMax = Math.ceil(Wmax / (2 * g)) + 1;
+
+            ctx.lineWidth = 0.5 / ts;
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
+            ctx.beginPath();
+            for (let m = mMin; m <= mMax; m++) {
+                if (Math.abs(m % majorEvery) !== 0) {
+                    ctx.moveTo(2 * m * g - Math.sqrt(3) * bottom, bottom);
+                    ctx.lineTo(2 * m * g - Math.sqrt(3) * top, top);
+                }
+            }
+            ctx.stroke();
+
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
+            ctx.beginPath();
+            for (let m = mMin; m <= mMax; m++) {
+                if (Math.abs(m % majorEvery) === 0) {
+                    ctx.moveTo(2 * m * g - Math.sqrt(3) * bottom, bottom);
+                    ctx.lineTo(2 * m * g - Math.sqrt(3) * top, top);
+                }
+            }
+            ctx.stroke();
+
+            // 4. Main Axes (subtle layout)
+            ctx.strokeStyle = "rgba(0, 188, 212, 0.3)"; // Subtle Cyan for Origin
+            ctx.beginPath();
+            if (0 >= left && 0 <= right) { ctx.moveTo(0, bottom); ctx.lineTo(0, top); }
+            if (0 >= bottom && 0 <= top) { ctx.moveTo(left, 0); ctx.lineTo(right, 0); }
+            ctx.stroke();
+        } else {
+            // Minor Grid Lines
+            ctx.lineWidth = 0.5 / ts;
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
+            ctx.beginPath();
+            for(let x=Math.floor(sMin.x/g)*g; x<=sMax.x; x+=g){ 
+                if (Math.abs(x % (g * majorEvery)) > 0.001 && Math.abs(x) > 0.001) {
+                    ctx.moveTo(x, sMin.y); ctx.lineTo(x, sMax.y); 
+                }
+            }
+            for(let y=Math.floor(sMax.y/g)*g; y<=sMin.y; y+=g){ 
+                if (Math.abs(y % (g * majorEvery)) > 0.001 && Math.abs(y) > 0.001) {
+                    ctx.moveTo(sMin.x, y); ctx.lineTo(sMax.x, y); 
+                }
+            }
+            ctx.stroke();
+
+            // Major Grid Lines
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
+            ctx.beginPath();
+            for(let x=Math.floor(sMin.x/(g * majorEvery))*(g * majorEvery); x<=sMax.x; x+=(g * majorEvery)){
+                if (Math.abs(x) > 0.001) {
+                    ctx.moveTo(x, sMin.y); ctx.lineTo(x, sMax.y);
+                }
+            }
+            for(let y=Math.floor(sMax.y/(g * majorEvery))*(g * majorEvery); y<=sMin.y; y+=(g * majorEvery)){
+                if (Math.abs(y) > 0.001) {
+                    ctx.moveTo(sMin.x, y); ctx.lineTo(sMax.x, y);
+                }
+            }
+            ctx.stroke();
+
+            // Main Axes (Origin Lines)
+            ctx.strokeStyle = "rgba(0, 188, 212, 0.3)"; // Subtle Cyan for Origin
+            ctx.beginPath();
+            if (0 >= sMin.x && 0 <= sMax.x) { ctx.moveTo(0, sMin.y); ctx.lineTo(0, sMax.y); }
+            if (0 >= sMax.y && 0 <= sMin.y) { ctx.moveTo(sMin.x, 0); ctx.lineTo(sMax.x, 0); }
+            ctx.stroke();
+        }
       }
     
       const renderable = getAllShapesForRendering();
       
       const sMin = calculateScreenToWorld(0, 0, view, w, h);
-      const sMax = calculateScreenToWorld(w*r, h*r, view, w, h);
+      const sMax = calculateScreenToWorld(w, h, view, w, h);
       const viewportBounds = { 
           xMin: Math.min(sMin.x, sMax.x), 
           yMin: Math.min(sMin.y, sMax.y), 
@@ -483,8 +723,9 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       };
       
       const visibleShapes = renderingSpatialIndex.query(viewportBounds);
+      const optimizedVisibleShapes = visibleShapes.slice(0, MAX_RENDERED_ENTITIES);
 
-      visibleShapes.forEach(s => {
+      optimizedVisibleShapes.forEach(s => {
           drawShape(ctx, s, ts);
       });
       ctx.restore();
@@ -495,33 +736,138 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     const isModel = activeTab === 'model';
     ctx.setTransform(r, 0, 0, r, 0, 0);
 
+    const sMin = calculateScreenToWorld(0, 0, view, w, h);
+    const sMax = calculateScreenToWorld(w, h, view, w, h);
+    const viewportBounds = { 
+        xMin: Math.min(sMin.x, sMax.x), 
+        yMin: Math.min(sMin.y, sMax.y), 
+        xMax: Math.max(sMin.x, sMax.x), 
+        yMax: Math.max(sMin.y, sMax.y) 
+    };
+    const visibleShapes = renderingSpatialIndex.query(viewportBounds);
+
     if (isModel) {
       ctx.save(); ctx.translate(w/2 + view.originX, h/2 + view.originY); ctx.scale(ts, -ts);
 
       if (activeSnapRef.current) drawSnapMarker(ctx, activeSnapRef.current, ts, w, h);
       const mainPreviewShapes = (window as any).__activePreviewShapes || previewShapes;
       if (mainPreviewShapes) mainPreviewShapes.forEach(s => drawShape(ctx, s, ts));
+
+      // 1. OBJECT HOVER snaps assist (translucent dashed line highlight)
+      if (hoveredShapeRef.current) {
+          ctx.save();
+          ctx.strokeStyle = "rgba(0, 240, 255, 0.7)";
+          ctx.shadowColor = "rgba(0, 240, 255, 0.4)";
+          ctx.shadowBlur = 4;
+          ctx.lineWidth = 2.0 / ts;
+          ctx.setLineDash([6 / ts, 4 / ts]);
+          
+          const hs = hoveredShapeRef.current;
+          ctx.beginPath();
+          if (hs.type === 'line') {
+              ctx.moveTo(hs.x1, hs.y1);
+              ctx.lineTo(hs.x2, hs.y2);
+              ctx.stroke();
+          } else if (hs.type === 'circle') {
+              ctx.arc(hs.x, hs.y, hs.radius, 0, Math.PI * 2);
+              ctx.stroke();
+          } else if (hs.type === 'rect') {
+              ctx.rect(hs.x, hs.y, hs.width, hs.height);
+              ctx.stroke();
+          } else if (hs.type === 'arc') {
+              ctx.arc(hs.x, hs.y, hs.radius, hs.startAngle, hs.endAngle, !hs.counterClockwise);
+              ctx.stroke();
+          } else if (hs.type === 'pline' || hs.type === 'polygon' || hs.type === 'spline') {
+              const pts = hs.points || [];
+              if (pts.length > 1) {
+                  ctx.moveTo(pts[0].x, pts[0].y);
+                  for (let i = 1; i < pts.length; i++) {
+                      ctx.lineTo(pts[i].x, pts[i].y);
+                  }
+                  if (hs.closed || hs.type === 'polygon') ctx.closePath();
+                  ctx.stroke();
+              }
+          } else if (hs.type === 'ellipse') {
+              ctx.ellipse(hs.x, hs.y, hs.rx, hs.ry, hs.rotation || 0, 0, Math.PI * 2);
+              ctx.stroke();
+          }
+          ctx.restore();
+      }
       
-      const sMin = calculateScreenToWorld(0, 0, view, w, h);
-      const sMax = calculateScreenToWorld(w*r, h*r, view, w, h);
-      const viewportBounds = { 
-          xMin: Math.min(sMin.x, sMax.x), 
-          yMin: Math.min(sMin.y, sMax.y), 
-          xMax: Math.max(sMin.x, sMax.x), 
-          yMax: Math.max(sMin.y, sMax.y) 
-      };
-      
-      const visibleShapes = renderingSpatialIndex.query(viewportBounds);
+      // 2. AREA SHADING for closed selected shapes
+      const tsSafeForShade = Math.max(1e-4, ts);
+      visibleShapes.filter(shape => selectedIds.includes(shape.id) && isShapeClosed(shape)).forEach(shape => {
+          const pts = getShapeBoundaryPoints(shape);
+          if (pts && pts.length > 2) {
+              ctx.save();
+              ctx.fillStyle = "rgba(0, 188, 212, 0.16)"; // soft modern translucent cyan shading
+              ctx.beginPath();
+              ctx.moveTo(pts[0].x, pts[0].y);
+              for (let i = 1; i < pts.length; i++) {
+                  ctx.lineTo(pts[i].x, pts[i].y);
+              }
+              ctx.closePath();
+              ctx.fill();
+              
+              ctx.strokeStyle = "rgba(0, 188, 212, 0.4)";
+              ctx.lineWidth = 1.2 / tsSafeForShade;
+              ctx.stroke();
+              ctx.restore();
+          }
+      });
       visibleShapes.filter(s => selectedIds.includes(s.id)).forEach(s => drawGrips(ctx, s, ts));
+
+      // Perpendicular and Tangent Feedback lines and symbols
+      if (activeSnapRef.current && (activeSnapRef.current.type === 'perp' || activeSnapRef.current.type === 'tan') && activeSnapRef.current.lastPoint) {
+          const snap = activeSnapRef.current;
+          const lp = snap.lastPoint;
+          const tsSafe = Math.max(1e-4, ts);
+          ctx.save();
+          ctx.strokeStyle = snap.type === 'perp' ? "rgba(16, 185, 129, 0.75)" : "rgba(236, 72, 153, 0.75)";
+          ctx.lineWidth = 1.5/tsSafe;
+          ctx.setLineDash([6/tsSafe, 6/tsSafe]);
+          ctx.beginPath();
+          ctx.moveTo(lp.x, lp.y);
+          ctx.lineTo(snap.x, snap.y);
+          ctx.stroke();
+
+          // Render explicit feedback symbols at snap
+          ctx.beginPath();
+          ctx.setLineDash([]);
+          ctx.strokeStyle = snap.type === 'perp' ? "#10b981" : "#ec4899";
+          if (snap.type === 'perp') {
+              const dx = lp.x - snap.x;
+              const dy = lp.y - snap.y;
+              const len = Math.sqrt(dx*dx + dy*dy);
+              if (len > 0.001) {
+                  const ux = dx / len;
+                  const uy = dy / len;
+                  const symSize = 8 / tsSafe;
+                  const px = -uy;
+                  const py = ux;
+                  ctx.moveTo(snap.x + ux * symSize, snap.y + uy * symSize);
+                  ctx.lineTo(snap.x + ux * symSize + px * symSize, snap.y + uy * symSize + py * symSize);
+                  ctx.lineTo(snap.x + px * symSize, snap.y + py * symSize);
+              }
+          } else {
+              // tangent indicator contact circle
+              ctx.arc(snap.x, snap.y, 4 / tsSafe, 0, Math.PI * 2);
+              ctx.fillStyle = "rgba(236, 72, 153, 0.8)";
+              ctx.fill();
+          }
+          ctx.stroke();
+          ctx.restore();
+      }
 
       // Polar / Tracking Line
       if (activeSnapRef.current && activeSnapRef.current.type === 'polar' && activeSnapRef.current.lastPoint) {
           const snap = activeSnapRef.current;
           const lp = snap.lastPoint;
+          const tsSafe = Math.max(1e-4, ts);
           ctx.save();
           ctx.strokeStyle = "rgba(0, 188, 212, 0.6)"; 
-          ctx.lineWidth = 1/ts;
-          ctx.setLineDash([10/ts, 10/ts]);
+          ctx.lineWidth = 1/tsSafe;
+          ctx.setLineDash([10/tsSafe, 10/tsSafe]);
           ctx.beginPath();
           ctx.moveTo(lp.x, lp.y);
           ctx.lineTo(snap.x, snap.y);
@@ -530,21 +876,50 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           const len = Math.sqrt(dx*dx + dy*dy);
           if (len > 0) {
               const ux = dx/len, uy = dy/len;
-              ctx.lineTo(snap.x + ux * (20/ts), snap.y + uy * (20/ts));
+              ctx.lineTo(snap.x + ux * (20/tsSafe), snap.y + uy * (20/tsSafe));
           }
           ctx.stroke();
+          ctx.restore();
           
-          // Draw tooltip for angle/distance
+          // Draw tooltip for angle/distance in screen coordinates to prevent division by zero or huge font sizes crashing the tab!
           if (len > 0) {
             const angle = Math.atan2(dy, dx) * 180 / Math.PI;
             const posAngle = (angle + 360) % 360;
             const label = `${len.toFixed(1)} < ${posAngle.toFixed(1)}°`;
-            ctx.setLineDash([]);
-            ctx.font = `${11/ts}px Inter`;
-            ctx.fillStyle = "rgba(0, 188, 212, 0.9)";
-            ctx.fillText(label, snap.x + 15/ts, snap.y - 15/ts);
+            
+            ctx.save();
+            ctx.setTransform(r, 0, 0, r, 0, 0); // stable screen space
+            
+            const screenPos = worldToScreen(snap.x, snap.y);
+            
+            ctx.font = '10px "JetBrains Mono", "Fira Code", monospace';
+            const tw = ctx.measureText(label).width;
+            
+            const padX = 6;
+            const padY = 3;
+            const rectW = tw + padX * 2;
+            const rectH = 14;
+            
+            const bx = screenPos.x + 12;
+            const by = screenPos.y - 18;
+            
+            ctx.fillStyle = 'rgba(10, 10, 12, 0.85)';
+            ctx.beginPath();
+            if (ctx.roundRect) {
+              ctx.roundRect(bx, by, rectW, rectH, 3);
+            } else {
+              ctx.rect(bx, by, rectW, rectH);
+            }
+            ctx.fill();
+            
+            ctx.strokeStyle = 'rgba(0, 188, 212, 0.45)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            
+            ctx.fillStyle = '#00bcd4';
+            ctx.fillText(label, bx + padX, by + 10.5);
+            ctx.restore();
           }
-          ctx.restore();
       }
       ctx.restore();
     }
@@ -556,15 +931,16 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     // Tracking markers & Alignment Lines (OTRACK)
     if (isCommandActive && trackingPoints.current.length > 0) {
         ctx.save();
+        const tsSafe = Math.max(1e-4, ts);
         ctx.setTransform(ts, 0, 0, -ts, w/2 + view.originX, h/2 + view.originY);
         
-        ctx.lineWidth = 0.8/ts;
-        ctx.setLineDash([6/ts, 6/ts]);
+        ctx.lineWidth = 0.8/tsSafe;
+        ctx.setLineDash([6/tsSafe, 6/tsSafe]);
         
         trackingPoints.current.forEach(tp => {
             // Draw OTRACK marker (Small cyan +)
             ctx.strokeStyle = "#22d3ee";
-            const size = 3/ts;
+            const size = 3/tsSafe;
             ctx.beginPath();
             ctx.moveTo(tp.x - size, tp.y); ctx.lineTo(tp.x + size, tp.y);
             ctx.moveTo(tp.x, tp.y - size); ctx.lineTo(tp.x, tp.y + size);
@@ -574,7 +950,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
             // This makes it feel much more like AutoCAD
             const drawInfinite = (p1: Point, p2: Point) => {
                 const proj = projectPointOnLine(worldCursorRef.current, p1, p2);
-                if (distance(worldCursorRef.current, proj) < 20/ts) {
+                if (distance(worldCursorRef.current, proj) < 20/tsSafe) {
                     ctx.beginPath();
                     ctx.strokeStyle = "rgba(34, 211, 238, 0.4)";
                     // Calculate ends of line based on viewport visibility or just large enough
@@ -685,8 +1061,128 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         ctx.strokeStyle = 'rgba(0, 188, 212, 0.4)'; ctx.stroke();
         ctx.fillStyle = '#00bcd4'; ctx.fillText(text, screenPos.x + 25, screenPos.y - 13);
     }
+
+    // Floating Area Tooltip near cursor
+    let areaTooltipText: string | null = null;
+    const activePreview = (window as any).__activePreviewShapes || previewShapes;
+    const measuringAreaShape = activePreview?.find(shape => shape.closed && shape.points && shape.points.length > 2);
+    if (measuringAreaShape) {
+        const areaVal = calculateArea(measuringAreaShape.points);
+        const { primary, secondary } = formatDualArea(areaVal, settings);
+        areaTooltipText = `Area: ${primary} (${secondary})`;
+    } else {
+        const selectedClosed = visibleShapes.find(shape => selectedIds.includes(shape.id) && isShapeClosed(shape));
+        if (selectedClosed) {
+            const areaVal = calculateArea(getShapeBoundaryPoints(selectedClosed));
+            const { primary, secondary } = formatDualArea(areaVal, settings);
+            areaTooltipText = `Area: ${primary} (${secondary})`;
+        }
+    }
+
+    if (areaTooltipText) {
+        ctx.font = '700 10px "JetBrains Mono", "Fira Code", monospace';
+        const tw = ctx.measureText(areaTooltipText).width;
+        const rectW = tw + 20;
+        const rectH = 22;
+        // Float beneath the standard coordinates HUD if both are showing
+        const offsetY = settings.showHUD ? 4 : -28;
+        
+        ctx.fillStyle = 'rgba(10, 10, 12, 0.92)';
+        ctx.beginPath();
+        if (ctx.roundRect) {
+            ctx.roundRect(screenPos.x + 15, screenPos.y + offsetY, rectW, rectH, 4);
+        } else {
+            ctx.rect(screenPos.x + 15, screenPos.y + offsetY, rectW, rectH);
+        }
+        ctx.fill();
+        
+        ctx.strokeStyle = 'rgba(0, 240, 255, 0.75)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        
+        ctx.fillStyle = '#00f0ff';
+        ctx.fillText(areaTooltipText, screenPos.x + 25, screenPos.y + offsetY + 15);
+    }
+
+    // Collaborative Cursors & Workspace Highlights
+    if (collaborators && collaborators.length > 0) {
+        collaborators.forEach(p => {
+            const peerScreen = worldToScreen(p.x, p.y);
+            
+            // Draw Peer Selection highlights
+            if (p.selection && p.selection.length > 0) {
+                p.selection.forEach((shpId: string) => {
+                    const sh = visibleShapes.find(s => s.id === shpId);
+                    if (sh) {
+                        const bounds = getShapeBounds(sh);
+                        if (bounds) {
+                            const minS = worldToScreen(bounds.xMin, bounds.yMin);
+                            const maxS = worldToScreen(bounds.xMax, bounds.yMax);
+                            
+                            ctx.save();
+                            ctx.strokeStyle = p.color || '#ff007f';
+                            ctx.lineWidth = 1.0;
+                            ctx.setLineDash([3, 3]);
+                            ctx.strokeRect(
+                                Math.min(minS.x, maxS.x) - 4,
+                                Math.min(minS.y, maxS.y) - 4,
+                                Math.abs(maxS.x - minS.x) + 8,
+                                Math.abs(maxS.y - minS.y) + 8
+                            );
+                            
+                            // Small peer label tab
+                            ctx.font = '700 7.5px "Inter", sans-serif';
+                            const tagText = `${p.name} active`;
+                            const tagW = ctx.measureText(tagText).width;
+                            ctx.fillStyle = p.color || '#ff007f';
+                            ctx.fillRect(Math.min(minS.x, maxS.x) - 4, Math.min(minS.y, maxS.y) - 13, tagW + 6, 9);
+                            ctx.fillStyle = '#ffffff';
+                            ctx.fillText(tagText, Math.min(minS.x, maxS.x) - 1, Math.min(minS.y, maxS.y) - 6);
+                            ctx.restore();
+                        }
+                    }
+                });
+            }
+
+            // Draw Peer Cursor pointer arrow
+            ctx.save();
+            ctx.fillStyle = p.color || '#ff007f';
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.2;
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.shadowBlur = 4;
+            
+            ctx.beginPath();
+            ctx.moveTo(peerScreen.x, peerScreen.y);
+            ctx.lineTo(peerScreen.x + 10, peerScreen.y + 11);
+            ctx.lineTo(peerScreen.x + 4, peerScreen.y + 11);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // Name tab
+            ctx.font = '700 8.5px "Inter", sans-serif';
+            const nameW = ctx.measureText(p.name).width;
+            ctx.fillStyle = p.color || '#ff007f';
+            ctx.shadowColor = 'rgba(0,0,0,0.3)';
+            ctx.shadowBlur = 3;
+            
+            ctx.beginPath();
+            if (ctx.roundRect) {
+                ctx.roundRect(peerScreen.x + 10, peerScreen.y + 8, nameW + 12, 14, 3);
+            } else {
+                ctx.rect(peerScreen.x + 10, peerScreen.y + 8, nameW + 12, 14);
+            }
+            ctx.fill();
+
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(p.name, peerScreen.x + 16, peerScreen.y + 18);
+            ctx.restore();
+        });
+    }
+
     ctx.restore();
-  }, [activeTab, view, settings, isCommandActive, previewShapes, selectedIds, isAiThinking, lastAiCommandTime, selectionRect, renderingSpatialIndex]);
+  }, [activeTab, view, settings, isCommandActive, previewShapes, selectedIds, isAiThinking, lastAiCommandTime, selectionRect, renderingSpatialIndex, collaborators]);
 
   const redraw = useCallback(() => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -858,6 +1354,14 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     // Ensure weight is a number (handles 'DEFAULT' if it leaked through)
     let weight = typeof resolved.lineweight === 'number' ? resolved.lineweight : 0.25;
     
+    // Explicitly override to layerConfig.thickness if weight is bylayer/default or not explicitly a number
+    const layerConf = layerConfig[s.layer];
+    if (layerConf && typeof layerConf.thickness === 'number') {
+        if (!s.thickness || s.thickness === 'bylayer' || s.thickness === 'DEFAULT' || typeof s.thickness !== 'number') {
+            weight = layerConf.thickness;
+        }
+    }
+    
     // Special case for double lines - use inherited weight but handle potential stale data or 'DEFAULT'
     if (s.type === 'dline') {
         const dweight = conf?.thickness;
@@ -890,8 +1394,18 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         ctx.lineWidth = 1.2/ts; 
         if (s.type === 'dline') ctx.lineWidth = 2.0/ts;
     }
-    else if (isS) { ctx.strokeStyle = "#00bcd4"; ctx.lineWidth = 2.8/ts; ctx.setLineDash([2/ts, 2/ts]); }
-    else if (isH) { ctx.strokeStyle = "#00bcd4"; ctx.lineWidth = 1.8/ts; ctx.setLineDash([4/ts, 4/ts]); }
+    else if (isS) { 
+        ctx.strokeStyle = baseColor; 
+        const minLw = (weight <= 0.001) ? 0.25/ts : 0.6/ts;
+        ctx.lineWidth = Math.max(minLw + 1.2/ts, (finalThickness + 1.2)/ts); 
+        ctx.setLineDash([4/ts, 4/ts]); 
+    }
+    else if (isH) { 
+        ctx.strokeStyle = baseColor; 
+        const minLw = (weight <= 0.001) ? 0.25/ts : 0.6/ts;
+        ctx.lineWidth = Math.max(minLw + 0.6/ts, (finalThickness + 0.6)/ts); 
+        ctx.setLineDash([6/ts, 6/ts]); 
+    }
     else { 
         ctx.strokeStyle = baseColor; 
         ctx.globalAlpha = resolved.opacity;
@@ -1197,6 +1711,73 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               }
           }
           break;
+      }
+      case 'section': {
+        if (isSafe(s.x1) && isSafe(s.y1) && isSafe(s.x2) && isSafe(s.y2)) {
+            ctx.save();
+            ctx.setLineDash([8, 8]);
+            ctx.beginPath();
+            ctx.moveTo(s.x1, s.y1);
+            ctx.lineTo(s.x2, s.y2);
+            ctx.stroke();
+            ctx.restore();
+
+            const dx = s.x2 - s.x1;
+            const dy = s.y2 - s.y1;
+            const len = Math.sqrt(dx * dx + dy * dy);
+            if (len > 0.1) {
+                const ux = dx / len;
+                const uy = dy / len;
+                const px = -uy;
+                const py = ux;
+
+                const baseH = (settings.drawingScale || 1.0) * 1.65;
+                const arrowLen = baseH * 3.5;
+                const arrowWid = baseH * 1.5;
+
+                const drawSectionMarker = (x: number, y: number, perpX: number, perpY: number, label: string) => {
+                    const fx = x + perpX * arrowLen;
+                    const fy = y + perpY * arrowLen;
+
+                    ctx.beginPath();
+                    ctx.moveTo(x, y);
+                    ctx.lineTo(fx, fy);
+                    ctx.stroke();
+
+                    ctx.save();
+                    ctx.translate(fx, fy);
+                    ctx.rotate(Math.atan2(perpY, perpX));
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    ctx.lineTo(-arrowWid, -arrowWid / 2);
+                    ctx.lineTo(-arrowWid, arrowWid / 2);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.restore();
+
+                    ctx.save();
+                    ctx.fillStyle = ctx.strokeStyle;
+                    ctx.font = `bold ${baseH * 2.5}px monospace`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    
+                    const tx = x + perpX * (arrowLen * 1.5);
+                    const ty = y + perpY * (arrowLen * 1.5);
+
+                    ctx.beginPath();
+                    ctx.arc(tx, ty, baseH * 1.8, 0, Math.PI * 2);
+                    ctx.stroke();
+
+                    ctx.fillText(label || 'A', tx, ty);
+                    ctx.restore();
+                };
+
+                drawSectionMarker(s.x1, s.y1, px, py, (s as any).tag);
+                drawSectionMarker(s.x2, s.y2, px, py, (s as any).tag);
+            }
+        }
+        break;
       }
       case 'dimension': {
           const ds = settings.dimStyles[s.styleId || 'standard'] || settings.dimStyles['standard'] || {
@@ -1552,22 +2133,33 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       case 'mtext':
         ctx.save(); 
         ctx.translate(s.x, s.y); 
-        if (s.rotation) ctx.rotate(-s.rotation); 
+        
+        let rAngle = (s as any).rotation || s.rotation || 0;
+        // AutoCAD DXF stores text rotation in degrees. We convert to radians if it's in degrees.
+        if (Math.abs(rAngle) > 2 * Math.PI) {
+            rAngle = rAngle * Math.PI / 180;
+        }
+        if (rAngle) ctx.rotate(-rAngle); 
         ctx.scale(1,-1); 
         
         const weight = (s as any).bold ? 'bold' : '400';
         const style = (s as any).italic ? 'italic' : 'normal';
         
-        // AutoCAD Font Mapping
+        // AutoCAD Font Mapping supporting CAD-standard typography
         const cadFontMap: Record<string, string> = {
             'simplex': 'Courier Prime',
+            'romans': 'Rajdhani',
+            'roman': 'Times New Roman',
+            'romand': 'Outfit',
             'romanS': 'Rajdhani',
             'complex': 'Pathway Gothic One',
             'txt': 'JetBrains Mono',
             'standard': 'Inter',
             'italic': 'Inter',
             'bold': 'Inter',
-            'arial': 'Inter',
+            'arial': 'Arial',
+            'arial ms unicode': 'Arial Unicode MS',
+            'arial unicode ms': 'Arial Unicode MS',
             'isocp': 'Saira Condensed',
             'isocp2': 'Saira Condensed',
             'isoct': 'Chakra Petch',
@@ -1593,14 +2185,18 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
             'comfortaa': 'Comfortaa'
         };
         
-        const rawFont = (s as any).fontFamily || 'monospace';
-        const font = cadFontMap[rawFont.toLowerCase()] || rawFont;
+        const rawFont = (s as any).fontFamily || 'standard';
+        let fontName = cadFontMap[rawFont.toLowerCase()] || rawFont;
+        if (rawFont.toLowerCase().endsWith('.shx')) {
+            const baseFont = rawFont.substring(0, rawFont.length - 4).toLowerCase();
+            fontName = cadFontMap[baseFont] || baseFont;
+        }
         const textSize = s.size || 2.5;
         
-        ctx.font=`${style} ${weight} ${textSize}px "${font}", monospace`; 
+        ctx.font=`${style} ${weight} ${textSize}px "${fontName}", sans-serif, monospace`; 
         ctx.fillStyle=ctx.strokeStyle; 
         
-        const ap = (s as any).attachmentPoint || 1;
+        const ap = (s as any).attachmentPoint || (s as any).attachment_point || 1;
         const aligns: Record<number, {h: CanvasTextAlign, v: CanvasTextBaseline}> = {
             1: {h: 'left', v: 'top'}, 2: {h: 'center', v: 'top'}, 3: {h: 'right', v: 'top'},
             4: {h: 'left', v: 'middle'}, 5: {h: 'center', v: 'middle'}, 6: {h: 'right', v: 'middle'},
@@ -1641,12 +2237,19 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
 
             const lineSpacing = 1.25;
             const totalH = lines.length * textSize * lineSpacing;
-            const xOffset = (align.h === 'center' ? s.width/2 : align.h === 'right' ? s.width : 0);
+            const xOffset = s.width > 0 ? (align.h === 'center' ? s.width/2 : align.h === 'right' ? s.width : 0) : 0;
             
-            // Adjust start Y based on vertical alignment
+            // Adjust start Y based on vertical alignment using a unified, middle-referenced system
             let yBase = 0;
-            if (align.v === 'middle') yBase = -totalH / 2 + textSize / 2;
-            else if (align.v === 'bottom') yBase = -totalH + textSize;
+            if (align.v === 'top') {
+                yBase = textSize * 0.5;
+            } else if (align.v === 'middle') {
+                yBase = -totalH / 2 + textSize * 0.5;
+            } else { // bottom or alphabetic
+                yBase = -totalH + textSize * 0.5;
+            }
+            ctx.textBaseline = 'middle';
+            ctx.textAlign = align.h;
             
             lines.forEach((line, i) => {
                 const ly = yBase + i * textSize * lineSpacing;
@@ -1750,21 +2353,94 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           block.shapes.forEach(bs => drawShape(ctx, bs, ts, { color: currentColor, thickness: currentThickness, lineType: currentLT }));
           ctx.restore();
         } else {
-            // Block fallback (Phase 2 suggestion)
+            // Enhanced Visual representation of Block when definition is missing
+            ctx.save();
+            ctx.translate(s.x, s.y);
+            ctx.rotate(-s.rotation);
+            const sclX = s.scaleX !== undefined ? s.scaleX : (s.scale !== undefined ? s.scale : 1);
+            const sclY = s.scaleY !== undefined ? s.scaleY : (s.scale !== undefined ? s.scale : 1);
+            ctx.scale(sclX, sclY);
+            
+            // Draw visual representation card
+            ctx.beginPath();
+            ctx.rect(-15, -15, 30, 30);
+            ctx.fillStyle = "#1e40af";
+            ctx.fill();
+            ctx.strokeStyle = "#67e8f9";
+            ctx.lineWidth = 1.6 / ts; // Scale border thickness dynamically with zoom
+            if (ctx.lineWidth < 1.2) ctx.lineWidth = 1.2;
+            ctx.stroke();
+
+            // Diagonal lines inside box for CAD draft styling
+            ctx.beginPath();
+            ctx.moveTo(-15, -15);
+            ctx.lineTo(15, 15);
+            ctx.moveTo(-15, 15);
+            ctx.lineTo(15, -15);
+            ctx.strokeStyle = "rgba(103, 232, 249, 0.25)";
+            ctx.lineWidth = 1.0 / ts;
+            ctx.stroke();
+
+            // Flip Y back to draw right-side-up readable text
             ctx.save();
             ctx.scale(1, -1);
-            ctx.translate(s.x, -s.y);
-            ctx.font = `${12 / ts}px monospace`;
-            ctx.fillStyle = "#22d3ee";
+            
+            // Abbreviated label centered inside box
+            ctx.font = `bold ${8 / ts}px sans-serif`;
+            ctx.fillStyle = "#ffffff";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
             const rawBlockName = s.blockId || s.name || 'Block';
+            const abbrev = rawBlockName.startsWith('*') ? 'BLK' : rawBlockName.substring(0, 3).toUpperCase();
+            ctx.fillText(abbrev, 0, 0);
+
+            // Full block name below the container
+            ctx.font = `${7 / ts}px sans-serif`;
+            ctx.fillStyle = "#67e8f9";
+            ctx.globalAlpha = 0.85;
             const isAnon = rawBlockName.startsWith('*') || rawBlockName.startsWith('A$C') || /^[0-9a-f]{6,16}$/i.test(rawBlockName);
             const displayName = isAnon ? 'Block Ref' : rawBlockName;
-            ctx.fillText(`⟐ ${displayName}`, 0, 0);
+            ctx.fillText(displayName, 0, 20);
+            
+            ctx.restore();
+            ctx.restore();
+        }
+        
+        if (isS) {
+            ctx.save();
+            ctx.translate(s.x, s.y);
+            ctx.rotate(-s.rotation);
+            
+            const stickLen = 35 / ts; 
+            const handleRad = 5 / ts;
+            
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(0, stickLen);
+            ctx.strokeStyle = '#00bcd4';
+            ctx.lineWidth = 1.6 / ts;
+            ctx.setLineDash([3 / ts, 2 / ts]);
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.arc(0, stickLen, handleRad, 0, Math.PI * 2);
+            ctx.fillStyle = '#00bcd4';
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1 / ts;
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.arc(0, stickLen, handleRad * 1.8, Math.PI * 0.2, Math.PI * 1.8);
+            ctx.strokeStyle = 'rgba(0, 188, 212, 0.6)';
+            ctx.lineWidth = 1 / ts;
+            ctx.stroke();
+            
             ctx.restore();
         }
         break;
     }
-    if(s.filled && !isS && !isH) { ctx.fillStyle = ctx.strokeStyle; ctx.globalAlpha = 0.25; ctx.fill(); ctx.globalAlpha = 1.0; }
+    if(s.filled) { ctx.fillStyle = baseColor; ctx.globalAlpha = isS ? 0.35 : isH ? 0.3 : 0.25; ctx.fill(); ctx.globalAlpha = 1.0; }
     
     if (isComplexLT && !s.isPreview && !isH && !isS) {
         let pts: Point[] = [];
@@ -1814,9 +2490,32 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     // Safety check for empty bounds
     if (xMin === Infinity) return;
 
+    // Advanced hatch pattern mapping for AutoCAD pattern compatibility
+    const knownPatterns = ['solid', 'dots', 'ansi31', 'ansi32', 'ansi33', 'ansi37', 'cross', 'net', 'hound', 'grid', 'brick', 'gravel', 'honey', 'ansi38', 'triang', 'zigzag', 'stars', 'grass', 'earth'];
+    let finalPattern = (pattern || 'ansi31').toLowerCase().trim();
+    if (finalPattern === 'user' || finalPattern === '_user' || !knownPatterns.includes(finalPattern) && !finalPattern.startsWith('ansi')) {
+        if (finalPattern.includes('sand') || finalPattern.includes('conc') || finalPattern.includes('dirt') || finalPattern.includes('gravel')) {
+            finalPattern = 'gravel';
+        } else if (finalPattern.includes('hex') || finalPattern.includes('honey')) {
+            finalPattern = 'honey';
+        } else if (finalPattern.includes('cross') || finalPattern.includes('net') || finalPattern.includes('box') || finalPattern.includes('grid')) {
+            finalPattern = 'grid';
+        } else if (finalPattern.includes('dot')) {
+            finalPattern = 'dots';
+        } else if (finalPattern.includes('star')) {
+            finalPattern = 'stars';
+        } else if (finalPattern.includes('grass')) {
+            finalPattern = 'grass';
+        } else if (finalPattern.includes('earth') || finalPattern.includes('mud') || finalPattern.includes('clay')) {
+            finalPattern = 'earth';
+        } else {
+            finalPattern = 'ansi31';
+        }
+    }
+
     const width = xMax - xMin, height = yMax - yMin;
     // Spacing should be model-space (not divided by ts)
-    const spacing = (scale || 1) * (pattern === 'dots' ? 12 : 24);
+    const spacing = (scale || 1) * (finalPattern === 'dots' ? 12 : 24);
     const angle = (rotation || 0) * Math.PI / 180;
     
     ctx.save();
@@ -1826,7 +2525,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     const hatchColor = ctx.strokeStyle;
     ctx.globalAlpha = 0.6;
     
-    if (pattern === 'solid') {
+    if (finalPattern === 'solid') {
       ctx.fillStyle = hatchColor;
       ctx.globalAlpha = 0.5; // Slightly more opaque for solid hatch
       ctx.beginPath();
@@ -1835,6 +2534,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       ctx.closePath();
       ctx.fill(); 
     } else {
+        pattern = finalPattern;
         const diagonal = Math.sqrt(width*width + height*height) * 2;
         let count = Math.ceil(diagonal / spacing);
         // Safety cap for extremely dense patterns
@@ -2105,7 +2805,20 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     ctx.save();
     const { x, y, type } = snap;
     const size = 12 / ts; 
-    ctx.strokeStyle = "#00f0ff"; 
+
+    // Assign appropriate color styles for the geometric outline markers
+    let markerColor = "#00f0ff";
+    if (type === 'mid') {
+      markerColor = "#eab308";
+    } else if (type === 'cen') {
+      markerColor = "#ec4899";
+    } else if (type === 'perp') {
+      markerColor = "#10b981";
+    } else if (type === 'tan') {
+      markerColor = "#ec4899";
+    }
+    
+    ctx.strokeStyle = markerColor; 
     ctx.lineWidth = 2.5 / ts;
     ctx.beginPath();
     
@@ -2272,6 +2985,33 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           touchStartTime.current = Date.now();
           touchStartCount.current = 1;
 
+          // Check if we clicked on a rotation handle!
+          const wp = screenToWorld(x, y);
+          const ts = view.scale * settings.drawingScale;
+          const clickTolerance = 15 / ts; // 15 pixels tolerance
+          
+          const activeBlockId = selectedIds.find(id => {
+              const s = allRenderableShapes.find(sh => sh.id === id);
+              if (s && s.type === 'block') {
+                  const hPos = getBlockRotationHandlePos(s);
+                  const dist = Math.hypot(wp.x - hPos.x, wp.y - hPos.y);
+                  return dist < clickTolerance;
+              }
+              return false;
+          });
+          
+          if (activeBlockId) {
+              activeRotationBlockId.current = activeBlockId;
+              const s = allRenderableShapes.find(sh => sh.id === activeBlockId)!;
+              initialBlockAngle.current = s.rotation || 0;
+              initialPointerAngle.current = Math.atan2(wp.y - s.y, wp.x - s.x);
+              setIsRotatingBlock(true);
+              if (setLogMessage) setLogMessage("ROTATING BLOCK INTERACTIVELY");
+              setIsPanning(false);
+              updateCursorAndSnaps(x, y, e.shiftKey, e.pointerType === 'touch'); redraw();
+              return;
+          }
+
           // REQUIREMENT: Long press for multi object selection or Hatch
           if (!isCommandActive) {
             selectionTimer.current = setTimeout(() => {
@@ -2341,7 +3081,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
             setIsPanning(true); 
         }
       }
-      updateCursorAndSnaps(x, y, e.shiftKey); redraw();
+      updateCursorAndSnaps(x, y, e.shiftKey, e.pointerType === 'touch'); redraw();
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
@@ -2349,6 +3089,25 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       const canvas = canvasRef.current; if (!canvas) return;
       const rect = canvas.getBoundingClientRect(), x = e.clientX-rect.left, y = e.clientY-rect.top;
       activePointers.current.set(e.pointerId, {x, y});
+      
+      if (activeRotationBlockId.current) {
+          const wp = screenToWorld(x, y);
+          const s = allRenderableShapes.find(sh => sh.id === activeRotationBlockId.current);
+          if (s) {
+              const currentPointerAngle = Math.atan2(wp.y - s.y, wp.x - s.x);
+              const deltaAngle = currentPointerAngle - initialPointerAngle.current;
+              let newAngle = initialBlockAngle.current + deltaAngle;
+              
+              if (e.shiftKey) {
+                  const snapStep = 15 * Math.PI / 180;
+                  newAngle = Math.round(newAngle / snapStep) * snapStep;
+              }
+              
+              onAction?.('updateShapeRotation', { id: s.id, rotation: newAngle });
+          }
+          updateCursorAndSnaps(x, y, e.shiftKey, e.pointerType === 'touch'); redraw();
+          return;
+      }
       
       if (activePointers.current.size === 1) {
           const dx_p = x - pointerStartPos.current.x, dy_p = y - pointerStartPos.current.y;
@@ -2440,12 +3199,22 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               setClampedView({ scale: newScale, originX: newOriginX, originY: newOriginY });
           }
       }
-      updateCursorAndSnaps(x, y, e.shiftKey); redraw();
+      updateCursorAndSnaps(x, y, e.shiftKey, e.pointerType === 'touch'); redraw();
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
       const canvas = canvasRef.current; if (!canvas) return;
       const rect = canvas.getBoundingClientRect(), x = e.clientX-rect.left, y = e.clientY-rect.top;
+      
+      if (activeRotationBlockId.current) {
+          activeRotationBlockId.current = null;
+          setIsRotatingBlock(false);
+          onAction?.('commitHistory');
+          activePointers.current.delete(e.pointerId);
+          setIsPanning(false);
+          updateCursorAndSnaps(x, y, e.shiftKey, e.pointerType === 'touch'); redraw();
+          return;
+      }
       
       if (selectionTimer.current) {
         clearTimeout(selectionTimer.current);
@@ -2492,8 +3261,38 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       } else {
           const dx = Math.abs(x - pointerStartPos.current.x), dy = Math.abs(y - pointerStartPos.current.y);
           if (dx < 6 && dy < 6 && activePointers.current.size === 1) {
-              const wp = screenToWorld(x, y), snapped = !!activeSnapRef.current;
-              const finalP = activeSnapRef.current ? {x: activeSnapRef.current.x, y: activeSnapRef.current.y} : wp;
+              const wp = screenToWorld(x, y);
+              let snapped = !!activeSnapRef.current;
+              let finalP = activeSnapRef.current ? {x: activeSnapRef.current.x, y: activeSnapRef.current.y} : wp;
+              if (!activeSnapRef.current && settings.gridSnap) {
+                  const snapS = settings.snapSpacing || settings.gridSpacing || 10;
+                  if (snapS > 0) {
+                      if (settings.isometricGrid) {
+                          const k = Math.round(wp.x / snapS);
+                          let bestP = { x: wp.x, y: wp.y };
+                          let minDist = Infinity;
+                          for (let offset = -1; offset <= 1; offset++) {
+                              const c = k + offset;
+                              const m = Math.round(0.5 * ((wp.y * Math.sqrt(3)) / snapS - c));
+                              const px = c * snapS;
+                              const py = ((c + 2 * m) * snapS) / Math.sqrt(3);
+                              const dist = Math.hypot(px - wp.x, py - wp.y);
+                              if (dist < minDist) {
+                                  minDist = dist;
+                                  bestP = { x: px, y: py };
+                              }
+                          }
+                          finalP = bestP;
+                          snapped = true;
+                      } else {
+                          finalP = {
+                              x: Math.round(wp.x / snapS) * snapS,
+                              y: Math.round(wp.y / snapS) * snapS
+                          };
+                          snapped = true;
+                      }
+                  }
+              }
               if (isCommandActive && onClick && activeCommandName !== 'PAN') onClick(finalP.x, finalP.y, snapped, e.shiftKey);
               else if (activeCommandName !== 'PAN') {
                 const ts = view.scale * settings.drawingScale;
@@ -2509,8 +3308,16 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                 // Requirement: Single tap -> additive selection for shapes, click empty -> clear
                 if (onSelectionChange) {
                     if (hit) {
+                        const idx = allSelectableShapes.findIndex(sh => sh.id === hit.id);
+                        setSelectedIndex(idx !== -1 ? idx : null);
+                        if (idx !== -1) {
+                            window.dispatchEvent(new CustomEvent('shapeSelected', { 
+                                detail: { shape: hit, index: idx } 
+                            }));
+                        }
                         onSelectionChange([hit.id], true);
                     } else if (!(isMultiSelecting.current || e.shiftKey)) {
+                        setSelectedIndex(null);
                         onSelectionChange([], false);
                     }
                 }
@@ -2531,7 +3338,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       }
 
       if (countAfter === 0) { setIsPanning(false); initialPinchDist.current = null; }
-      updateCursorAndSnaps(x, y, e.shiftKey);
+      updateCursorAndSnaps(x, y, e.shiftKey, e.pointerType === 'touch');
       redraw();
   };
 
@@ -2656,6 +3463,29 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     return () => canvas.removeEventListener('wheel', onWheel);
   }, []);
 
+  // Intercept Escape key to show confirmation modal during active drawing commands
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isCommandActive && activeCommandName && activeCommandName !== 'PAN') {
+        const drawingCommands = [
+          'LINE', 'DLINE', 'POLY', 'RECT', 'CIRCLE', 'ARC', 'ELLIPSE', 
+          'SPLINE', 'PLINE', 'DONUT', 'POINT', 'HATCH', 'TEXT', 'MTEXT', 'LEADER',
+          'POLYGON', 'COPY', 'MOVE', 'ROTATE', 'SCALE', 'MIRROR', 'ARRAY'
+        ];
+        if (drawingCommands.includes(activeCommandName.toUpperCase())) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          setShowConfirmCancel(true);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, { capture: true });
+    };
+  }, [isCommandActive, activeCommandName]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -2683,7 +3513,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   useEffect(() => {
     let anim: number;
     const loop = () => {
-      if (isAiThinking || (lastAiCommandTime && Date.now() - lastAiCommandTime < 1000)) {
+      if (isAiThinking || (lastAiCommandTime && Date.now() - lastAiCommandTime < 1000) || activeSnapRef.current) {
         redraw();
       }
       anim = requestAnimationFrame(loop);
@@ -2766,7 +3596,18 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-        <canvas ref={canvasRef} className="w-full h-full outline-none select-none touch-none" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onContextMenu={handleContextMenu} />
+        <canvas 
+          ref={canvasRef} 
+          className="w-full h-full outline-none select-none touch-none will-change-transform" 
+          style={{ 
+            cursor: isPanning ? 'grabbing' : activeCommandName === 'PAN' ? 'grab' : isCommandActive ? 'crosshair' : 'default' 
+          }}
+          onPointerDown={handlePointerDown} 
+          onPointerMove={handlePointerMove} 
+          onPointerUp={handlePointerUp} 
+          onPointerCancel={handlePointerUp} 
+          onContextMenu={handleContextMenu} 
+        />
         
         {/* Dynamic Input Floating UI */}
         {isCommandActive && (
@@ -2818,6 +3659,177 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                <span className="text-[7px] font-mono text-neutral-500 uppercase tracking-tighter">ENTER: CONFIRM</span>
             </div>
           </div>
+        )}
+
+        {/* Confirmation Dialog to Catch Accidental Cancel/Escape */}
+        {showConfirmCancel && (
+          <div className="absolute inset-0 bg-[#060608]/90 backdrop-blur-sm z-50 flex items-center justify-center p-6 animate-in fade-in duration-300 pointer-events-auto select-none">
+            <div className="bg-[#121215] border border-white/10 rounded-2xl w-full max-w-sm overflow-hidden shadow-[0_32px_120px_rgba(0,0,0,0.95)] flex flex-col p-6 space-y-5 animate-in zoom-in-95 duration-200">
+              <div className="flex items-center gap-3 pb-3 border-b border-white/5">
+                <div className="p-2 bg-amber-500/10 text-amber-500 rounded-xl">
+                  <AlertCircle size={18} className="stroke-[2.5]" />
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[11px] font-black uppercase tracking-widest text-neutral-100 font-sans">Confirm Action</span>
+                  <span className="text-[8px] font-bold text-neutral-500 uppercase tracking-wider">Unsaved progress will be discarded</span>
+                </div>
+              </div>
+              
+              <div className="space-y-1">
+                <p className="text-[10px] text-neutral-300 font-semibold leading-relaxed uppercase tracking-wider pl-0.5">
+                  Are you sure you want to cancel the active <span className="text-cyan-400 font-extrabold">{activeCommandName?.toUpperCase()}</span> drawing command?
+                </p>
+              </div>
+
+              <div className="flex gap-2.5 pt-2">
+                <button 
+                  type="button"
+                  onClick={() => {
+                    setShowConfirmCancel(false);
+                  }}
+                  className="flex-1 py-3 bg-neutral-900 border border-white/5 hover:bg-neutral-800 rounded-xl text-[9px] font-black uppercase tracking-widest text-neutral-300 hover:text-white transition-all active:scale-95 cursor-pointer outline-none"
+                >
+                  Keep Drawing
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => {
+                    setShowConfirmCancel(false);
+                    onAction?.('cancel');
+                  }}
+                  className="flex-1 py-3 bg-red-600/90 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-red-500 hover:shadow-[0_0_15px_rgba(239,68,68,0.3)] transition-all active:scale-95 cursor-pointer outline-none"
+                >
+                  Cancel Command
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Real-time Statistics HUD */}
+        {settings.showHUD && !isHudDismissed && (
+          isHudVisible ? (
+            <div 
+              className="absolute bottom-4 right-4 z-40 bg-zinc-950/85 backdrop-blur-md border border-white/10 rounded-2xl p-4 shadow-[0_16px_40px_rgba(0,0,0,0.7)] flex flex-col font-sans transition-all duration-300 w-64 pointer-events-auto select-none"
+              style={{ transform: `translate(${hudPos.x}px, ${hudPos.y}px)` }}
+            >
+              {/* HUD Header */}
+              <div 
+                className="flex items-center justify-between border-b border-white/5 pb-2.5 mb-3 cursor-grab active:cursor-grabbing touch-none shrink-0"
+                onMouseDown={e => startDraggingHud(e.clientX, e.clientY)}
+                onTouchStart={e => e.touches.length > 0 && startDraggingHud(e.touches[0].clientX, e.touches[0].clientY)}
+              >
+                <div className="flex items-center gap-2 pointer-events-none">
+                  <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_8px_rgba(34,211,238,0.5)]" />
+                  <span className="text-[10px] font-bold text-neutral-200 uppercase tracking-wider font-sans">Drawing Stats</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button 
+                    onClick={() => {
+                      const next = !isHudExpanded;
+                      setIsHudExpanded(next);
+                      localStorage.setItem('voxcadd_hud_expanded', next ? 'true' : 'false');
+                    }}
+                    className="p-1 hover:bg-white/5 text-neutral-400 hover:text-white rounded-md transition-colors cursor-pointer outline-none"
+                    title={isHudExpanded ? "Collapse" : "Expand"}
+                  >
+                    {isHudExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setIsHudVisible(false);
+                      localStorage.setItem('voxcadd_hud_visible', 'false');
+                    }}
+                    className="p-1 hover:bg-white/5 text-neutral-400 hover:text-red-400 rounded-md transition-colors cursor-pointer outline-none"
+                    title="Hide HUD"
+                  >
+                    <EyeOff size={14} />
+                  </button>
+                </div>
+              </div>
+
+              {/* HUD Content */}
+              {isHudExpanded ? (
+                <div className="space-y-3 animate-in fade-in duration-200">
+                  {/* 1. Total Length */}
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-2 text-neutral-400">
+                      <Ruler size={13} className="text-cyan-400" />
+                      <span className="text-[9px] uppercase tracking-wider font-semibold">Total Length</span>
+                    </div>
+                    <span className="text-[10px] font-mono font-bold text-cyan-400 text-right">
+                      {formatLength(hudStats.totalLength, settings)}
+                    </span>
+                  </div>
+
+                  {/* 2. Active Shapes */}
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-2 text-neutral-400">
+                      <Activity size={13} className="text-[#ec4899]" />
+                      <span className="text-[9px] uppercase tracking-wider font-semibold">Active Shapes</span>
+                    </div>
+                    <span className="text-[10px] font-mono font-bold text-[#ec4899] text-right">
+                      {hudStats.totalShapes} {hudStats.totalShapes === 1 ? 'shape' : 'shapes'}
+                    </span>
+                  </div>
+
+                  {/* 3. Current Layer */}
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-2 text-neutral-400">
+                      <Layers size={13} className="text-amber-500" />
+                      <span className="text-[9px] uppercase tracking-wider font-semibold">Drawing Layer</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 justify-end">
+                      <div 
+                        className="w-2.5 h-2.5 rounded-full border border-white/10" 
+                        style={{ backgroundColor: layerConfig[settings.currentLayer]?.color || '#ffffff' }}
+                      />
+                      <span className="text-[10px] font-mono font-bold text-amber-500 max-w-[80px] truncate uppercase">
+                        {settings.currentLayer}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* Collapsed view summary */
+                <div className="flex items-center justify-between gap-4 text-[9px] font-mono font-bold text-neutral-400 animate-in fade-in duration-200">
+                  <span className="text-cyan-400">{hudStats.totalShapes} OBJ</span>
+                  <span className="text-neutral-600">|</span>
+                  <span className="text-pink-400 font-bold truncate max-w-[100px]" style={{ color: layerConfig[settings.currentLayer]?.color || '#ec4899' }}>
+                    L: {settings.currentLayer}
+                  </span>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Small mini restore pill container in corner */
+            <div 
+              className="absolute bottom-4 right-4 z-40 flex items-center gap-2 pointer-events-auto"
+              style={{ transform: `translate(${hudPos.x}px, ${hudPos.y}px)` }}
+            >
+              <button 
+                onClick={() => {
+                  setIsHudVisible(true);
+                  localStorage.setItem('voxcadd_hud_visible', 'true');
+                }}
+                className="bg-zinc-950/80 hover:bg-zinc-900 border border-white/10 px-3 py-2 rounded-full shadow-lg flex items-center gap-2 pointer-events-auto transition-all duration-200 active:scale-95 text-neutral-400 hover:text-cyan-400 cursor-pointer outline-none"
+                title="Restore HUD"
+              >
+                <Eye size={14} className="stroke-[2.5]" />
+                <span className="text-[8px] font-black uppercase tracking-widest leading-none font-sans">Stats HUD</span>
+              </button>
+              <button
+                onClick={() => {
+                  setIsHudDismissed(true);
+                  localStorage.setItem('voxcadd_hud_dismissed', 'true');
+                }}
+                className="bg-zinc-950/80 hover:bg-zinc-900 border border-white/10 p-2 rounded-full shadow-lg flex items-center justify-center text-neutral-400 hover:text-red-400 transition-all duration-200 active:scale-95 cursor-pointer outline-none"
+                title="Fully Hide HUD from Drawing Area"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )
         )}
     </div>
   );

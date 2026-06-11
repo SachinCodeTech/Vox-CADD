@@ -74,9 +74,29 @@ export const resolveShapeProperties = (
     activeTab: string = 'model'
 ): ResolvedProperties => {
     // 1. Resolve Color
-    let color = shape.color || 'bylayer';
+    let rawColor: any = shape.color || 'bylayer';
+    let color = 'bylayer';
+    if (typeof rawColor === 'number') {
+        color = `#${rawColor.toString(16).padStart(6, '0')}`;
+    } else if (typeof rawColor === 'string') {
+        if (/^\d+$/.test(rawColor)) {
+            const num = parseInt(rawColor, 10);
+            color = `#${num.toString(16).padStart(6, '0')}`;
+        } else {
+            color = rawColor;
+        }
+    }
+    
     if (color.toLowerCase() === 'bylayer') {
-        color = layerConfig[shape.layer]?.color || '#FFFFFF';
+        const layerColor = layerConfig[shape.layer]?.color || '#FFFFFF';
+        if (typeof layerColor === 'number') {
+            color = `#${(layerColor as number).toString(16).padStart(6, '0')}`;
+        } else if (typeof layerColor === 'string' && /^\d+$/.test(layerColor)) {
+            const num = parseInt(layerColor, 10);
+            color = `#${num.toString(16).padStart(6, '0')}`;
+        } else {
+            color = layerColor || '#FFFFFF';
+        }
     } else if (color.toLowerCase() === 'byblock' && blockContext) {
         color = blockContext.color;
     }

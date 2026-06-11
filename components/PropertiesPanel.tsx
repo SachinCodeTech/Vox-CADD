@@ -83,8 +83,38 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [activePanelTab, setActivePanelTab] = useState<'props' | 'stats'>('props');
   const [filterType, setFilterType] = useState<string | null>(null);
+  const [selectedShape, setSelectedShape] = useState<Shape | null>(null);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const handleSelection = (e: any) => {
+      setSelectedShape(e.detail.shape);
+      setSelectedIndex(e.detail.index);
+    };
+
+    window.addEventListener('shapeSelected', handleSelection);
+    return () => window.removeEventListener('shapeSelected', handleSelection);
+  }, []);
+
+  useEffect(() => {
+    if (selectedShapes.length === 1) {
+      setSelectedShape(selectedShapes[0]);
+    } else if (selectedShapes.length === 0) {
+      setSelectedShape(null);
+      setSelectedIndex(null);
+    }
+  }, [selectedShapes]);
+
+  const updateSelectedShape = (newProps: Partial<Shape>) => {
+    if (selectedShape) {
+      setSelectedShape(prev => prev ? { ...prev, ...newProps } : null);
+      onUpdateShape(selectedShape.id, newProps);
+    } else if (selectedShapes.length > 0) {
+      selectedShapes.forEach(shape => onUpdateShape(shape.id, newProps));
+    }
+  };
 
   useEffect(() => {
     const handleMove = (e: MouseEvent | TouchEvent) => {
@@ -112,7 +142,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   };
 
   const handleShapeChange = (key: string, value: any) => {
-      selectedShapes.forEach(shape => onUpdateShape(shape.id, { [key]: value }));
+      updateSelectedShape({ [key]: value });
   };
 
   const PropertyRow = ({ label, tooltip, children, readOnly = false }: { label: string, tooltip?: string, children?: React.ReactNode, readOnly?: boolean }) => (
@@ -467,13 +497,13 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
   return (
     <div 
-      className="relative glass-panel w-full sm:w-[340px] sm:max-w-[95vw] h-full sm:h-auto sm:max-h-[85vh] sm:rounded-[2rem] shadow-[0_50px_120px_rgba(0,0,0,0.95)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-300 border border-white/10"
-      style={{ transform: window.innerWidth > 640 ? `translate(${pos.x}px, ${pos.y}px)` : undefined, zIndex: 160 }}
+      className="relative glass-panel w-[94vw] sm:w-[340px] sm:max-w-[95vw] h-[82vh] sm:h-auto sm:max-h-[85vh] rounded-3xl shadow-[0_50px_120px_rgba(0,0,0,0.95)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-300 border border-white/10"
+      style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, zIndex: 160 }}
     >
       <div 
-        className="flex justify-between items-center px-6 py-4 border-b border-white/5 bg-[#1a1a1c] sm:cursor-grab active:sm:cursor-grabbing touch-none shrink-0"
-        onMouseDown={e => window.innerWidth > 640 && startDrag(e.clientX, e.clientY)}
-        onTouchStart={e => window.innerWidth > 640 && e.touches.length > 0 && startDrag(e.touches[0].clientX, e.touches[0].clientY)}
+        className="flex justify-between items-center px-6 py-4 border-b border-white/5 bg-[#1a1a1c] cursor-grab active:cursor-grabbing touch-none shrink-0"
+        onMouseDown={e => startDrag(e.clientX, e.clientY)}
+        onTouchStart={e => e.touches.length > 0 && startDrag(e.touches[0].clientX, e.touches[0].clientY)}
       >
         <div className="flex items-center gap-3 pointer-events-none">
             <div className="w-8 h-8 rounded-xl bg-[#00bcd4]/10 flex items-center justify-center text-[#00bcd4]">
@@ -564,14 +594,15 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                   title="Change Color"
                                   className="relative w-10 h-10 rounded-xl overflow-hidden border border-white/10 cursor-pointer shadow-lg active:scale-95 transition-transform shrink-0"
                                   style={{ backgroundColor: s.color && (s.color === 'BYLAYER' || s.color === 'BYBLOCK') ? '#444' : (s.color || '#ffffff') }}
-                                  onClick={() => {
-                                      onOpenColorSelector?.(s.color || '#FFFFFF', (color) => {
-                                          onUpdateShape(s.id, { color });
-                                      }, `Entity: ${s.type.toUpperCase()}`);
-                                  }}
                                 >
+                                  <input 
+                                    type="color" 
+                                    value={s.color && s.color.startsWith('#') ? s.color : '#ffffff'}
+                                    onChange={(e) => updateSelectedShape({ color: e.target.value })}
+                                    className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
+                                  />
                                   { (s.color === 'BYLAYER' || s.color === 'BYBLOCK') && (
-                                      <div className="absolute inset-0 flex items-center justify-center text-[7px] font-black uppercase text-white/40">
+                                      <div className="absolute inset-0 flex items-center justify-center text-[7px] font-black uppercase text-white/40 pointer-events-none">
                                           {s.color === 'BYLAYER' ? 'LAYER' : 'BLOCK'}
                                       </div>
                                   )}
@@ -584,7 +615,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                     spellCheck={false}
                                     onClick={() => {
                                         onOpenColorSelector?.(s.color || '#FFFFFF', (color) => {
-                                            onUpdateShape(s.id, { color });
+                                            updateSelectedShape({ color });
                                         }, `Entity: ${s.type.toUpperCase()}`);
                                     }}
                                     readOnly
@@ -599,7 +630,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                         <select 
                                           className="w-full bg-[#121214] border border-white/5 text-[10px] text-white rounded-xl px-4 pr-8 py-3 outline-none uppercase font-black cursor-pointer appearance-none hover:border-[#00bcd4]/40 hover:bg-black transition-all shadow-inner" 
                                           value={s.lineType || 'continuous'} 
-                                          onChange={(e) => onUpdateShape(s.id, { lineType: e.target.value as LineType })}
+                                          onChange={(e) => updateSelectedShape({ lineType: e.target.value as LineType })}
                                         >
                                             {allLineTypes.map((lt, idx) => <option key={`${lt.value}-${idx}`} value={lt.value} className="bg-[#121214] text-white py-2">{lt.label}</option>)}
                                         </select>
@@ -845,18 +876,99 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                             onChange={v => onUpdateLayout?.(activeLayout.id, { paperSize: { ...activeLayout.paperSize, width: v } })} 
                         />
                     </PropertyRow>
+                    <PropertyRow label="Grid Snap Frame">
+                        <div className="flex items-center gap-2 pt-1">
+                            <input 
+                                type="checkbox"
+                                id="snapViewportToGrid"
+                                className="w-3.5 h-3.5 rounded border-white/10 bg-neutral-900 accent-[#00bcd4] cursor-pointer"
+                                checked={settings.snapViewportToGrid || false}
+                                onChange={e => onUpdateSettings({ snapViewportToGrid: e.target.checked })}
+                            />
+                            <label htmlFor="snapViewportToGrid" className="text-[7.5px] text-neutral-400 font-black uppercase tracking-wider cursor-pointer select-none">
+                                SNAP TO GRID (10MM)
+                            </label>
+                        </div>
+                    </PropertyRow>
                   </PropertySection>
 
                   <PropertySection title="Layout Objects" icon={Box}>
-                    <div className="px-6 py-4 space-y-3">
+                    <div className="px-6 py-4 space-y-4">
                         <div className="flex items-center justify-between text-[10px]">
-                            <span className="text-neutral-500 uppercase font-black tracking-widest">Viewports</span>
+                            <span className="text-neutral-500 uppercase font-black tracking-widest">Total Viewports</span>
                             <span className="text-white font-mono">{activeLayout.viewports.length}</span>
                         </div>
                         <div className="flex items-center justify-between text-[10px]">
                             <span className="text-neutral-500 uppercase font-black tracking-widest">Annotations</span>
                             <span className="text-white font-mono">{(activeLayout.entities || []).length}</span>
                         </div>
+
+                        {activeLayout.viewports.length > 0 && (
+                            <div className="pt-2 border-t border-white/5 space-y-3.5">
+                                <span className="text-[8px] font-black font-sans text-neutral-400 uppercase tracking-widest block">Viewport Placement Settings</span>
+                                {activeLayout.viewports.map((vp, index) => {
+                                    const handleVpUpdate = (updates: Partial<typeof vp>) => {
+                                        const snapEnabled = settings.snapViewportToGrid;
+                                        let newX = updates.x !== undefined ? updates.x : vp.x;
+                                        let newY = updates.y !== undefined ? updates.y : vp.y;
+                                        let newW = updates.width !== undefined ? updates.width : vp.width;
+                                        let newH = updates.height !== undefined ? updates.height : vp.height;
+                                        
+                                        if (snapEnabled) {
+                                            const spacing = 10;
+                                            if (updates.x !== undefined) newX = Math.round(newX / spacing) * spacing;
+                                            if (updates.y !== undefined) newY = Math.round(newY / spacing) * spacing;
+                                            if (updates.width !== undefined) newW = Math.max(10, Math.round(newW / spacing) * spacing);
+                                            if (updates.height !== undefined) newH = Math.max(10, Math.round(newH / spacing) * spacing);
+                                        }
+                                        
+                                        const updatedViewports = activeLayout.viewports.map((v, i) => 
+                                            i === index ? { ...v, x: newX, y: newY, width: newW, height: newH } : v
+                                        );
+                                        onUpdateLayout?.(activeLayout.id, { viewports: updatedViewports });
+                                    };
+
+                                    return (
+                                        <div key={vp.id} className="p-3 bg-neutral-900/40 border border-white/5 rounded-xl space-y-2.5">
+                                            <div className="flex justify-between items-center border-b border-white/5 pb-1.5">
+                                                <span className="text-[8px] font-black font-mono text-cyan-400 uppercase">VIEWPORT {index + 1}</span>
+                                                <span className="text-[6.5px] font-mono text-neutral-500 uppercase">{vp.id}</span>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <div className="flex flex-col gap-1">
+                                                    <span className="text-[7px] font-black text-neutral-500 uppercase">X (MM)</span>
+                                                    <NumericInput 
+                                                        value={vp.x} 
+                                                        onChange={v => handleVpUpdate({ x: v })} 
+                                                    />
+                                                </div>
+                                                <div className="flex flex-col gap-1">
+                                                    <span className="text-[7px] font-black text-neutral-500 uppercase">Y (MM)</span>
+                                                    <NumericInput 
+                                                        value={vp.y} 
+                                                        onChange={v => handleVpUpdate({ y: v })} 
+                                                    />
+                                                </div>
+                                                <div className="flex flex-col gap-1">
+                                                    <span className="text-[7px] font-black text-neutral-500 uppercase">W (MM)</span>
+                                                    <NumericInput 
+                                                        value={vp.width} 
+                                                        onChange={v => handleVpUpdate({ width: v })} 
+                                                    />
+                                                </div>
+                                                <div className="flex flex-col gap-1">
+                                                    <span className="text-[7px] font-black text-neutral-500 uppercase">H (MM)</span>
+                                                    <NumericInput 
+                                                        value={vp.height} 
+                                                        onChange={v => handleVpUpdate({ height: v })} 
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
                   </PropertySection>
 

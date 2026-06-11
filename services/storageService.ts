@@ -116,5 +116,58 @@ export const storageService = {
     } catch {
       return null;
     }
+  },
+
+  /**
+   * Pushes a snapshot of commands/changes executed offline into IndexedDB queue
+   */
+  async pushOfflineCommand(fileName: string, layers: any, layouts: any, blocks: any): Promise<void> {
+    try {
+      const key = `offline_queue_${fileName}`;
+      const existingQueue: any[] = await this.loadLarge(key) || [];
+      const item = {
+        id: Math.random().toString(36).substr(2, 9),
+        fileName,
+        timestamp: Date.now(),
+        layers,
+        layouts,
+        blocks
+      };
+      existingQueue.push(item);
+      // Keep only last 20 operations to avoid bloating memory/disk limits
+      if (existingQueue.length > 20) {
+        existingQueue.shift();
+      }
+      await this.saveLarge(key, existingQueue);
+      console.log(`OFFLINE_QUEUE_PUSHED: ${fileName} (Queue length: ${existingQueue.length})`);
+    } catch (err) {
+      console.error('FAILED_TO_PUSH_OFFLINE_COMMAND:', err);
+    }
+  },
+
+  /**
+   * Retrieves the offline command snaps for a given file name
+   */
+  async getOfflineQueue(fileName: string): Promise<any[]> {
+    try {
+      const key = `offline_queue_${fileName}`;
+      return await this.loadLarge(key) || [];
+    } catch (err) {
+      console.error('FAILED_TO_GET_OFFLINE_QUEUE:', err);
+      return [];
+    }
+  },
+
+  /**
+   * Cleans up the offline queue for a given file name upon successful sync
+   */
+  async clearOfflineQueue(fileName: string): Promise<void> {
+    try {
+      const key = `offline_queue_${fileName}`;
+      await this.deleteLarge(key);
+      console.log(`OFFLINE_QUEUE_CLEARED: ${fileName}`);
+    } catch (err) {
+      console.error('FAILED_TO_CLEAR_OFFLINE_QUEUE:', err);
+    }
   }
 };

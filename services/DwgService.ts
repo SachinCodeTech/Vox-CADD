@@ -127,23 +127,18 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
             
             let actualText = text;
             
+            // Aggressive cleaning
+            if (actualText.startsWith('A$') || actualText.includes('$')) {
+                actualText = actualText.split('*').pop() || actualText.replace(/A\$\w+/g, '');
+            }
+            actualText = actualText.trim();
+            
             // Rejects anonymized AutoCAD labels, handles & block references
             if (/^\*[u|d|x|e|t|a][0-9]+/i.test(actualText) || /^\*[0-9]+/i.test(actualText) || /^[0-9a-f]{6,16}$/i.test(actualText)) {
                 return '';
             }
             if (/A\$C[0-9a-f]+/i.test(actualText) || actualText.startsWith('A$C')) {
                 return '';
-            }
-
-            // Clean AutoCAD formatting garbage and split on * to find actual text labels inside anonymous names
-            if (actualText.startsWith('A$') || actualText.includes('$')) {
-                const parts = actualText.split('*');
-                const lastPart = parts[parts.length - 1];
-                if (lastPart && lastPart.length >= 2 && !lastPart.startsWith('A$')) {
-                    actualText = lastPart;
-                } else {
-                    actualText = actualText.replace(/A\$\w+/gi, '');
-                }
             }
 
             // Allow common dimension placeholders and small strings (single letters like grids or labels)
@@ -299,21 +294,36 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                     case type.includes('TEXT') || type.includes('MTEXT') || type.includes('ATTRIB') || type.includes('ATTDEF'):
                         const pos = ent.position || ent.insertPoint || ent.basePoint || ent.insertionPoint || ent.location;
                         if (pos && isValid(pos.x) && isValid(pos.y)) {
-                            const rawText = ent.text || ent.content || ent.textString || ent.value || ent.string || '';
-                            const text = cleanText(rawText);
+                            const rawText = ent.text || ent.content || ent.contents || ent.textString || ent.value || ent.string || '';
+                            let text = cleanText(rawText);
                             
-                            // Only skip if truly empty, don't skip [Text] if it's actual content
-                            if (text === '') return null;
+                            // Fallback if empty but exists
+                            if (text === '') text = '[Text]';
 
                             let fontFamily = 'standard';
                             const fMatch = rawText.match(/\\f([^;|]+)[;|]/);
                             if (fMatch) fontFamily = fMatch[1];
                             else if (ent.style) fontFamily = ent.style.name || ent.style.id || 'standard';
                             
-                            const rotation = ent.rotation !== undefined ? ent.rotation : 0;
+                            const rawRot = ent.rotation !== undefined ? ent.rotation : 0;
+                            const rotation = Math.abs(rawRot) > 2 * Math.PI ? rawRot * Math.PI / 180 : rawRot;
                             const h = ent.height || ent.textHeight || 2.5;
                             const width = ent.width || ent.rectWidth || 0;
-                            const attachmentPoint = ent.attachmentPoint || ent.attachment_point || 1;
+                            // Set accurate attachmentPoint based on alignment fields if not explicitly specified
+                            let attachmentPoint = ent.attachmentPoint || ent.attachment_point || 1;
+                            if (!ent.attachmentPoint && !ent.attachment_point) {
+                                const hAlg = ent.halign !== undefined ? ent.halign : (ent.hAlign !== undefined ? ent.hAlign : (ent.horizontalJustification !== undefined ? ent.horizontalJustification : 0));
+                                const vAlg = ent.valign !== undefined ? ent.valign : (ent.vAlign !== undefined ? ent.vAlign : (ent.verticalJustification !== undefined ? ent.verticalJustification : 0));
+                                if (hAlg === 4) {
+                                    attachmentPoint = 5;
+                                } else {
+                                    const hIndex = (hAlg === 1) ? 2 : (hAlg === 2) ? 3 : 1;
+                                    const vIndex = (vAlg === 3) ? 1 : (vAlg === 2) ? 4 : 7;
+                                    if (vIndex === 1) attachmentPoint = hIndex;
+                                    else if (vIndex === 4) attachmentPoint = 3 + hIndex;
+                                    else attachmentPoint = 6 + hIndex;
+                                }
+                            }
                             
                             return { 
                                 id: nextId(), type: (type.includes('MTEXT') || rawText.includes('\\P')) ? 'mtext' : 'text', 
@@ -334,21 +344,93 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                         break;
                     case type.includes('HATCH'):
                         const loops: Point[][] = [];
-                        const paths = ent.boundaryPaths || ent.paths || ent.loops || ent.boundary;
+                        const paths = ent.boundaryPaths || ent.paths || ent.loops || ent.boundary || ent.edges;
                         if (paths && Array.isArray(paths)) {
                             paths.forEach((path: any) => {
                                 const pts: Point[] = [];
-                                const pVertices = path?.vertices || path?.points || path?.edges || (Array.isArray(path) ? path : []);
+                                const pVertices = path?.vertices || path?.points || (Array.isArray(path) ? path : null);
                                 if (Array.isArray(pVertices)) {
                                     pVertices.forEach((v: any) => {
                                         if (v && isValid(v.x) && isValid(v.y)) pts.push({ x: v.x, y: v.y, bulge: v.bulge });
                                     });
+                                } else if (path && typeof path === 'object' && path.edges && Array.isArray(path.edges)) {
+                                    path.edges.forEach((edge: any) => {
+                                        if (edge.type === 'CircularArc' || edge.center) {
+                                            const center = edge.center;
+                                            const r = edge.radius || 1;
+                                            const sa = edge.startAngle !== undefined ? edge.startAngle : 0;
+                                            const ea = edge.endAngle !== undefined ? edge.endAngle : Math.PI * 2;
+                                            const finalSa = Math.abs(sa) > 2 * Math.PI ? sa * Math.PI / 180 : sa;
+                                            const finalEa = Math.abs(ea) > 2 * Math.PI ? ea * Math.PI / 180 : ea;
+                                            const steps = 16;
+                                            const diff = finalEa - finalSa;
+                                            for (let i = 0; i <= steps; i++) {
+                                                const a = finalSa + (i / steps) * diff;
+                                                pts.push({ x: center.x + r * Math.cos(a), y: center.y + r * Math.sin(a) });
+                                            }
+                                        } else {
+                                            if (edge.startPoint && isValid(edge.startPoint.x) && isValid(edge.startPoint.y)) {
+                                                pts.push({ x: edge.startPoint.x, y: edge.startPoint.y });
+                                            }
+                                            if (edge.endPoint && isValid(edge.endPoint.x) && isValid(edge.endPoint.y)) {
+                                                pts.push({ x: edge.endPoint.x, y: edge.endPoint.y });
+                                            }
+                                            if (edge.vertices && Array.isArray(edge.vertices)) {
+                                                edge.vertices.forEach((v: any) => {
+                                                    if (v && isValid(v.x) && isValid(v.y)) pts.push({ x: v.x, y: v.y });
+                                                });
+                                            }
+                                        }
+                                    });
                                 }
-                                if (pts.length >= 2) loops.push(pts);
+                                
+                                // Remove duplicate consecutive coordinates
+                                const cleanPts: Point[] = [];
+                                pts.forEach(p => {
+                                    if (cleanPts.length === 0) {
+                                        cleanPts.push(p);
+                                    } else {
+                                        const last = cleanPts[cleanPts.length - 1];
+                                        const dist = Math.hypot(p.x - last.x, p.y - last.y);
+                                        if (dist > 1e-4) cleanPts.push(p);
+                                    }
+                                });
+                                if (cleanPts.length >= 2) loops.push(cleanPts);
                             });
                         }
+                        
+                        // Fallback: If no loops were detected from boundary paths, check direct points/vertices of the Hatch entity
+                        if (loops.length === 0 && ent.points && Array.isArray(ent.points)) {
+                            const pts: Point[] = [];
+                            ent.points.forEach((v: any) => {
+                                if (v && isValid(v.x) && isValid(v.y)) pts.push({ x: v.x, y: v.y });
+                            });
+                            if (pts.length >= 2) loops.push(pts);
+                        }
+                        if (loops.length === 0 && ent.vertices && Array.isArray(ent.vertices)) {
+                            const pts: Point[] = [];
+                            ent.vertices.forEach((v: any) => {
+                                if (v && isValid(v.x) && isValid(v.y)) pts.push({ x: v.x, y: v.y });
+                            });
+                            if (pts.length >= 2) loops.push(pts);
+                        }
+
                         if (loops.length > 0) {
-                            return { id: nextId(), type: 'hatch', layer, color, points: loops[0], loops, pattern: (ent.patternName || 'solid').toLowerCase(), scale: ent.patternScale || 1, rotation: ent.patternAngle || 0, filled: true, fill: true } as any;
+                            return { 
+                                id: nextId(), 
+                                type: 'hatch', 
+                                layer, 
+                                color, 
+                                points: loops[0], 
+                                loops, 
+                                pattern: (ent.patternName || 'solid').toLowerCase(), 
+                                scale: ent.patternScale || 1, 
+                                rotation: ent.patternAngle || 0, 
+                                filled: true, 
+                                fill: true,
+                                lineType,
+                                thickness
+                            } as any;
                         }
                         break;
                     case type.includes('INSERT') || type.includes('BLOCK'):
@@ -383,7 +465,9 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             if (blockId) {
                                 const scaleX = ent.scale?.x !== undefined ? ent.scale.x : (ent.xScale !== undefined ? ent.xScale : 1);
                                 const scaleY = ent.scale?.y !== undefined ? ent.scale.y : (ent.yScale !== undefined ? ent.yScale : 1);
-                                return { id: nextId(), type: 'block', layer, color, x: insPoint.x, y: insPoint.y, blockId, scaleX, scaleY, rotation: ent.rotation || 0, name: blockId } as any;
+                                const rawRot = ent.rotation || 0;
+                                const finalRot = Math.abs(rawRot) > 2 * Math.PI ? rawRot * Math.PI / 180 : rawRot;
+                                return { id: nextId(), type: 'block', layer, color, x: insPoint.x, y: insPoint.y, blockId, scaleX, scaleY, scale: scaleX, rotation: finalRot, name: blockId, blockDefinition: ent.blockDefinition || ent.block || null } as any;
                             }
                         }
                         break;
@@ -442,6 +526,8 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             else if (x2 !== cx || y2 !== cy) angle2 = Math.atan2(y2 - cy, x2 - cx);
                         }
 
+                        const dimRot = ent.rotation || 0;
+                        const finalDimRot = Math.abs(dimRot) > 2 * Math.PI ? dimRot * Math.PI / 180 : dimRot;
                         return { 
                             id: nextId(), type: 'dimension', dimType, 
                             layer, color, 
@@ -450,7 +536,7 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             dimX, dimY,
                             text: formattedDimText,
                             size: dimH, height: dimH,
-                            rotation: ent.rotation || 0,
+                            rotation: finalDimRot,
                             thickness, lineType, lineScale
                         } as any;
                     }

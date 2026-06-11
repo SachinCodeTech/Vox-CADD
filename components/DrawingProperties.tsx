@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import * as d3 from 'd3';
 import { 
   X, FileText, Info, User, Briefcase, Activity, Calendar, 
   ShieldCheck, PenLine, Ruler, Layers2, Trash2, HardDrive, AlertTriangle 
@@ -57,6 +58,150 @@ const InputField = ({ label, value, onChange, placeholder, icon: Icon, isTextAre
   );
 };
 
+const EntityDistributionChart: React.FC<{ counts: Record<string, number> }> = ({ counts }) => {
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [tooltip, setTooltip] = useState<{ type: string; count: number; percent: string } | null>(null);
+
+  useEffect(() => {
+    if (!svgRef.current || !counts || Object.keys(counts).length === 0) return;
+
+    // Clear previous elements
+    const svg = d3.select(svgRef.current);
+    svg.selectAll('*').remove();
+
+    const data: Array<{ type: string; count: number; label: string }> = Object.entries(counts).map(([type, count]) => ({
+      type,
+      count: Number(count),
+      label: formattedTypeLabel(type)
+    })).sort((a: any, b: any) => b.count - a.count);
+
+    const total: number = data.reduce((acc: number, d) => acc + d.count, 0);
+
+    const width = 280;
+    const height = 150;
+
+    // Custom CAD Theme Colors
+    const colors = [
+      '#00bcd4', // Cyan
+      '#f59e0b', // Amber
+      '#c084fc', // Purple
+      '#10b981', // Emerald
+      '#f43f5e', // Rose
+      '#6366f1', // Indigo
+      '#14b8a6', // Teal
+      '#a855f7'  // Purple-dark
+    ];
+
+    const colorScale = d3.scaleOrdinal<string>()
+      .domain(data.map(d => d.type))
+      .range(colors);
+
+    const g = svg.append('g')
+      .attr('transform', `translate(${width / 2}, ${height / 2})`);
+
+    const pie = d3.pie<any>()
+      .value((d: any) => d.count)
+      .sort(null);
+
+    const arc = d3.arc<any>()
+      .innerRadius(35)
+      .outerRadius(55)
+      .cornerRadius(4);
+
+    const arcHover = d3.arc<any>()
+      .innerRadius(35)
+      .outerRadius(62)
+      .cornerRadius(6);
+
+    // Set initial display
+    setTooltip({
+      type: data[0].label,
+      count: data[0].count,
+      percent: ((data[0].count / total) * 100).toFixed(1) + '%'
+    });
+
+    const path = g.selectAll('path')
+      .data(pie(data))
+      .enter()
+      .append('path')
+      .attr('d', arc)
+      .attr('fill', (d: any) => colorScale(d.data.type)!)
+      .attr('stroke', '#0d0d0f')
+      .attr('stroke-width', '2px')
+      .style('cursor', 'pointer')
+      .style('transition', 'all 0.2s ease');
+
+    path.on('mouseover', function (event, d: any) {
+      d3.select(this)
+        .transition()
+        .duration(150)
+        .attr('d', arcHover)
+        .style('opacity', '1');
+
+      setTooltip({
+        type: d.data.label,
+        count: d.data.count,
+        percent: ((d.data.count / total) * 100).toFixed(1) + '%'
+      });
+    });
+
+    path.on('mouseout', function (event, d: any) {
+      d3.select(this)
+        .transition()
+        .duration(150)
+        .attr('d', arc);
+    });
+
+  }, [counts]);
+
+  const formattedTypeLabel = (typeKey: string): string => {
+    switch (typeKey) {
+      case 'line': return 'LINES';
+      case 'circle': return 'CIRCLES';
+      case 'rect': return 'RECTANGLES';
+      case 'pline': return 'POLYLINES';
+      case 'polygon': return 'POLYGONS';
+      case 'arc': return 'ARCS';
+      case 'ellipse': return 'ELLIPSES';
+      case 'point': return 'POINTS';
+      case 'dimension': return 'DIMENSIONS';
+      case 'dline': return 'DOUBLE LINES';
+      case 'ray': return 'RAYS';
+      case 'xline': return 'X-LINES';
+      case 'text': return 'TEXT';
+      case 'mtext': return 'MTEXT';
+      case 'hatch': return 'HATCHES';
+      case 'leader': return 'LEADERS';
+      case 'block': return 'BLOCKS';
+      case 'insert': return 'INSERTS';
+      default: return typeKey.toUpperCase();
+    }
+  };
+
+  if (!counts || Object.keys(counts).length === 0) return null;
+
+  return (
+    <div className="flex flex-col items-center justify-center p-2 bg-black/40 border border-white/5 rounded-xl">
+      <div className="relative">
+        <svg ref={svgRef} width="280" height="150" className="overflow-visible animate-in zoom-in-95 duration-300" />
+        {tooltip && (
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center justify-center pointer-events-none select-none text-center leading-none">
+            <span className="text-[7.5px] font-mono text-neutral-500 font-bold uppercase tracking-widest truncate max-w-[80px]">
+              {tooltip.type}
+            </span>
+            <span className="text-sm font-black text-white font-mono mt-1">
+              {tooltip.count}
+            </span>
+            <span className="text-[8px] font-mono font-bold text-[#00bcd4] mt-0.5 font-black">
+              {tooltip.percent}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 export const DrawingProperties: React.FC<DrawingPropertiesProps> = ({ 
   settings, 
   onConfirm, 
@@ -79,14 +224,68 @@ export const DrawingProperties: React.FC<DrawingPropertiesProps> = ({
   const [localTitle, setLocalTitle] = useState(currentFileName.replace(/\.(vox|dxf)$/i, ''));
   const [activeTab, setActiveTab] = useState<'meta' | 'stats'>('meta');
 
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const isDragging = useRef(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const handleMove = (e: MouseEvent | TouchEvent) => {
+        if (!isDragging.current) return;
+        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+        setPos({ x: clientX - dragStart.current.x, y: clientY - dragStart.current.y });
+    };
+    const handleEnd = () => { isDragging.current = false; };
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleEnd);
+    window.addEventListener('touchmove', handleMove, { passive: false });
+    window.addEventListener('touchend', handleEnd);
+    return () => {
+        window.removeEventListener('mousemove', handleMove);
+        window.removeEventListener('mouseup', handleEnd);
+        window.removeEventListener('touchmove', handleMove);
+        window.removeEventListener('touchend', handleEnd);
+    };
+  }, []);
+
+  const startDrag = (clientX: number, clientY: number) => {
+    isDragging.current = true;
+    dragStart.current = { x: clientX - pos.x, y: clientY - pos.y };
+  };
+
   const handleConfirm = () => {
     const ext = currentFileName.toLowerCase().endsWith('.dxf') ? '.dxf' : '.vox';
     const finalName = localTitle.endsWith('.vox') || localTitle.endsWith('.dxf') ? localTitle : localTitle + ext;
     
-    onConfirm(
-      { ...localMetadata, lastModified: new Date().toISOString() },
-      finalName
-    );
+    // Auto increment revision when properties are saved/confirmed
+    const prevRevision = localMetadata.revision || 'REV-00';
+    const match = prevRevision.match(/REV-(\d+)/i) || prevRevision.match(/REV\s*(\d+)/i) || prevRevision.match(/(\d+)/);
+    let revNum = 0;
+    if (match) {
+      revNum = parseInt(match[1] || match[0], 10);
+    }
+    const nextRev = revNum + 1;
+    const pad = nextRev < 10 ? '0' + nextRev : String(nextRev);
+
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const min = String(now.getMinutes()).padStart(2, '0');
+    const timestampStr = `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+
+    const updated = {
+      ...localMetadata,
+      revision: `REV-${pad}`,
+      revisionTimestamp: timestampStr,
+      lastModified: now.toISOString(),
+      modifiedAt: now.toISOString(),
+      savedAt: now.toISOString(),
+      lastSavedTimestamp: timestampStr
+    };
+    
+    onConfirm(updated, finalName);
   };
 
   const formattedTypeLabel = (typeKey: string): string => {
@@ -110,9 +309,14 @@ export const DrawingProperties: React.FC<DrawingPropertiesProps> = ({
   return (
     <div 
       className="relative bg-[#0a0a0c]/98 backdrop-blur-3xl w-[340px] max-w-[95vw] border border-white/10 rounded-2xl shadow-[0_40px_100px_rgba(0,0,0,0.95)] flex flex-col overflow-hidden font-sans text-neutral-300 select-none z-[1001]"
+      style={{ transform: `translate(${pos.x}px, ${pos.y}px)` }}
     >
       {/* Header */}
-      <div className="flex justify-between items-center px-4 py-3 border-b border-white/5 bg-white/[0.01] shrink-0">
+      <div 
+        className="flex justify-between items-center px-4 py-3 border-b border-white/5 bg-white/[0.01] cursor-grab active:cursor-grabbing touch-none shrink-0"
+        onMouseDown={e => startDrag(e.clientX, e.clientY)}
+        onTouchStart={e => e.touches.length > 0 && startDrag(e.touches[0].clientX, e.touches[0].clientY)}
+      >
         <div className="flex items-center gap-2.5 pointer-events-none">
           <Briefcase size={16} className="text-amber-500" />
           <div>
@@ -191,6 +395,22 @@ export const DrawingProperties: React.FC<DrawingPropertiesProps> = ({
                 icon={PenLine} 
                 isTextArea
               />
+
+              <div className="bg-amber-500/5 border border-amber-500/10 p-3 rounded-xl space-y-1.5 mt-2">
+                <div className="flex justify-between items-center text-[8.5px] font-mono">
+                  <span className="text-neutral-500 uppercase font-black">Last Save Revision</span>
+                  <span className="text-amber-500 font-black px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">{localMetadata.revision || 'REV-01'}</span>
+                </div>
+                {localMetadata.revisionTimestamp && (
+                  <div className="flex justify-between items-center text-[8.5px] font-mono">
+                    <span className="text-neutral-500 uppercase font-black">Revision Timestamp</span>
+                    <span className="text-neutral-300 font-bold">{localMetadata.revisionTimestamp}</span>
+                  </div>
+                )}
+                <div className="text-[7.5px] text-neutral-600 font-semibold uppercase leading-normal pt-1 border-t border-white/5">
+                  The revision counter auto-increments and stamps when clicking the main "Save Details" or "Export VOX" controllers.
+                </div>
+              </div>
             </PropertySection>
           </div>
         ) : (
@@ -238,6 +458,11 @@ export const DrawingProperties: React.FC<DrawingPropertiesProps> = ({
             {/* Entity Types breakdown list */}
             {projectStats?.counts && Object.keys(projectStats.counts).length > 0 && (
               <PropertySection title="Entity Inventory Breakdown" icon={Ruler} accent="cyan">
+                {/* Interactive Donut visualization */}
+                <div className="mb-3">
+                  <EntityDistributionChart counts={projectStats.counts} />
+                </div>
+                
                 <div className="flex flex-wrap gap-1.5">
                   {Object.entries(projectStats.counts).map(([typeKey, count]) => (
                     <div 

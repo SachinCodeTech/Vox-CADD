@@ -29,6 +29,10 @@ interface ToolbarProps {
   showEllipseOptions?: boolean;
   canUndo?: boolean;
   canRedo?: boolean;
+  // Macro properties
+  savedMacros?: Array<{ id: string, name: string, commands: string[] }>;
+  isRecordingMacro?: boolean;
+  recordedCommandsCount?: number;
 }
 
 const ToolCircleBtn: React.FC<{ 
@@ -96,7 +100,11 @@ const ToolCircleBtn: React.FC<{
     );
 };
 
-const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settings, activePanel, onSettingChange, canUndo, canRedo, activeCommandName, showCircleOptions, showArcOptions, showEllipseOptions }) => {
+const Toolbar: React.FC<ToolbarProps> = ({ 
+  category, onCommand, onAction, settings, activePanel, onSettingChange, 
+  canUndo, canRedo, activeCommandName, showCircleOptions, showArcOptions, 
+  showEllipseOptions, savedMacros = [], isRecordingMacro = false, recordedCommandsCount = 0 
+}) => {
   const [dimFlyoutOpen, setDimFlyoutOpen] = useState(false);
   const [leaderFlyoutOpen, setLeaderFlyoutOpen] = useState(false);
 
@@ -159,11 +167,13 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
             <ToolCircleBtn onClick={() => onCommand('f')} icon={<Zap />} label="FILLET" active={activeCommandName === 'FILLET'} />
             <ToolCircleBtn onClick={() => onCommand('e')} icon={<Trash2 />} label="ERASE" danger active={activeCommandName === 'ERASE'} />
             <ToolCircleBtn onClick={() => onAction('cancel')} icon={<XCircle />} label="CANCEL" />
+            <ToolCircleBtn onClick={() => onAction('toggleWallCleanupMode')} icon={<Sparkles />} label="WALL CLEAN" active={settings.wallCleanupMode} />
           </>
         );
       case 'Edit':
         return (
           <>
+            <ToolCircleBtn onClick={() => onAction('toggleQSelect')} icon={<Filter />} label="QSELECT" active={activePanel === 'qselect'} />
             <ToolCircleBtn onClick={() => onCommand('select')} icon={<MousePointer2 />} label="SELECT" active={activeCommandName === 'SELECT'} />
             <ToolCircleBtn onClick={() => onAction('undo')} icon={<RotateCcw />} label="UNDO" disabled={!canUndo} />
             <ToolCircleBtn onClick={() => onAction('redo')} icon={<RotateCw />} label="REDO" disabled={!canRedo} />
@@ -181,6 +191,8 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
           <>
             <ToolCircleBtn onClick={() => onCommand('mt')} icon={<AlignLeft />} label="MTEXT" active={activeCommandName === 'MTEXT'} />
             <ToolCircleBtn onClick={() => onCommand('t')} icon={<Type />} label="TEXT" active={activeCommandName === 'TEXT'} />
+            <ToolCircleBtn onClick={() => onCommand('autodim')} icon={<Sparkles />} label="AUTODIM" active={activeCommandName === 'AUTODIM'} />
+            <ToolCircleBtn onClick={() => onCommand('section')} icon={<DraftingCompass />} label="SECTION" active={activeCommandName === 'SECTIONLINE'} />
             <div className="relative shrink-0" ref={btnRef}>
                 <ToolCircleBtn 
                     onClick={() => { if (dimFlyoutOpen) setDimFlyoutOpen(false); else onCommand('dimlinear'); }} 
@@ -222,6 +234,9 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
                         </button>
                         <button onClick={() => { onCommand('dimord'); setDimFlyoutOpen(false); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
                             <Target size={14} className="text-cyan-500" /> Ordinate
+                        </button>
+                        <button onClick={() => { onCommand('autodim'); setDimFlyoutOpen(false); }} className="w-full text-left px-3 py-2.5 rounded-xl text-[10px] text-neutral-400 hover:bg-white/5 hover:text-white transition-all font-bold uppercase flex items-center gap-3 active:scale-95">
+                            <Sparkles size={14} className="text-cyan-500" /> Auto-Dimension
                         </button>
                         <div className="h-px bg-white/5 my-1" />
                         <button 
@@ -292,6 +307,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
         return (
           <>
             <ToolCircleBtn onClick={() => onSettingChange({ ...settings, snap: !settings.snap })} icon={<Target />} label="SNAP" active={settings.snap} />
+            <ToolCircleBtn onClick={() => onSettingChange({ ...settings, gridSnap: !settings.gridSnap })} icon={<Grid3X3 />} label="G-SNAP" active={settings.gridSnap} />
             <ToolCircleBtn onClick={() => onSettingChange({ ...settings, ortho: !settings.ortho })} icon={<Hash />} label="ORTHO" active={settings.ortho} />
             <ToolCircleBtn onClick={() => onSettingChange({ ...settings, grid: !settings.grid })} icon={<LayoutGrid />} label="GRID" active={settings.grid} />
             <ToolCircleBtn onClick={() => onSettingChange({ ...settings, showHUD: !settings.showHUD })} icon={<Monitor />} label="HUD" active={settings.showHUD} />
@@ -308,6 +324,55 @@ const Toolbar: React.FC<ToolbarProps> = ({ category, onCommand, onAction, settin
             <ToolCircleBtn onClick={() => onCommand('find')} icon={<Search />} label="FIND" active={activeCommandName === 'FIND'} />
             <ToolCircleBtn onClick={() => onCommand('vports')} icon={<MonitorPlay />} label="VPORTS" active={activeCommandName === 'VIEWPORT'} />
             <ToolCircleBtn onClick={() => onAction('toggleAbout')} icon={<Info />} label="ABOUT" active={activePanel === 'about'} />
+            <ToolCircleBtn onClick={() => onAction('purge')} icon={<Trash2 />} label="PURGE" danger />
+          </>
+        );
+      case 'Macros':
+        return (
+          <>
+            {isRecordingMacro ? (
+              <>
+                <div className="flex-shrink-0 flex flex-col justify-center items-center px-4 border-r border-white/5 mr-1 select-none animate-pulse">
+                  <div className="w-3.5 h-3.5 rounded-full bg-red-500 shadow-[0_0_10px_rgba(244,63,94,0.6)] mb-1" />
+                  <span className="text-[8px] font-mono font-black text-rose-500 uppercase tracking-widest">{recordedCommandsCount || 0} STEPS</span>
+                </div>
+                <ToolCircleBtn 
+                  onClick={() => onAction('stopRecordingMacro')} 
+                  icon={<Square className="fill-red-500/20 text-red-500" size={16} />} 
+                  label="SAVE" 
+                  active={true} 
+                />
+                <ToolCircleBtn 
+                  onClick={() => onAction('cancelRecordingMacro')} 
+                  icon={<XCircle className="text-neutral-500" size={16} />} 
+                  label="DISCARD" 
+                />
+              </>
+            ) : (
+              <>
+                <ToolCircleBtn 
+                  onClick={() => onAction('startRecordingMacro')} 
+                  icon={<MonitorPlay className="text-white" size={16} />} 
+                  label="RECORD" 
+                />
+                {savedMacros && savedMacros.length > 0 && (
+                  <div className="w-[1px] h-10 bg-white/5 mx-2 shrink-0" />
+                )}
+                {savedMacros?.map((m) => (
+                  <ToolCircleBtn 
+                    key={m.id}
+                    onClick={() => onAction('playMacro', m.commands)}
+                    onLongPress={() => onAction('deleteMacro', m.id)}
+                    icon={<Sparkles className="text-[#00bcd4]" size={16} />}
+                    label={m.name.toUpperCase()}
+                  />
+                ))}
+                <div className="text-[7.5px] text-neutral-600 font-semibold max-w-[130px] leading-relaxed select-none border-l border-white/5 pl-3.5 flex flex-col justify-center grow shrink-0">
+                  <span className="text-[#00bcd4] font-black uppercase tracking-widest text-[7px]">PRO TIP:</span>
+                  <span>HOLD BUTTON TO REMOVE</span>
+                </div>
+              </>
+            )}
           </>
         );
       default: return null;

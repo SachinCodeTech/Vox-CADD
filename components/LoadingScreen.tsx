@@ -9,18 +9,18 @@ const LoadingScreen: React.FC<{ onComplete: () => void }> = ({ onComplete }) => 
 
   useEffect(() => {
     let currentProgress = 0;
-    const intervalTime = 60; // Slightly faster for responsiveness
+    const intervalTime = 16; // 60fps updates for buttery smooth responsiveness
     
     const timer = setInterval(() => {
-      // Modern progress curve: fast then slow
-      const increment = currentProgress > 85 ? Math.random() * 1.5 : Math.random() * 6 + 4;
+      // Modern progress curve: fast then slow, but completed very quickly
+      const increment = currentProgress > 85 ? Math.random() * 8 + 6 : Math.random() * 20 + 15;
       currentProgress += increment;
 
       if (currentProgress >= 100) {
         currentProgress = 100;
         setProgress(100);
         clearInterval(timer);
-        setTimeout(onComplete, 1000);
+        setTimeout(onComplete, 100); // Trigger completion fast (100ms instead of 1000ms)
       } else {
         setProgress(currentProgress);
       }

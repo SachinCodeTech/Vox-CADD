@@ -3,6 +3,16 @@ import { Shape, Point, AppSettings, DimensionStyle, SnapPoint, LineShape, Double
 
 export const getArcFromBulge = (p1: Point, p2: Point, b: number) => {
     const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    if (dist < 1e-9 || isNaN(dist) || !isFinite(dist) || Math.abs(b) < 1e-9) {
+        return {
+            centerX: (p1.x + p2.x) / 2,
+            centerY: (p1.y + p2.y) / 2,
+            r: dist / 2 || 0.001,
+            startAngle: 0,
+            endAngle: 0,
+            bulgeSign: b >= 0 ? 1 : -1
+        };
+    }
     const s = dist / 2;
     const h = b * s;
     const r = (s * s + h * h) / (2 * h);
@@ -19,7 +29,14 @@ export const getArcFromBulge = (p1: Point, p2: Point, b: number) => {
     const startAngle = Math.atan2(p1.y - centerY, p1.x - centerX);
     const endAngle = Math.atan2(p2.y - centerY, p2.x - centerX);
     
-    return { centerX, centerY, r: Math.abs(r), startAngle, endAngle, bulgeSign };
+    return { 
+        centerX: isNaN(centerX) || !isFinite(centerX) ? midX : centerX, 
+        centerY: isNaN(centerY) || !isFinite(centerY) ? midY : centerY, 
+        r: isNaN(r) || !isFinite(r) ? s : Math.abs(r), 
+        startAngle: isNaN(startAngle) || !isFinite(startAngle) ? 0 : startAngle, 
+        endAngle: isNaN(endAngle) || !isFinite(endAngle) ? 0 : endAngle, 
+        bulgeSign 
+    };
 };
 
 let idCounter = 0;
@@ -114,6 +131,7 @@ export const hitTestGrip = (p: Point, s: Shape, threshold: number): number => {
     const isNear = (x: number, y: number) => distance(p, {x, y}) < threshold;
     switch (s.type) {
         case 'line':
+        case 'section':
             if (isNear(s.x1, s.y1)) return 0;
             if (isNear(s.x2, s.y2)) return 1;
             if (isNear((s.x1+s.x2)/2, (s.y1+s.y2)/2)) return 2;
@@ -158,6 +176,7 @@ export const modifyShapeByGrip = (s: Shape, gripIndex: number, newP: Point): Sha
     const ns = JSON.parse(JSON.stringify(s));
     switch (ns.type) {
         case 'line':
+        case 'section':
             if (gripIndex === 0) { ns.x1 = newP.x; ns.y1 = newP.y; }
             else if (gripIndex === 1) { ns.x2 = newP.x; ns.y2 = newP.y; }
             else if (gripIndex === 2) { 
@@ -365,7 +384,8 @@ export const findBlock = (blockId: string, blocks?: Record<string, BlockDefiniti
 
 export const hitTestShape = (x: number, y: number, s: Shape, threshold: number, blocks?: Record<string, BlockDefinition>): boolean => {
   switch (s.type) {
-    case 'line': return distToSegment(x, y, s.x1, s.y1, s.x2, s.y2) < threshold;
+    case 'line':
+    case 'section': return distToSegment(x, y, s.x1, s.y1, s.x2, s.y2) < threshold;
     case 'block':
       const block = findBlock(s.blockId, blocks);
       if (block) {
@@ -553,6 +573,7 @@ export const getShapeBounds = (s: Shape, blocks?: Record<string, BlockDefinition
     let bounds;
     switch (s.type) {
         case 'line':
+        case 'section':
             bounds = { xMin: Math.min(s.x1, s.x2), yMin: Math.min(s.y1, s.y2), xMax: Math.max(s.x1, s.x2), yMax: Math.max(s.y1, s.y2) };
             break;
         case 'block':
@@ -762,7 +783,8 @@ export const calculateShapeLength = (s: Shape): number => {
     if (s._length !== undefined) return s._length;
     let len = 0;
     switch (s.type) {
-        case 'line': len = distance({x: s.x1, y: s.y1}, {x: s.x2, y: s.y2}); break;
+        case 'line':
+        case 'section': len = distance({x: s.x1, y: s.y1}, {x: s.x2, y: s.y2}); break;
         case 'circle': len = Math.PI * 2 * s.radius; break;
         case 'rect': len = 2 * (s.width + s.height); break;
         case 'pline': case 'polygon': case 'spline': case 'dline': case 'hatch': 
@@ -854,7 +876,7 @@ export const moveShape = (s: Shape, dx: number, dy: number): Shape => {
     delete (ns as any)._length;
     
     switch (ns.type) {
-        case 'line': case 'ray': case 'xline': case 'leader':
+        case 'line': case 'ray': case 'xline': case 'leader': case 'section':
             (ns as any).x1 += dx; (ns as any).y1 += dy; (ns as any).x2 += dx; (ns as any).y2 += dy; break;
         case 'circle': case 'arc': case 'text': case 'mtext': case 'rect': case 'ellipse': case 'point': case 'donut': case 'dimang':
             (ns as any).x += dx; (ns as any).y += dy; break;
@@ -1623,7 +1645,7 @@ export const rotateShape = (s: Shape, base: Point, angle: number): Shape => {
     };
 
     switch (ns.type) {
-        case 'line': case 'ray': case 'xline': case 'leader': {
+        case 'line': case 'ray': case 'xline': case 'leader': case 'section': {
             const p1 = rotatePt({ x: (ns as any).x1, y: (ns as any).y1 }), p2 = rotatePt({ x: (ns as any).x2, y: (ns as any).y2 });
             (ns as any).x1 = p1.x; (ns as any).y1 = p1.y; (ns as any).x2 = p2.x; (ns as any).y2 = p2.y; break;
         }
@@ -1653,7 +1675,7 @@ export const scaleShape = (s: Shape, base: Point, factor: number): Shape => {
     const scalePt = (p: Point) => ({ x: base.x + (p.x - base.x) * factor, y: base.y + (p.y - base.y) * factor });
 
     switch (ns.type) {
-        case 'line': case 'ray': case 'xline': case 'leader': {
+        case 'line': case 'ray': case 'xline': case 'leader': case 'section': {
             const p1 = scalePt({ x: (ns as any).x1, y: (ns as any).y1 }), p2 = scalePt({ x: (ns as any).x2, y: (ns as any).y2 });
             (ns as any).x1 = p1.x; (ns as any).y1 = p1.y; (ns as any).x2 = p2.x; (ns as any).y2 = p2.y; break;
         }
@@ -1703,7 +1725,8 @@ export const mirrorShape = (s: Shape, p1: Point, p2: Point): Shape => {
     };
 
     switch (ns.type) {
-        case 'line': {
+        case 'line':
+        case 'section': {
             const mp1 = mirrorPt({ x: ns.x1, y: ns.y1 }), mp2 = mirrorPt({ x: ns.x2, y: ns.y2 });
             ns.x1 = mp1.x; ns.y1 = mp1.y; ns.x2 = mp2.x; ns.y2 = mp2.y; break;
         }
@@ -1783,6 +1806,7 @@ export const stretchShape = (s: Shape, xMin: number, yMin: number, xMax: number,
 
     switch (ns.type) {
         case 'line':
+        case 'section':
             if (inRect({ x: ns.x1, y: ns.y1 })) { ns.x1 += dx; ns.y1 += dy; }
             if (inRect({ x: ns.x2, y: ns.y2 })) { ns.x2 += dx; ns.y2 += dy; }
             break;
@@ -1844,12 +1868,13 @@ const SNAP_PRIORITY: Record<string, number> = {
     'grid': 12
 };
 
-export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts: number, trackingPoints: SnapPoint[], settings?: any): SnapPoint | null => {
-    const threshold = 20 / ts; 
+export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts: number, trackingPoints: SnapPoint[], settings?: any, isTouch?: boolean): SnapPoint | null => {
+    const threshold = (isTouch ? 45 : 20) / ts; 
     const candidates: SnapPoint[] = [];
 
     const addCandidate = (x: number, y: number, type: SnapPoint['type'], lp?: Point) => {
         const d = distance(p, { x, y });
+        if (isNaN(x) || !isFinite(x) || isNaN(y) || !isFinite(y)) return;
         if (d <= threshold) {
             candidates.push({ x, y, type, lastPoint: lp });
         }
@@ -1935,7 +1960,7 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
                 if (options.midpoint) addCandidate((s.x1 + s.x2) / 2, (s.y1 + s.y2) / 2, 'mid');
                 if (options.perpendicular && basePoint) {
                     const perp = projectPointOnLine(basePoint, { x: s.x1, y: s.y1 }, { x: s.x2, y: s.y2 });
-                    addCandidate(perp.x, perp.y, 'perp');
+                    addCandidate(perp.x, perp.y, 'perp', basePoint);
                 }
                 if (options.extension) {
                     const ext = projectPointOnLine(p, { x: s.x1, y: s.y1 }, { x: s.x2, y: s.y2 });
@@ -1976,8 +2001,8 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
                 }
                 if (options.perpendicular && basePoint) {
                     const angle = Math.atan2(basePoint.y - s.y, basePoint.x - s.x);
-                    addCandidate(s.x + s.radius * Math.cos(angle), s.y + s.radius * Math.sin(angle), 'perp');
-                    addCandidate(s.x - s.radius * Math.cos(angle), s.y - s.radius * Math.sin(angle), 'perp');
+                    addCandidate(s.x + s.radius * Math.cos(angle), s.y + s.radius * Math.sin(angle), 'perp', basePoint);
+                    addCandidate(s.x - s.radius * Math.cos(angle), s.y - s.radius * Math.sin(angle), 'perp', basePoint);
                 }
                 if (options.tangent && basePoint) {
                     const d = distance({x: s.x, y: s.y}, basePoint);
@@ -1986,8 +2011,8 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
                         const baseAngle = Math.atan2(basePoint.y - s.y, basePoint.x - s.x);
                         const t1 = { x: s.x + s.radius * Math.cos(baseAngle + angle), y: s.y + s.radius * Math.sin(baseAngle + angle) };
                         const t2 = { x: s.x + s.radius * Math.cos(baseAngle - angle), y: s.y + s.radius * Math.sin(baseAngle - angle) };
-                        addCandidate(t1.x, t1.y, 'tan');
-                        addCandidate(t2.x, t2.y, 'tan');
+                        addCandidate(t1.x, t1.y, 'tan', basePoint);
+                        addCandidate(t2.x, t2.y, 'tan', basePoint);
                     }
                 }
                 if (options.nearest) {
@@ -2003,8 +2028,8 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
                 }
                 if (options.perpendicular && basePoint) {
                     const angle = Math.atan2(basePoint.y - s.y, basePoint.x - s.x);
-                    addCandidate(s.x + s.radius * Math.cos(angle), s.y + s.radius * Math.sin(angle), 'perp');
-                    addCandidate(s.x - s.radius * Math.cos(angle), s.y - s.radius * Math.sin(angle), 'perp');
+                    addCandidate(s.x + s.radius * Math.cos(angle), s.y + s.radius * Math.sin(angle), 'perp', basePoint);
+                    addCandidate(s.x - s.radius * Math.cos(angle), s.y - s.radius * Math.sin(angle), 'perp', basePoint);
                 }
                 if (options.nearest) {
                     let angle = Math.atan2(p.y - s.y, p.x - s.x);
@@ -2034,7 +2059,7 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
                         if (options.center) addCandidate(arc.centerX, arc.centerY, 'cen');
                         if (options.perpendicular && basePoint) {
                             const angle = Math.atan2(basePoint.y - arc.centerX, basePoint.x - arc.centerY);
-                            addCandidate(arc.centerX + arc.r * Math.cos(angle), arc.centerY + arc.r * Math.sin(angle), 'perp');
+                            addCandidate(arc.centerX + arc.r * Math.cos(angle), arc.centerY + arc.r * Math.sin(angle), 'perp', basePoint);
                         }
                         if (options.midpoint) {
                             let sA = arc.startAngle, eA = arc.endAngle;
@@ -2061,7 +2086,7 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
                         if (options.midpoint) addCandidate((pt.x + pt2.x) / 2, (pt.y + pt2.y) / 2, 'mid');
                         if (options.perpendicular && basePoint) {
                             const perp = projectPointOnLine(basePoint, pt, pt2);
-                            addCandidate(perp.x, perp.y, 'perp');
+                            addCandidate(perp.x, perp.y, 'perp', basePoint);
                         }
                         if (options.nearest) {
                             const near = projectPointOnLine(p, pt, pt2);
@@ -2093,7 +2118,7 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
                     for(let i=0; i<4; i++) {
                         const p1 = corners[i], p2 = corners[(i+1)%4];
                         const perp = projectPointOnLine(basePoint, p1, p2);
-                        addCandidate(perp.x, perp.y, 'perp');
+                        addCandidate(perp.x, perp.y, 'perp', basePoint);
                     }
                 }
                 if (options.center || options.gcenter) addCandidate(s.x + s.width/2, s.y + s.height/2, 'gcen');
@@ -2157,13 +2182,26 @@ export const findBestSnap = (p: Point, shapes: Shape[], options: SnapOptions, ts
     // --- 4. FINALIZE ---
     if (candidates.length === 0) return null;
 
-    // Priority sorting: Highest priority first, then closest distance
-    candidates.sort((a, b) => {
-        const pa = SNAP_PRIORITY[a.type] || 99;
-        const pb = SNAP_PRIORITY[b.type] || 99;
-        if (pa !== pb) return pa - pb;
-        return distance(p, a) - distance(p, b);
-    });
+    if (isTouch) {
+        // Weighted scoring for touch interactions (combine snap type priority with screen-pixel distance)
+        candidates.sort((a, b) => {
+            const pa = SNAP_PRIORITY[a.type] || 99;
+            const pb = SNAP_PRIORITY[b.type] || 99;
+            const distA = distance(p, a) * ts; 
+            const distB = distance(p, b) * ts;
+            const scoreA = pa * 12 + distA;
+            const scoreB = pb * 12 + distB;
+            return scoreA - scoreB;
+        });
+    } else {
+        // Priority sorting: Highest priority first, then closest distance
+        candidates.sort((a, b) => {
+            const pa = SNAP_PRIORITY[a.type] || 99;
+            const pb = SNAP_PRIORITY[b.type] || 99;
+            if (pa !== pb) return pa - pb;
+            return distance(p, a) - distance(p, b);
+        });
+    }
 
     return candidates[0];
 };
@@ -2438,3 +2476,534 @@ export const filletLines = (s1: LineShape, s2: LineShape, radius: number): { l1:
         arc
     };
 };
+
+export const cleanupWallSegments = (shapes: Shape[]): Shape[] => {
+  // Deep clone shapes to avoid state mutations
+  const results = JSON.parse(JSON.stringify(shapes)) as Shape[];
+  const tolerance = 600; // Snap/trim intersection tolerance in mm (standard thickness is 230)
+
+  // We want to run this iteratively to allow corners to join and resolve cascade-wise
+  let modified = true;
+  let iterations = 0;
+  const MAX_ITERATIONS = 5;
+
+  while (modified && iterations < MAX_ITERATIONS) {
+    modified = false;
+    iterations++;
+
+    // Gather all line/dline segment endpoints and build references to edit their coordinate sources
+    interface EditableSegment {
+      shapeIndex: number;
+      segmentIndex: number; 
+      getStart: () => Point;
+      getEnd: () => Point;
+      setStart: (p: Point) => void;
+      setEnd: (p: Point) => void;
+    }
+
+    const segments: EditableSegment[] = [];
+
+    results.forEach((shape, sIdx) => {
+      if (!shape) return;
+      if (shape.type === 'line') {
+        const l = shape as any;
+        segments.push({
+          shapeIndex: sIdx,
+          segmentIndex: 0,
+          getStart: () => ({ x: l.x1, y: l.y1 }),
+          getEnd: () => ({ x: l.x2, y: l.y2 }),
+          setStart: (p) => { l.x1 = p.x; l.y1 = p.y; },
+          setEnd: (p) => { l.x2 = p.x; l.y2 = p.y; }
+        });
+      } else if (shape.type === 'dline') {
+        const dl = shape as any;
+        if (dl.points && dl.points.length > 1) {
+          for (let i = 0; i < dl.points.length - 1; i++) {
+            const idx = i;
+            segments.push({
+              shapeIndex: sIdx,
+              segmentIndex: idx,
+              getStart: () => dl.points[idx],
+              getEnd: () => dl.points[idx + 1],
+              setStart: (p) => { dl.points[idx] = p; },
+              setEnd: (p) => { dl.points[idx + 1] = p; }
+            });
+          }
+        }
+      }
+    });
+
+    const isPointOnSegment = (p: Point, s1: Point, s2: Point): boolean => {
+      const d_len = distance(s1, s2);
+      if (d_len < 0.1) return false;
+      const d_p1 = distance(p, s1);
+      const d_p2 = distance(p, s2);
+      return Math.abs((d_p1 + d_p2) - d_len) < 1.0; // Point is on segment within a 1 unit tolerance
+    };
+
+    // Pairwise check segments
+    for (let i = 0; i < segments.length; i++) {
+      const seg1 = segments[i];
+      const p1 = seg1.getStart();
+      const p2 = seg1.getEnd();
+
+      for (let j = i + 1; j < segments.length; j++) {
+        const seg2 = segments[j];
+        if (seg1.shapeIndex === seg2.shapeIndex) continue; // Skip same shape
+
+        const p3 = seg2.getStart();
+        const p4 = seg2.getEnd();
+
+        // Check if infinite lines of these two segments intersect
+        const P = getIntersection(p1, p2, p3, p4, true);
+        if (!P) continue;
+
+        const d1_start = distance(P, p1);
+        const d1_end = distance(P, p2);
+        const d2_start = distance(P, p3);
+        const d2_end = distance(P, p4);
+
+        const closeToSeg1_start = d1_start < tolerance;
+        const closeToSeg1_end = d1_end < tolerance;
+        const closeToSeg2_start = d2_start < tolerance;
+        const closeToSeg2_end = d2_end < tolerance;
+
+        // A. CORNER JOIN (L-Joint / Miter)
+        if ((closeToSeg1_start || closeToSeg1_end) && (closeToSeg2_start || closeToSeg2_end)) {
+          let updated = false;
+          if (closeToSeg1_start && d1_start > 0.01) {
+            seg1.setStart(P);
+            updated = true;
+          } else if (closeToSeg1_end && d1_end > 0.01) {
+            seg1.setEnd(P);
+            updated = true;
+          }
+
+          if (closeToSeg2_start && d2_start > 0.01) {
+            seg2.setStart(P);
+            updated = true;
+          } else if (closeToSeg2_end && d2_end > 0.01) {
+            seg2.setEnd(P);
+            updated = true;
+          }
+
+          if (updated) {
+            modified = true;
+            break;
+          }
+        }
+
+        // B. T-JUNCTION JOIN / TRIM (T-Joint)
+        const onSeg2 = isPointOnSegment(P, p3, p4);
+        if (onSeg2 && (closeToSeg1_start || closeToSeg1_end)) {
+          let updated = false;
+          if (closeToSeg1_start && d1_start > 0.01) {
+            seg1.setStart(P);
+            updated = true;
+          } else if (closeToSeg1_end && d1_end > 0.01) {
+            seg1.setEnd(P);
+            updated = true;
+          }
+
+          if (updated) {
+            modified = true;
+            break;
+          }
+        }
+
+        // Reciprocally, check if intersection is on seg1, and close to an endpoint of seg2
+        const onSeg1 = isPointOnSegment(P, p1, p2);
+        if (onSeg1 && (closeToSeg2_start || closeToSeg2_end)) {
+          let updated = false;
+          if (closeToSeg2_start && d2_start > 0.01) {
+            seg2.setStart(P);
+            updated = true;
+          } else if (closeToSeg2_end && d2_end > 0.01) {
+            seg2.setEnd(P);
+            updated = true;
+          }
+
+          if (updated) {
+            modified = true;
+            break;
+          }
+        }
+      }
+      if (modified) break;
+    }
+  }
+
+  return results;
+};
+
+export interface PurgeableInfo {
+  layers: string[];
+  blocks: string[];
+  dimStyles: string[];
+}
+
+export const getPurgeableItems = (
+  layers: Record<string, Shape[]>,
+  blocks: Record<string, BlockDefinition>,
+  settings: AppSettings
+): PurgeableInfo => {
+  const purgeableLayers: string[] = [];
+  const purgeableBlocks: string[] = [];
+  const purgeableStyles: string[] = [];
+
+  const allShapes = Object.values(layers).flat();
+
+  const usedBlockIds = new Set<string>();
+  allShapes.forEach(s => {
+    if (s.type === 'block') {
+      usedBlockIds.add(s.blockId);
+    }
+  });
+
+  const usedStyleIds = new Set<string>();
+  allShapes.forEach(s => {
+    if (s.type === 'dimension' && s.styleId) {
+      usedStyleIds.add(s.styleId);
+    }
+  });
+
+  Object.keys(blocks).forEach(blockId => {
+    if (!usedBlockIds.has(blockId)) {
+      purgeableBlocks.push(blockId);
+    }
+  });
+
+  Object.keys(layers).forEach(layerName => {
+    const isCurrent = layerName === settings.currentLayer;
+    const isSystem = ['0', 'defpoints'].includes(layerName.toLowerCase());
+    if (!isCurrent && !isSystem && layers[layerName].length === 0) {
+      purgeableLayers.push(layerName);
+    }
+  });
+
+  if (settings.dimStyles) {
+    Object.keys(settings.dimStyles).forEach(styleId => {
+      const isDefault = styleId === 'standard' || styleId === 'default';
+      const isActive = styleId === settings.activeDimStyle;
+      if (!isDefault && !isActive && !usedStyleIds.has(styleId)) {
+        purgeableStyles.push(styleId);
+      }
+    });
+  }
+
+  return {
+    layers: purgeableLayers,
+    blocks: purgeableBlocks,
+    dimStyles: purgeableStyles
+  };
+};
+
+export const getPointsAlongPath = (path: Shape, spacing: number, count?: number): Point[] => {
+    const points: Point[] = [];
+    let segments: { p1: Point, p2: Point }[] = [];
+
+    if (path.type === 'line') {
+        segments.push({ p1: { x: path.x1, y: path.y1 }, p2: { x: path.x2, y: path.y2 } });
+    } else if (path.type === 'pline' || path.type === 'polygon' || path.type === 'poly') {
+        const pts = path.points || [];
+        if (pts.length > 1) {
+            for (let i = 0; i < pts.length - 1; i++) {
+                segments.push({ p1: pts[i], p2: pts[i + 1] });
+            }
+            if (path.type === 'polygon' || (path as any).closed) {
+                segments.push({ p1: pts[pts.length - 1], p2: pts[0] });
+            }
+        }
+    } else if (path.type === 'arc') {
+        const radius = path.radius;
+        const startAng = path.startAngle;
+        let endAng = path.endAngle;
+        const cclockwise = !!path.counterClockwise;
+        if (cclockwise && endAng < startAng) endAng += Math.PI * 2;
+        const totalAngle = Math.abs(endAng - startAng);
+        const arcLength = radius * totalAngle;
+        const actualCount = count !== undefined ? count : Math.floor(arcLength / spacing) + 1;
+        const stepAngle = totalAngle / Math.max(1, actualCount - 1);
+        
+        for (let i = 0; i < actualCount; i++) {
+            const a = startAng + i * stepAngle * (cclockwise ? 1 : -1);
+            points.push({
+                x: path.x + radius * Math.cos(a),
+                y: path.y + radius * Math.sin(a)
+            });
+        }
+        return points;
+    } else if (path.type === 'spline') {
+        const pts = path.points || [];
+        if (pts.length > 1) {
+            for (let i = 0; i < pts.length - 1; i++) {
+                segments.push({ p1: pts[i], p2: pts[i + 1] });
+            }
+        }
+    }
+
+    if (segments.length === 0) return [];
+
+    const segmentLengths = segments.map(seg => Math.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y));
+    const totalPathLength = segmentLengths.reduce((a, b) => a + b, 0);
+
+    if (totalPathLength < 0.1) return [];
+
+    const numPoints = count !== undefined ? count : Math.floor(totalPathLength / spacing) + 1;
+    const actualSpacing = count !== undefined ? (totalPathLength / Math.max(1, count - 1)) : spacing;
+
+    for (let i = 0; i < numPoints; i++) {
+        const targetDist = i * actualSpacing;
+        if (targetDist > totalPathLength + 0.01) break;
+
+        let accumulated = 0;
+        let found = false;
+        for (let k = 0; k < segments.length; k++) {
+            const len = segmentLengths[k];
+            if (accumulated + len >= targetDist - 0.01) {
+                const ratio = len > 0.001 ? (targetDist - accumulated) / len : 0;
+                const p1 = segments[k].p1;
+                const p2 = segments[k].p2;
+                points.push({
+                    x: p1.x + (p2.x - p1.x) * ratio,
+                    y: p1.y + (p2.y - p1.y) * ratio
+                });
+                found = true;
+                break;
+            }
+            accumulated += len;
+        }
+        if (!found && segments.length > 0) {
+            points.push(segments[segments.length - 1].p2);
+        }
+    }
+
+    return points;
+};
+
+/**
+ * Merges overlapping, collinear lines and converts continuous, touching line segments 
+ * into continuous single polylines.
+ */
+export const mergeOverlappingAndContinuousLines = (shapes: Shape[]): Shape[] => {
+  // Let's filter out only lines
+  const lines = shapes.filter(s => s && s.type === 'line' && !(s as any).isPreview) as LineShape[];
+  const nonLines = shapes.filter(s => !s || s.type !== 'line' || (s as any).isPreview);
+
+  if (lines.length < 2) return shapes;
+
+  const used = new Set<string>();
+  const mergedLines: LineShape[] = [];
+
+  // Helper: check if two segments are collinear and overlapping
+  const isCollinearAndOverlapping = (l1: LineShape, l2: LineShape) => {
+    // Check orientation similarity using cross product
+    const dx1 = l1.x2 - l1.x1;
+    const dy1 = l1.y2 - l1.y1;
+    const dx2 = l2.x2 - l2.x1;
+    const dy2 = l2.y2 - l2.y1;
+    
+    const d1 = Math.hypot(dx1, dy1);
+    const d2 = Math.hypot(dx2, dy2);
+    if (d1 < 1e-4 || d2 < 1e-4) return false;
+
+    // Cross product to check parallel
+    const crossPr = Math.abs(dx1 * dy2 - dy1 * dx2);
+    if (crossPr / (d1 * d2) > 0.05) return false; // not parallel enough
+
+    // Check distance between line1 and starting point of line2
+    const num = Math.abs((l1.x2 - l1.x1) * (l1.y1 - l2.y1) - (l1.x1 - l2.x1) * (l1.y2 - l1.y1));
+    const distToLine = num / d1;
+    if (distToLine > 0.5) return false; // too far apart to be same line
+
+    // Project l2 points onto l1 direction vector
+    const ux = dx1 / d1;
+    const uy = dy1 / d1;
+
+    const p3_proj = (l2.x1 - l1.x1) * ux + (l2.y1 - l1.y1) * uy;
+    const p4_proj = (l2.x2 - l1.x1) * ux + (l2.y2 - l1.y1) * uy;
+
+    const min1 = 0, max1 = d1;
+    const min2 = Math.min(p3_proj, p4_proj);
+    const max2 = Math.max(p3_proj, p4_proj);
+
+    // Overlap if range intersection is non-empty
+    const overlap = Math.max(0, Math.min(max1, max2) - Math.max(min1, min2));
+    const touch = Math.abs(Math.min(max1, max2) - Math.max(min1, min2)) < 0.2; // touches on endpoint
+
+    return (overlap > 1e-3 || touch);
+  };
+
+  // Merge overlapping & collinear lines together
+  for (let i = 0; i < lines.length; i++) {
+    if (used.has(lines[i].id)) continue;
+    let currentLine = { ...lines[i] };
+    used.add(currentLine.id);
+
+    let extended = true;
+    while (extended) {
+      extended = false;
+      for (let j = 0; j < lines.length; j++) {
+        if (used.has(lines[j].id)) continue;
+        if (isCollinearAndOverlapping(currentLine, lines[j])) {
+          // Merge currentLine and lines[j] by choosing the extreme points
+          const dx = currentLine.x2 - currentLine.x1;
+          const dy = currentLine.y2 - currentLine.y1;
+          const len = Math.hypot(dx, dy);
+          const ux = dx / len;
+          const uy = dy / len;
+
+          const pts = [
+            { x: currentLine.x1, y: currentLine.y1 },
+            { x: currentLine.x2, y: currentLine.y2 },
+            { x: lines[j].x1, y: lines[j].y1 },
+            { x: lines[j].x2, y: lines[j].y2 }
+          ];
+
+          // Sort points along the line vector direction
+          pts.sort((a, b) => {
+            const projA = (a.x - currentLine.x1) * ux + (a.y - currentLine.y1) * uy;
+            const projB = (b.x - currentLine.x1) * ux + (b.y - currentLine.y1) * uy;
+            return projA - projB;
+          });
+
+          currentLine.x1 = pts[0].x;
+          currentLine.y1 = pts[0].y;
+          currentLine.x2 = pts[3].x;
+          currentLine.y2 = pts[3].y;
+
+          used.add(lines[j].id);
+          extended = true;
+        }
+      }
+    }
+    mergedLines.push(currentLine);
+  }
+
+  // Now, try to connect matching, continuous, touching line segments into continuous polylines (pline)!
+  const plinesGenerated: Shape[] = [];
+  const plineUsed = new Set<string>();
+
+  for (let i = 0; i < mergedLines.length; i++) {
+    if (plineUsed.has(mergedLines[i].id)) continue;
+    
+    // Attempt to chain continuous segments
+    const chain: Point[] = [{ x: mergedLines[i].x1, y: mergedLines[i].y1 }, { x: mergedLines[i].x2, y: mergedLines[i].y2 }];
+    plineUsed.add(mergedLines[i].id);
+
+    let matched = true;
+    while (matched) {
+      matched = false;
+      const endPt = chain[chain.length - 1];
+      const startPt = chain[0];
+
+      for (let j = 0; j < mergedLines.length; j++) {
+        if (plineUsed.has(mergedLines[j].id)) continue;
+
+        const candidateStart = { x: mergedLines[j].x1, y: mergedLines[j].y1 };
+        const candidateEnd = { x: mergedLines[j].x2, y: mergedLines[j].y2 };
+
+        // Test end of chain to candidate
+        const d_end_start = Math.hypot(endPt.x - candidateStart.x, endPt.y - candidateStart.y);
+        const d_end_end = Math.hypot(endPt.x - candidateEnd.x, endPt.y - candidateEnd.y);
+        
+        // Test start of chain to candidate
+        const d_start_start = Math.hypot(startPt.x - candidateStart.x, startPt.y - candidateStart.y);
+        const d_start_end = Math.hypot(startPt.x - candidateEnd.x, startPt.y - candidateEnd.y);
+
+        if (d_end_start < 0.2) {
+          chain.push(candidateEnd);
+          plineUsed.add(mergedLines[j].id);
+          matched = true;
+        } else if (d_end_end < 0.2) {
+          chain.push(candidateStart);
+          plineUsed.add(mergedLines[j].id);
+          matched = true;
+        } else if (d_start_start < 0.2) {
+          chain.unshift(candidateEnd);
+          plineUsed.add(mergedLines[j].id);
+          matched = true;
+        } else if (d_start_end < 0.2) {
+          chain.unshift(candidateStart);
+          plineUsed.add(mergedLines[j].id);
+          matched = true;
+        }
+
+        if (matched) break;
+      }
+    }
+
+    if (chain.length > 2) {
+      // Create a nice single continuous polyline shape
+      const pline: Shape = {
+        id: generateId(),
+        type: 'pline',
+        layer: mergedLines[i].layer || '0',
+        color: mergedLines[i].color || '#ffffff',
+        points: chain,
+        closed: false
+      } as any;
+      plinesGenerated.push(pline);
+    } else {
+      // Keep it as a simple line
+      plinesGenerated.push(mergedLines[i]);
+    }
+  }
+
+  return [...nonLines, ...plinesGenerated];
+};
+
+/**
+ * Stabilizes floating-point calculations to avoid epsilon-level drift and grid/coordinate jitter.
+ */
+export const stabilizeFloat = (val: number, decimals: number = 7): number => {
+  if (isNaN(val) || !isFinite(val)) return 0;
+  const shift = Math.pow(10, decimals);
+  return Math.round(val * shift) / shift;
+};
+
+/**
+ * Sanitizes point coordinates using the stabilizeFloat function.
+ */
+export const stabilizePoint = (p: Point, decimals: number = 7): Point => {
+  return {
+    x: stabilizeFloat(p.x, decimals),
+    y: stabilizeFloat(p.y, decimals)
+  };
+};
+
+/**
+ * Accepts a list of planned rooms and automatically generates corresponding MText entities at the center of each room with labels
+ */
+export const generateRoomLabelsMText = (
+  rooms: { name: string; x1: number; y1: number; x2: number; y2: number; area?: number }[],
+  layer: string = 'A-TEXT'
+): Shape[] => {
+  if (!rooms) return [];
+  return rooms.map(room => {
+    const cx = Math.round((room.x1 + room.x2) / 2);
+    const cy = Math.round((room.y1 + room.y2) / 2);
+    const w = Math.round(Math.abs(room.x2 - room.x1));
+    const h = Math.round(Math.abs(room.y2 - room.y1));
+    
+    // Label content: Room Name, dimensions (m), area
+    const rmW = (w / 1000).toFixed(1);
+    const rmH = (h / 1000).toFixed(1);
+    const areaVal = room.area !== undefined ? room.area : Number(((w * h) / 1000000).toFixed(2));
+    const content = `${room.name}\\n${rmW}m × ${rmH}m\\n${areaVal} m²`;
+
+    return {
+      id: generateId(),
+      type: 'mtext',
+      layer,
+      x: cx,
+      y: cy,
+      width: Math.max(100, Math.min(w - 200, 3000)),
+      size: 200, // Legible font size in mm for standard drawings
+      content,
+      justification: 'center',
+    } as any;
+  });
+};
+
+

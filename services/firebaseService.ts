@@ -204,3 +204,50 @@ export const onAuthChange = (callback: (user: User | null) => void) => {
     return () => {};
   }
 };
+
+import { collection, query, onSnapshot } from 'firebase/firestore';
+
+/**
+ * Syncs the local user's live cursor and selection status to Firestore
+ */
+export const syncLiveCursor = async (userId: string, data: { name: string; color: string; x: number; y: number; selection: string[] }) => {
+  const { db } = initializeFirebase();
+  if (!db) return;
+  const path = `live_cursors/${userId}`;
+  const cursorRef = doc(db, path);
+  try {
+    await setDoc(cursorRef, {
+      ...data,
+      userId,
+      lastActive: Date.now()
+    }, { merge: true });
+  } catch (error) {
+    // Non-blocking for offline/non-auth users
+  }
+};
+
+/**
+ * Listens to active collaborative sessions / live cursors
+ */
+export const subscribeToLiveCursors = (onUpdate: (cursors: any[]) => void) => {
+  const { db } = initializeFirebase();
+  if (!db) return () => {};
+  const path = 'live_cursors';
+  try {
+    const q = query(collection(db, path));
+    return onSnapshot(q, (snapshot) => {
+      const cursors: any[] = [];
+      snapshot.forEach(dDoc => {
+        const d = dDoc.data();
+        if (Date.now() - d.lastActive < 60000) {
+          cursors.push(d);
+        }
+      });
+      onUpdate(cursors);
+    }, (error) => {
+      console.warn("Collab subscription error:", error);
+    });
+  } catch (e) {
+    return () => {};
+  }
+};

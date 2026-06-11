@@ -128,9 +128,7 @@ const HatchPatternSelector: React.FC<HatchPatternSelectorProps> = ({ onSelect, o
       </div>
     </div>
   );
-};
-
-const HatchPreview: React.FC<{ pattern: string }> = ({ pattern }) => {
+};const HatchPreview: React.FC<{ pattern: string }> = ({ pattern }) => {
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
 
   React.useEffect(() => {
@@ -139,10 +137,14 @@ const HatchPreview: React.FC<{ pattern: string }> = ({ pattern }) => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Reset
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const size = canvas.width;
+    const spacing = 16;
+
+    // Clear background
+    ctx.fillStyle = '#050506';
+    ctx.fillRect(0, 0, size, size);
     
-    // Draw background grid
+    // Draw background cad grid inside preview
     ctx.strokeStyle = 'rgba(255,255,255,0.03)';
     ctx.lineWidth = 1;
     const step = 20;
@@ -151,18 +153,43 @@ const HatchPreview: React.FC<{ pattern: string }> = ({ pattern }) => {
         ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(canvas.width, i); ctx.stroke();
     }
 
+    // Define a beautiful closed boundary shape in the center (combining an arc and lines for a classic mechanical component feel)
+    const centerX = size / 2;
+    const centerY = size / 2;
+    const radius = size * 0.35;
+
+    const defineClosedShape = () => {
+      ctx.beginPath();
+      // Draw a mechanical flange/polygon structure
+      const points = 6;
+      for (let k = 0; k < points; k++) {
+        const angle = (k * Math.PI * 2) / points - Math.PI / 2;
+        const r = k % 2 === 0 ? radius : radius * 0.85; // alternate teeth
+        const x = centerX + Math.cos(angle) * r;
+        const y = centerY + Math.sin(angle) * r;
+        if (k === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+    };
+
+    // Save context for clipping mask
+    ctx.save();
+    defineClosedShape();
+    ctx.clip();
+
+    // Fill background of the closed shape
+    ctx.fillStyle = '#0c0c0e';
+    ctx.fill();
+
     if (pattern === 'solid') {
-      ctx.fillStyle = '#00bcd4';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      return;
-    }
+      ctx.fillStyle = 'rgba(0, 188, 212, 0.9)';
+      ctx.fill();
+    } else {
+      ctx.strokeStyle = '#00bcd4';
+      ctx.lineWidth = 1.2;
 
-    ctx.strokeStyle = '#00bcd4';
-    ctx.lineWidth = 1.5;
-    const size = canvas.width;
-    const spacing = 20;
-
-    if (pattern.startsWith('ansi')) {
+      if (pattern.startsWith('ansi')) {
         const s = pattern === 'ansi31' ? 8 : (pattern === 'ansi32' ? 12 : 10);
         for (let i = -size; i < size * 2; i += s) {
             ctx.beginPath();
@@ -180,8 +207,8 @@ const HatchPreview: React.FC<{ pattern: string }> = ({ pattern }) => {
                 ctx.stroke();
             }
         }
-    } else if (pattern === 'brick') {
-        const h = 15;
+      } else if (pattern === 'brick') {
+        const h = 12;
         for (let i = 0; i < size; i += h) {
             ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(size, i); ctx.stroke();
             let shift = (Math.floor(i/h) % 2 === 0) ? 0 : spacing/2;
@@ -189,7 +216,7 @@ const HatchPreview: React.FC<{ pattern: string }> = ({ pattern }) => {
                 ctx.beginPath(); ctx.moveTo(x, i); ctx.lineTo(x, i + h); ctx.stroke();
             }
         }
-    } else if (pattern === 'dots' || pattern === 'sand') {
+      } else if (pattern === 'dots' || pattern === 'sand') {
         ctx.fillStyle = '#00bcd4';
         const s = pattern === 'dots' ? 10 : 6;
         for (let i = 0; i < size; i += s) {
@@ -202,7 +229,7 @@ const HatchPreview: React.FC<{ pattern: string }> = ({ pattern }) => {
                 }
             }
         }
-    } else if (pattern === 'grass') {
+      } else if (pattern === 'grass') {
         for (let i = 0; i < size; i += spacing) {
             for (let j = 0; j < size; j += spacing) {
                 const noiseX = Math.abs(Math.sin(i * 45 + j * 67)) * spacing;
@@ -216,7 +243,7 @@ const HatchPreview: React.FC<{ pattern: string }> = ({ pattern }) => {
                 ctx.stroke();
             }
         }
-    } else if (pattern === 'stars') {
+      } else if (pattern === 'stars') {
         for (let i = 0; i < size; i += 30) {
             for (let j = 0; j < size; j += 30) {
                 const px = i + 15, py = j + 15, r = 5;
@@ -230,8 +257,8 @@ const HatchPreview: React.FC<{ pattern: string }> = ({ pattern }) => {
                 ctx.stroke();
             }
         }
-    } else {
-        // Generic diagonal for others
+      } else {
+        // Generic diagonal or grid for others
         const angle = pattern === 'net' || pattern === 'grid' ? 0 : Math.PI/4;
         ctx.save();
         ctx.translate(size/2, size/2);
@@ -244,12 +271,25 @@ const HatchPreview: React.FC<{ pattern: string }> = ({ pattern }) => {
             }
         }
         ctx.restore();
+      }
     }
-    
+
+    // Restore context (uncutting mask)
+    ctx.restore();
+
+    // Draw solid high-contrast neon cyan outline on the closed boundary shape
+    ctx.save();
+    ctx.strokeStyle = '#00f0ff';
+    ctx.lineWidth = 2.5;
+    ctx.shadowColor = '#00bcd4';
+    ctx.shadowBlur = 8;
+    defineClosedShape();
     ctx.stroke();
+    ctx.restore();
+
   }, [pattern]);
 
-  return <canvas ref={canvasRef} width={400} height={400} className="w-full h-full opacity-40 group-hover:opacity-60 transition-opacity" />;
+  return <canvas ref={canvasRef} width={400} height={400} className="w-full h-full opacity-90 group-hover:opacity-100 transition-opacity" />;
 };
 
 export default HatchPatternSelector;

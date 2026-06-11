@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Square, Triangle, Circle, Target, Hash, MousePointer2, Zap, LayoutGrid, CheckSquare, XSquare, Ruler, Settings2, Globe, Equal, Maximize, Compass, Pentagon, Scissors, Palette } from 'lucide-react';
+import { X, Square, Triangle, Circle, Target, Hash, MousePointer2, Zap, LayoutGrid, CheckSquare, XSquare, Ruler, Settings2, Globe, Equal, Maximize, Compass, Pentagon, Scissors, Palette, Users } from 'lucide-react';
 import { SnapOptions, AppSettings } from '../types';
 
 interface DraftingSettingsProps {
@@ -13,7 +13,7 @@ interface DraftingSettingsProps {
 
 const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, onChange, onSettingsChange, onClose }) => {
   const [pos, setPos] = useState({ x: 0, y: 0 });
-  const [activeTab, setActiveTab] = useState<'snaps' | 'grid' | 'units' | 'polar' | 'view'>('snaps');
+  const [activeTab, setActiveTab] = useState<'snaps' | 'grid' | 'units' | 'polar' | 'view' | 'constraints'>('snaps');
   const [isInteracting, setIsInteracting] = useState(false);
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
@@ -82,18 +82,19 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
     { id: 'grid', label: 'Grid', icon: LayoutGrid },
     { id: 'view', label: 'View', icon: Settings2 },
     { id: 'units', label: 'Units', icon: Globe },
-    { id: 'polar', label: 'Polar', icon: Compass }
+    { id: 'polar', label: 'Polar', icon: Compass },
+    { id: 'constraints', label: 'Constraints', icon: Equal }
   ];
 
   return (
     <div 
-      className="relative glass-panel w-full sm:w-[480px] sm:max-w-[95vw] h-full sm:h-auto sm:max-h-[85vh] sm:rounded-[2.5rem] shadow-[0_50px_120px_rgba(0,0,0,0.95)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-300 border border-white/10"
-      style={{ transform: window.innerWidth > 640 ? `translate(${pos.x}px, ${pos.y}px)` : undefined, zIndex: 160 }}
+      className="relative glass-panel w-[94vw] sm:w-[480px] sm:max-w-[95vw] h-[82vh] sm:h-auto sm:max-h-[85vh] rounded-3xl shadow-[0_50px_120px_rgba(0,0,0,0.95)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-300 border border-white/10"
+      style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, zIndex: 160 }}
     >
       <div 
-        className="flex justify-between items-center px-8 py-5 border-b border-white/5 bg-[#1a1a1c] sm:cursor-grab active:sm:cursor-grabbing touch-none shrink-0"
-        onMouseDown={e => window.innerWidth > 640 && startDrag(e.clientX, e.clientY)}
-        onTouchStart={e => window.innerWidth > 640 && e.touches.length > 0 && startDrag(e.touches[0].clientX, e.touches[0].clientY)}
+        className="flex justify-between items-center px-8 py-5 border-b border-white/5 bg-[#1a1a1c] cursor-grab active:cursor-grabbing touch-none shrink-0"
+        onMouseDown={e => startDrag(e.clientX, e.clientY)}
+        onTouchStart={e => e.touches.length > 0 && startDrag(e.touches[0].clientX, e.touches[0].clientY)}
       >
         <div className="flex items-center gap-3 pointer-events-none">
             <div className="w-9 h-9 rounded-xl bg-cyan-500/10 flex items-center justify-center text-cyan-400">
@@ -150,6 +151,62 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
                 </div>
             )}
 
+            {activeTab === 'constraints' && (
+                <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
+                    <div className="space-y-4">
+                        <label className="text-[8px] font-black text-neutral-600 uppercase tracking-[0.25em] px-1">Automatic Relations</label>
+                        <button 
+                            type="button"
+                            onClick={() => onSettingsChange({ geometricConstraintsEnabled: !settings.geometricConstraintsEnabled })} 
+                            className={`w-full flex items-center justify-between p-5 rounded-2xl border transition-all cursor-pointer ${settings.geometricConstraintsEnabled ? 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400' : 'bg-neutral-900/50 border-white/5 text-neutral-600'}`}
+                         >
+                            <div className="flex items-center gap-4">
+                                <Equal size={20} />
+                                <div className="flex flex-col items-start">
+                                    <span className="text-[10px] font-black uppercase tracking-widest">Auto Constraints</span>
+                                    <span className="text-[7.5px] font-bold opacity-65 uppercase">Influence new line segments</span>
+                                </div>
+                            </div>
+                            <div className={`w-10 h-5 rounded-full relative transition-all ${settings.geometricConstraintsEnabled ? 'bg-cyan-500' : 'bg-neutral-800'}`}>
+                                <div className={`absolute top-1 w-3 h-3 rounded-full bg-white shadow-lg transition-all ${settings.geometricConstraintsEnabled ? 'right-1' : 'left-1'}`} />
+                            </div>
+                         </button>
+                    </div>
+
+                    <div className="bg-neutral-950/40 border border-white/5 rounded-2xl p-5 space-y-4">
+                        <div className="text-[8px] font-black text-neutral-400 uppercase tracking-wider">Active Rule Engines</div>
+                        <div className="space-y-2.5">
+                            <div className="flex items-center justify-between opacity-80 pl-2">
+                                <div className="flex items-center gap-2 text-[9px] font-bold text-neutral-200">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0" />
+                                    <span>PERPENDICULARITY</span>
+                                </div>
+                                <span className="text-[7.5px] font-bold text-neutral-500 uppercase">90° SNAP INFLUENCE</span>
+                            </div>
+                            <div className="flex items-center justify-between opacity-80 pl-2">
+                                <div className="flex items-center gap-2 text-[9px] font-bold text-neutral-200">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0" />
+                                    <span>PARALLELISM</span>
+                                </div>
+                                <span className="text-[7.5px] font-bold text-neutral-500 uppercase">0° / 180° RELATIONS</span>
+                            </div>
+                            <div className="flex items-center justify-between opacity-80 pl-2">
+                                <div className="flex items-center gap-2 text-[9px] font-bold text-neutral-200">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-yellow-500 shrink-0" />
+                                    <span>HORIZONTAL / VERTICAL</span>
+                                </div>
+                                <span className="text-[7.5px] font-bold text-neutral-500 uppercase">AXIAL AUTO-ALIGNMENT</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="p-4 bg-[#141416] border border-white/5 rounded-xl text-[8px] text-neutral-500 font-bold uppercase tracking-wider leading-relaxed">
+                        <span className="text-cyan-400 font-extrabold block mb-1">PRO-DRAFTING TIP</span>
+                        When enabled, drawing lines near perpendicular/parallel angles to nearby shapes automatically locks them to exact constraints.
+                    </div>
+                </div>
+            )}
+
             {activeTab === 'view' && (
                <div className="space-y-8 animate-in slide-in-from-right-4 duration-300">
                  <div className="space-y-4">
@@ -172,27 +229,34 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
 
                   <div className="space-y-4">
                     <label className="text-[8px] font-black text-neutral-600 uppercase tracking-[0.25em] px-1">Visibility Toggles</label>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                        <button 
                         onClick={() => onSettingsChange({ showLineWeights: !settings.showLineWeights })} 
-                        className={`p-3.5 rounded-2xl border flex flex-col items-center gap-2 transition-all ${settings.showLineWeights ? 'bg-cyan-500/5 border-cyan-500/10 text-cyan-400' : 'bg-neutral-900/50 border-white/5 text-neutral-600'}`}
+                        className={`p-3 rounded-2xl border flex flex-col items-center gap-1.5 transition-all ${settings.showLineWeights ? 'bg-cyan-500/5 border-cyan-500/10 text-cyan-400' : 'bg-neutral-900/50 border-white/5 text-neutral-600'}`}
                        >
-                          <Ruler size={16} />
-                          <span className="text-[7px] font-black uppercase tracking-widest">Weight</span>
+                          <Ruler size={14} />
+                          <span className="text-[6.5px] font-black uppercase tracking-widest">Weight</span>
                        </button>
                        <button 
                         onClick={() => onSettingsChange({ showHUD: !settings.showHUD })} 
-                        className={`p-3.5 rounded-2xl border flex flex-col items-center gap-2 transition-all ${settings.showHUD ? 'bg-cyan-500/5 border-cyan-500/10 text-cyan-400' : 'bg-neutral-900/50 border-white/5 text-neutral-600'}`}
+                        className={`p-3 rounded-2xl border flex flex-col items-center gap-1.5 transition-all ${settings.showHUD ? 'bg-cyan-500/5 border-cyan-500/10 text-cyan-400' : 'bg-neutral-900/50 border-white/5 text-neutral-600'}`}
                        >
-                          <Settings2 size={16} />
-                          <span className="text-[7px] font-black uppercase tracking-widest">HUD</span>
+                          <Settings2 size={14} />
+                          <span className="text-[6.5px] font-black uppercase tracking-widest">HUD</span>
                        </button>
                        <button 
                         onClick={() => onSettingsChange({ aiSuggestionsEnabled: !settings.aiSuggestionsEnabled })} 
-                        className={`p-3.5 rounded-2xl border flex flex-col items-center gap-2 transition-all ${settings.aiSuggestionsEnabled ? 'bg-indigo-500/5 border-indigo-500/10 text-indigo-400' : 'bg-neutral-900/50 border-white/5 text-neutral-600'}`}
+                        className={`p-3 rounded-2xl border flex flex-col items-center gap-1.5 transition-all ${settings.aiSuggestionsEnabled ? 'bg-indigo-500/5 border-indigo-500/10 text-indigo-400' : 'bg-neutral-900/50 border-white/5 text-neutral-600'}`}
                        >
-                          <Zap size={16} className={settings.aiSuggestionsEnabled ? "animate-pulse" : ""} />
-                          <span className="text-[7px] font-black uppercase tracking-widest">AI SUGGEST</span>
+                          <Zap size={14} className={settings.aiSuggestionsEnabled ? "animate-pulse" : ""} />
+                          <span className="text-[6.5px] font-black uppercase tracking-widest">AI SUGGEST</span>
+                       </button>
+                       <button 
+                        onClick={() => onSettingsChange({ showSimulatedCollaborators: !settings.showSimulatedCollaborators })} 
+                        className={`p-3 rounded-2xl border flex flex-col items-center gap-1.5 transition-all ${settings.showSimulatedCollaborators !== false ? 'bg-cyan-500/5 border-cyan-500/10 text-cyan-400' : 'bg-neutral-900/50 border-white/5 text-neutral-600'}`}
+                       >
+                          <Users size={14} />
+                          <span className="text-[6.5px] font-black uppercase tracking-widest">SIM PEERS</span>
                        </button>
                     </div>
                  </div>
@@ -217,6 +281,27 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
                                 <span className="text-[8px] font-black uppercase tracking-widest">Snap (F9)</span>
                              </button>
                         </div>
+                    </div>
+                    <div className="space-y-4">
+                        <label className="text-[8px] font-black text-neutral-600 uppercase tracking-[0.25em] px-1">Advanced Grid Mode</label>
+                        <button 
+                            type="button"
+                            onClick={() => onSettingsChange({ isometricGrid: !settings.isometricGrid })} 
+                            className={`w-full flex items-between items-center p-5 rounded-2xl border transition-all cursor-pointer ${settings.isometricGrid ? 'bg-[#00bcd4]/10 border-[#00bcd4]/20 text-[#00bcd4]' : 'bg-neutral-900/50 border-white/5 text-neutral-600'}`}
+                         >
+                            <div className="flex items-center gap-4">
+                                <LayoutGrid size={20} className={settings.isometricGrid ? "rotate-45" : ""} />
+                                <div className="flex flex-col items-start text-left">
+                                    <span className="text-[10px] font-black uppercase tracking-widest">Isometric Drafting Grid</span>
+                                    <span className="text-[7.5px] font-bold opacity-65 uppercase">30°/60° plane snap and rendering support</span>
+                                </div>
+                            </div>
+                            <div className="ml-auto">
+                                <div className={`w-10 h-5 rounded-full relative transition-all ${settings.isometricGrid ? 'bg-[#00bcd4]' : 'bg-neutral-800'}`}>
+                                    <div className={`absolute top-1 w-3 h-3 rounded-full bg-white shadow-lg transition-all ${settings.isometricGrid ? 'right-1' : 'left-1'}`} />
+                                </div>
+                            </div>
+                         </button>
                     </div>
                     <div className="space-y-4">
                         <label className="text-[8px] font-black text-neutral-600 uppercase tracking-[0.25em] px-1">Spacing Values</label>

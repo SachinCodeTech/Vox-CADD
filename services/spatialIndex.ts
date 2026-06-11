@@ -76,7 +76,12 @@ export class QuadTreeNode {
     this.shapes.push({ shape, bounds });
 
     if (this.shapes.length > this.capacity && this.depth < this.maxDepth) {
-      this.subdivide();
+      // Avoid infinite subdivision on degenerate zero-area nodes
+      const dx = this.boundary.xMax - this.boundary.xMin;
+      const dy = this.boundary.yMax - this.boundary.yMin;
+      if (Math.abs(dx) > 1e-4 && Math.abs(dy) > 1e-4) {
+        this.subdivide();
+      }
     }
   }
 
@@ -115,24 +120,37 @@ export class DrawingSpatialIndex {
       for (const s of shapes) {
         let b = s._bounds;
         if (!b) {
-          b = getShapeBounds(s, blocks);
+          b = getShapeBounds(s, blocks) || { xMin: -100, yMin: -100, xMax: 100, yMax: 100 };
           // Cache the bounding box for future passes
           s._bounds = b;
         }
+        
+        // Ensure bounds coordinates are valid numeric shapes
+        const bxMin = (!b || isNaN(b.xMin) || !isFinite(b.xMin)) ? -100 : b.xMin;
+        const bymin = (!b || isNaN(b.yMin) || !isFinite(b.yMin)) ? -100 : b.yMin;
+        const bxMax = (!b || isNaN(b.xMax) || !isFinite(b.xMax)) ? 100 : b.xMax;
+        const bymax = (!b || isNaN(b.yMax) || !isFinite(b.yMax)) ? 100 : b.yMax;
+
         if (first) {
-          xMin = b.xMin;
-          yMin = b.yMin;
-          xMax = b.xMax;
-          yMax = b.yMax;
+          xMin = bxMin;
+          yMin = bymin;
+          xMax = bxMax;
+          yMax = bymax;
           first = false;
         } else {
-          xMin = Math.min(xMin, b.xMin);
-          yMin = Math.min(yMin, b.yMin);
-          xMax = Math.max(xMax, b.xMax);
-          yMax = Math.max(yMax, b.yMax);
+          xMin = Math.min(xMin, bxMin);
+          yMin = Math.min(yMin, bymin);
+          xMax = Math.max(xMax, bxMax);
+          yMax = Math.max(yMax, bymax);
         }
       }
     }
+
+    // Ensure final collected bounding values are fully sanitized numeric coordinates
+    if (isNaN(xMin) || !isFinite(xMin)) xMin = -1000;
+    if (isNaN(yMin) || !isFinite(yMin)) yMin = -1000;
+    if (isNaN(xMax) || !isFinite(xMax)) xMax = 1000;
+    if (isNaN(yMax) || !isFinite(yMax)) yMax = 1000;
 
     // Add padding to satisfy dynamic zoom queries
     const dx = xMax - xMin;
@@ -150,7 +168,7 @@ export class DrawingSpatialIndex {
     this.root = new QuadTreeNode(this.bounds);
 
     for (const s of shapes) {
-      const b = s._bounds || getShapeBounds(s, blocks);
+      const b = s._bounds || getShapeBounds(s, blocks) || { xMin: -100, yMin: -100, xMax: 100, yMax: 100 };
       this.root.insert(s, b);
     }
   }

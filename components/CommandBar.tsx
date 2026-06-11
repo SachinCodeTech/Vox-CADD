@@ -65,6 +65,8 @@ export const COMMAND_LIST = [
     { cmd: 'LAYOUT', alias: 'LO', desc: 'Manage layout tabs' }, 
     { cmd: 'FIND', alias: 'FIND', desc: 'Find and replace text' },
     { cmd: 'TABLE', alias: 'TB', desc: 'Create custom Bill of Materials table' },
+    { cmd: 'LAYER', alias: 'LA', desc: 'Manage layers and linetype properties' },
+    { cmd: 'CLEAN', alias: 'CL', desc: 'Remove zero-length lines and overlapping duplicates' },
     { cmd: 'COPYCLIP', alias: 'CC', desc: 'Copy to clipboard' }, 
     { cmd: 'PASTECLIP', alias: 'CV', desc: 'Paste from clipboard' }
 ];
@@ -99,21 +101,59 @@ const CommandBar: React.FC<CommandBarProps> = ({
   const inputHistory = useMemo(() => history.filter(h => h.startsWith("> ")).map(h => h.substring(2)), [history]);
   const [histIdx, setHistIdx] = useState(-1);
 
+  // Synchronise showSuggestions visibility whenever input changes
+  useEffect(() => {
+    if (value && value.trim()) {
+      setShowSuggestions(true);
+    } else {
+      setShowSuggestions(false);
+    }
+  }, [value]);
+
   const suggestions = useMemo(() => {
     if (!value) return [];
     
     if (activeTab === 'cli') {
         const search = value.trim().toUpperCase();
         if (!search) return [];
-        return COMMAND_LIST.filter(c => 
-          c.cmd.includes(search) || (c.alias && c.alias.startsWith(search))
-        ).map(c => ({ ...c, type: 'cmd' })).slice(0, 8);
+        
+        let matches = COMMAND_LIST.map(c => {
+          let score = 0;
+          const cmd = c.cmd.toUpperCase();
+          const alias = c.alias ? c.alias.toUpperCase() : '';
+          
+          if (cmd === search) {
+            score = 100;
+          } else if (alias === search) {
+            score = 90;
+          } else if (cmd.startsWith(search)) {
+            score = 80;
+          } else if (alias.startsWith(search)) {
+            score = 70;
+          } else if (cmd.includes(search)) {
+            score = 50;
+          } else if (alias.includes(search)) {
+            score = 40;
+          }
+          
+          return { ...c, score, type: 'cmd' as const };
+        }).filter(item => item.score > 0);
+        
+        // Sort by score descending, then alphabetically by cmd
+        matches.sort((a, b) => {
+          if (b.score !== a.score) {
+            return b.score - a.score;
+          }
+          return a.cmd.localeCompare(b.cmd);
+        });
+        
+        return matches.slice(0, 10);
     } else if (activeTab === 'ai') {
         const search = value.trim().toLowerCase();
-        if (!search) return AI_PROMPT_SUGGESTIONS.map(s => ({ cmd: s.prompt, label: s.label, type: 'ai' })).slice(0, 5);
+        if (!search) return AI_PROMPT_SUGGESTIONS.map(s => ({ cmd: s.prompt, label: s.label, type: 'ai' as const })).slice(0, 5);
         return AI_PROMPT_SUGGESTIONS.filter(s => 
           s.label.toLowerCase().includes(search) || s.prompt.toLowerCase().includes(search)
-        ).map(s => ({ cmd: s.prompt, label: s.label, type: 'ai' })).slice(0, 5);
+        ).map(s => ({ cmd: s.prompt, label: s.label, type: 'ai' as const })).slice(0, 5);
     }
     return [];
   }, [value, activeTab]);
@@ -314,45 +354,58 @@ const CommandBar: React.FC<CommandBarProps> = ({
       </div>
 
       {/* INPUT DRAWER (NOW ABOVE HISTORY, BELOW TABS) */}
-      <div className={`overflow-hidden transition-all duration-300 ${activeTab ? 'max-h-[300px] opacity-100' : 'max-h-0 opacity-0'}`}>
+      <div className={`transition-all duration-300 ${activeTab ? 'max-h-[300px] opacity-100 overflow-visible' : 'max-h-0 opacity-0 overflow-hidden'}`}>
         <div className="bg-black px-3 pb-3 pt-1 border-t border-white/5 shadow-[0_-20px_40px_rgba(0,0,0,0.5)]">
           {activeTab === 'cli' ? (
             <form onSubmit={handleSubmit} className="flex items-start gap-2 bg-[#0a0a0c] border border-white/10 rounded-xl px-3 min-h-10 focus-within:border-[#00bcd4]/50 transition-all relative">
                 {showSuggestions && suggestions.length > 0 && (
-                    <div className="absolute bottom-full left-0 mb-2 w-full bg-[#111] border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,1)] z-[200] overflow-hidden backdrop-blur-xl">
-                        <div className="px-3 py-1.5 border-b border-white/5 bg-white/5 flex justify-between items-center">
-                            <span className="text-[7px] font-black text-neutral-600 uppercase tracking-widest">
-                                {activeTab === 'cli' ? 'Cmd Suggestions' : 'Architectural Prompts'}
+                    <div className="absolute bottom-full left-0 mb-2 w-full bg-[#111] border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,1)] z-[200] overflow-hidden backdrop-blur-xl max-h-[260px] flex flex-col">
+                        <div className="px-3 py-1.5 border-b border-white/5 bg-[#161619] flex justify-between items-center shrink-0">
+                            <span className="text-[7.5px] font-black text-cyan-400/80 uppercase tracking-widest leading-relaxed">
+                                {activeTab === 'cli' ? `CMD SUGGESTIONS STARTING WITH "${value.toUpperCase()}"` : 'Architectural Prompts'}
                             </span>
                             {activeTab === 'ai' && <Bot size={10} className="text-indigo-500" />}
                         </div>
-                        {suggestions.map((s: any, i) => (
-                            <button 
-                              key={`suggestion-${s.cmd}`} 
-                              type="button" 
-                              onClick={() => { 
-                                if (s.type === 'ai') {
-                                    onAiQuery(s.cmd);
-                                } else {
-                                    onChange(s.cmd); onCommand(s.cmd); 
-                                }
-                                onChange(''); 
-                                setShowSuggestions(false); 
-                                setSuggestionIdx(-1); 
-                              }} 
-                              className={`w-full px-4 py-3 text-left text-[10px] font-bold border-b border-white/5 uppercase flex justify-between items-center transition-colors ${suggestionIdx === i ? (s.type === 'ai' ? 'bg-indigo-600 text-white' : 'bg-cyan-500 text-black') : 'text-neutral-400 hover:bg-white/5'}`}
-                            >
-                                <div className="flex flex-col gap-0.5">
-                                    <span className={s.type === 'ai' ? 'text-[9px] lowercase opacity-80 font-normal leading-tight line-clamp-1 max-w-[200px]' : ''}>
-                                        {s.type === 'ai' ? s.cmd : s.cmd}
+                        <div className="overflow-y-auto flex-1 divide-y divide-white/5 animate-in fade-in-50 duration-200">
+                            {suggestions.map((s: any, i) => (
+                                <button 
+                                  key={`suggestion-${s.cmd}`} 
+                                  type="button" 
+                                  onClick={() => { 
+                                    if (s.type === 'ai') {
+                                        onAiQuery(s.cmd);
+                                    } else {
+                                        onChange(s.cmd); onCommand(s.cmd); 
+                                    }
+                                    onChange(''); 
+                                    setShowSuggestions(false); 
+                                    setSuggestionIdx(-1); 
+                                  }} 
+                                  className={`w-full px-4 py-2 text-left text-[10px] font-bold uppercase flex justify-between items-center transition-all ${suggestionIdx === i ? (s.type === 'ai' ? 'bg-indigo-600 text-white' : 'bg-cyan-500 text-black') : 'text-neutral-400 hover:bg-white/5'}`}
+                                >
+                                    <div className="flex flex-col gap-0.5 min-w-0">
+                                        <div className="flex items-center gap-2">
+                                            <span className={`text-[10px] font-black tracking-widest uppercase truncate ${suggestionIdx === i ? (s.type === 'ai' ? 'text-white' : 'text-black') : 'text-cyan-400'}`}>
+                                                {s.cmd}
+                                            </span>
+                                            {s.alias && (
+                                                <span className={`text-[8px] font-mono font-black px-1.5 py-0.5 rounded ${suggestionIdx === i ? 'bg-black/20 text-black/80' : 'bg-neutral-800 text-neutral-400'}`}>
+                                                    {s.alias}
+                                                </span>
+                                            )}
+                                        </div>
+                                        {s.desc && (
+                                            <span className={`text-[8.5px] normal-case font-semibold tracking-tight truncate max-w-[280px] sm:max-w-md ${suggestionIdx === i ? 'text-black/60' : 'text-neutral-500'}`}>
+                                                {s.desc}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <span className={`text-[8px] font-mono shrink-0 pl-3 ${suggestionIdx === i ? 'opacity-60 text-black' : 'opacity-40 text-neutral-500'}`}>
+                                        {s.type === 'ai' ? 'AI' : 'SELECT [TAB]'}
                                     </span>
-                                    {s.type === 'ai' && <span className="text-[10px] font-black uppercase tracking-tight">{s.label}</span>}
-                                </div>
-                                <span className={`text-[8px] font-mono ${suggestionIdx === i ? 'opacity-50' : 'opacity-30'}`}>
-                                    {s.type === 'ai' ? 'AI' : s.alias}
-                                </span>
-                            </button>
-                        ))}
+                                </button>
+                            ))}
+                        </div>
                     </div>
                 )}
                 <div className="flex flex-col flex-1 min-w-0 h-full py-2">
@@ -366,6 +419,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
                         id="command-input"
                         name={`vox-cmd-${Date.now()}`}
                         value={value}
+                        onFocus={() => setShowSuggestions(true)}
                         onChange={e => { 
                             onChange(e.target.value); 
                             setShowSuggestions(true);
@@ -412,27 +466,29 @@ const CommandBar: React.FC<CommandBarProps> = ({
           ) : (
             <form onSubmit={handleSubmit} className={`flex items-end gap-2 bg-[#0a0a0c] border rounded-xl px-3 py-1.5 min-h-10 transition-all ${isAiThinking ? 'border-indigo-500 shadow-[0_0_20px_rgba(99,102,241,0.2)]' : 'border-white/10 focus-within:border-indigo-500/50'}`}>
                 {showSuggestions && suggestions.length > 0 && (
-                    <div className="absolute bottom-full left-0 mb-2 w-full bg-[#111] border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,1)] z-[200] overflow-hidden backdrop-blur-xl">
-                        <div className="px-3 py-1.5 border-b border-white/5 bg-white/5 flex gap-2 items-center">
+                    <div className="absolute bottom-full left-0 mb-2 w-full bg-[#111] border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,1)] z-[200] overflow-hidden backdrop-blur-xl max-h-[260px] flex flex-col">
+                        <div className="px-3 py-1.5 border-b border-white/5 bg-[#161619] flex gap-2 items-center shrink-0">
                             <Bot size={10} className="text-indigo-500" />
-                            <span className="text-[7px] font-black text-neutral-600 uppercase tracking-widest">Architectural Patterns</span>
+                            <span className="text-[7.5px] font-black text-neutral-500 uppercase tracking-widest leading-relaxed">Architectural Patterns</span>
                         </div>
-                        {suggestions.map((s: any, i) => (
-                            <button 
-                              key={`suggestion-ai-${i}`} 
-                              type="button" 
-                              onClick={() => { 
-                                onAiQuery(s.cmd);
-                                onChange(''); 
-                                setShowSuggestions(false); 
-                                setSuggestionIdx(-1); 
-                              }} 
-                              className={`w-full px-4 py-3 text-left border-b border-white/5 transition-colors flex flex-col gap-0.5 ${suggestionIdx === i ? 'bg-indigo-600' : 'hover:bg-white/5'}`}
-                            >
-                                <span className={`text-[10px] font-black uppercase tracking-tight ${suggestionIdx === i ? 'text-white' : 'text-neutral-300'}`}>{s.label}</span>
-                                <span className={`text-[8px] line-clamp-1 ${suggestionIdx === i ? 'text-white/60' : 'text-neutral-600 font-medium'}`}>{s.cmd}</span>
-                            </button>
-                        ))}
+                        <div className="overflow-y-auto flex-1 divide-y divide-white/5 animate-in fade-in-50 duration-200">
+                            {suggestions.map((s: any, i) => (
+                                <button 
+                                  key={`suggestion-ai-${i}`} 
+                                  type="button" 
+                                  onClick={() => { 
+                                    onAiQuery(s.cmd);
+                                    onChange(''); 
+                                    setShowSuggestions(false); 
+                                    setSuggestionIdx(-1); 
+                                  }} 
+                                  className={`w-full px-4 py-3 text-left transition-all flex flex-col gap-0.5 ${suggestionIdx === i ? 'bg-indigo-600 text-white' : 'text-neutral-300 hover:bg-white/5'}`}
+                                >
+                                    <span className={`text-[10px] font-black uppercase tracking-tight ${suggestionIdx === i ? 'text-white' : 'text-indigo-400'}`}>{s.label}</span>
+                                    <span className={`text-[8.5px] line-clamp-1 normal-case font-medium ${suggestionIdx === i ? 'text-white/70' : 'text-neutral-500'}`}>{s.cmd}</span>
+                                </button>
+                            ))}
+                        </div>
                     </div>
                 )}
                 <div className="flex items-center gap-2 shrink-0 pb-2">
@@ -487,6 +543,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
                         disabled={isAiThinking}
                         name={`vox-ai-${Date.now()}`}
                         value={value}
+                        onFocus={() => setShowSuggestions(true)}
                         onChange={e => {
                             onChange(e.target.value);
                             e.target.style.height = 'auto';

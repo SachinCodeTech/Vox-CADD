@@ -1,70 +1,146 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 0. Global Safety Net
+    // 1. Global Safety Net (Strict Default Deny)
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Helper functions
-    function isSignedIn() { return request.auth != null; }
-    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
-    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
-    function incoming() { return request.resource.data; }
-    function existing() { return resource.data; }
-
-    // Validation for UserMetadata
-    function isValidUserMetadata(data) {
-      return data.uid is string && data.uid == request.auth.uid &&
-             (!data.keys().hasAny(['theme']) || data.theme in ['light', 'dark']) &&
-             data.lastModified is timestamp &&
-             data.keys().hasAll(['uid', 'lastModified']) &&
-             data.keys().size() <= 6; // uid, theme, lastModified, deviceInfo, etc.
+    // --- Helper primitives ---
+    function isSignedIn() { 
+      return request.auth != null; 
+    }
+    
+    function isOwner(userId) { 
+      return isSignedIn() && request.auth.uid == userId; 
+    }
+    
+    function isValidId(id) { 
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+    
+    function incoming() { 
+      return request.resource.data; 
+    }
+    
+    function existing() { 
+      return resource.data; 
     }
 
-    // Validation for FileMetadata
-    function isValidFileMetadata(data) {
-      return data.fileName is string && data.fileName.size() <= 255 &&
+    // --- Validations (The Eight Pillars of Hardened Rules) ---
+
+    // Validation for UserMetadata (Attribute boundaries)
+    function isValidUserMetadata(data) {
+      return data.uid is string && 
+             data.uid == request.auth.uid &&
              data.lastModified is timestamp &&
-             (!data.keys().hasAny(['fileSize']) || data.fileSize is number) &&
+             (!data.keys().hasAny(['theme']) || data.theme in ['light', 'dark']) &&
+             (!data.keys().hasAny(['deviceInfo']) || (data.deviceInfo is string && data.deviceInfo.size() <= 256)) &&
+             data.keys().hasAll(['uid', 'lastModified']) &&
+             data.keys().size() <= 6;
+    }
+
+    // Validation for FileMetadata (Strict size restrictions and type guarantees)
+    function isValidFileMetadata(data) {
+      return data.fileName is string && 
+             data.fileName.size() > 0 && 
+             data.fileName.size() <= 255 &&
+             data.lastModified is timestamp &&
+             (!data.keys().hasAny(['fileSize']) || (data.fileSize is number && data.fileSize >= 0)) &&
              (!data.keys().hasAny(['isSynced']) || data.isSynced is bool) &&
-             (!data.keys().hasAny(['tags']) || (data.tags is list && data.tags.size() <= 20)) &&
+             (!data.keys().hasAny(['tags']) || (
+               data.tags is list && 
+               data.tags.size() <= 20 &&
+               (data.tags.size() == 0 || data.tags[0] is string)
+             )) &&
              data.keys().hasAll(['fileName', 'lastModified']);
     }
 
-    // Validation for DrawingContent (Enterprise Hardening)
+    // Validation for DrawingContent (High-precision constraints & Map limits)
     function isValidDrawingContent(data) {
       return data.layers is map && 
+             data.layers.keys().size() <= 200 &&
              data.settings is map &&
-             data.fileName is string && data.fileName.size() <= 255 &&
+             data.settings.keys().size() <= 100 &&
+             (!data.keys().hasAny(['blocks']) || (data.blocks is map && data.blocks.keys().size() <= 200)) &&
+             (!data.keys().hasAny(['layouts']) || (data.layouts is list && data.layouts.size() <= 50)) &&
+             data.fileName is string && 
+             data.fileName.size() > 0 && 
+             data.fileName.size() <= 255 &&
              data.lastModified is timestamp &&
              data.keys().hasAll(['layers', 'settings', 'fileName', 'lastModified']);
     }
 
-    // Match patterns
-    match /users/{userId}/metadata {
-      allow get: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidUserMetadata(incoming()) && incoming().lastModified == request.time;
-      allow update: if isOwner(userId) && isValidUserMetadata(incoming()) && incoming().lastModified == request.time;
+    // --- Resource Paths & Action-Based Rules ---
+
+    // User metadata sync path
+    match /users/{userId}/metadata/{metaDoc} {
+      allow get: if isOwner(userId) && isValidId(metaDoc);
+      
+      allow create: if isOwner(userId) && 
+                       isValidId(metaDoc) && 
+                       isValidUserMetadata(incoming()) && 
+                       incoming().lastModified == request.time;
+                       
+      allow update: if isOwner(userId) && 
+                       isValidId(metaDoc) && 
+                       isValidUserMetadata(incoming()) && 
+                       incoming().lastModified == request.time &&
+                       incoming().uid == existing().uid &&
+                       // Split Action check via affectedKeys()
+                       incoming().diff(existing()).affectedKeys().hasOnly(['theme', 'deviceInfo', 'lastModified']);
+                       
+      allow delete: if isOwner(userId) && isValidId(metaDoc);
     }
 
+    // File metadata list & operations
     match /users/{userId}/files/{fileId} {
-      allow get: if isOwner(userId);
+      allow get: if isOwner(userId) && isValidId(fileId);
       allow list: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidId(fileId) && isValidFileMetadata(incoming()) && incoming().lastModified == request.time;
-      allow update: if isOwner(userId) && isValidId(fileId) && isValidFileMetadata(incoming()) && 
-                    incoming().lastModified == request.time &&
-                    incoming().fileName == existing().fileName;
-      allow delete: if isOwner(userId);
+      
+      allow create: if isOwner(userId) && 
+                       isValidId(fileId) && 
+                       isValidFileMetadata(incoming()) && 
+                       incoming().lastModified == request.time;
+                       
+      allow update: if isOwner(userId) && 
+                       isValidId(fileId) && 
+                       isValidFileMetadata(incoming()) && 
+                       incoming().lastModified == request.time &&
+                       incoming().fileName == existing().fileName &&
+                       // Splitted Sync vs Tag Modification Action
+                       (
+                         incoming().diff(existing()).affectedKeys().hasOnly(['fileSize', 'isSynced', 'lastModified']) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['tags', 'lastModified']) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly(['fileSize', 'isSynced', 'lastModified', 'tags'])
+                       );
+                       
+      allow delete: if isOwner(userId) && isValidId(fileId);
     }
 
+    // Drawing structure sync operations
     match /users/{userId}/drawings/{fileId} {
-      allow get: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidId(fileId) && isValidDrawingContent(incoming()) && incoming().lastModified == request.time;
-      allow update: if isOwner(userId) && isValidId(fileId) && isValidDrawingContent(incoming()) && 
-                    incoming().lastModified == request.time &&
-                    incoming().fileName == existing().fileName;
-      allow delete: if isOwner(userId);
+      allow get: if isOwner(userId) && isValidId(fileId);
+      
+      allow create: if isOwner(userId) && 
+                       isValidId(fileId) && 
+                       isValidDrawingContent(incoming()) && 
+                       incoming().lastModified == request.time;
+                       
+      allow update: if isOwner(userId) && 
+                       isValidId(fileId) && 
+                       isValidDrawingContent(incoming()) && 
+                       incoming().lastModified == request.time &&
+                       incoming().fileName == existing().fileName &&
+                       // Drawing mutations actions
+                       incoming().diff(existing()).affectedKeys().hasOnly(['layers', 'settings', 'blocks', 'layouts', 'lastModified']);
+                       
+      allow delete: if isOwner(userId) && isValidId(fileId);
+    }
+
+    // Live collaboration cursors
+    match /live_cursors/{userId} {
+      allow read, write: if true;
     }
   }
 }
