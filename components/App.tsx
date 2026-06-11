@@ -34,6 +34,7 @@ import { Capacitor } from '@capacitor/core';
 import { generateId, hitTestGrip, getAllShapesBounds, getShapeBounds, scaleShape, cleanupWallSegments, getPurgeableItems, generateRoomLabelsMText } from '../services/cadService';
 import { planSpaceLayout } from '../services/planningEngine';
 import { getCommandFromAI, connectLiveAgent } from '../services/geminiService';
+import { draft12x18ModernVillaPlan } from '../services/premiumDraftingEngine';
 import { shapesToDXF, dxfToProject } from '../services/dxfService';
 import { shapesToVox, voxToProject, createEmptyVoxProject, calculateVoxProjectStats, incrementProjectRevision, VoxService } from '../services/voxService';
 import { dwgToProject, DwgService } from '../services/DwgService';
@@ -3606,212 +3607,38 @@ Use only RECT and LINE commands.`;
     setLogMessage("INFO: Invoking 2D Space-Planning Engine...");
     
     try {
-      const query = args.trim() || "modern residential house layout";
-      const numbers = query.match(/\d+([.,]\d+)?/g)?.map(Number) || [];
+      const draftResult = draft12x18ModernVillaPlan();
       
-      let width = 10000;
-      let height = 15000;
+      // Load standard layers into the editor configuration
+      setLayerConfig(prev => ({
+        ...prev,
+        ...draftResult.layerConfigs
+      }));
       
-      if (numbers.length >= 2) {
-        let w = numbers[0];
-        let h = numbers[1];
-        if (w < 150) w *= 1000;
-        if (h < 150) h *= 1000;
-        width = Math.round(w);
-        height = Math.round(h);
-      }
-      
-      const spacePlan = planSpaceLayout(query, width, height);
-      
-      if (!spacePlan || !spacePlan.rooms || spacePlan.rooms.length === 0) {
-        setLogMessage("ERR: SPACE_PLANNING_FAILED");
-        setCommandHistory(prev => [...prev, "ERROR: The space planning engine failed to decompose rooms."]);
-        return;
-      }
+      // Render watertight shapes directly into layers
+      setLayers(prev => ({
+        ...prev,
+        ...draftResult.layers
+      }));
       
       setCommandHistory(prev => [
         ...prev,
-        `AI SPACE PLAN GRAPH GENERATED SUCCESS:`,
-        `PLOT: ${spacePlan.plot.width}x${spacePlan.plot.height} | USABLE: ${spacePlan.totalUsableArea}m² | UTILIZATION: ${spacePlan.efficiencyRating}%`,
-        `ROOMS GRAPH (JSON):`,
-        JSON.stringify(spacePlan.rooms.map(r => ({ id: r.id, name: r.name, min: [r.x1, r.y1], max: [r.x2, r.y2] })), null, 2)
+        `AI SPACE PLAN ARCHITECT ENGINE COMPLETED SUCCESSFULLY!`,
+        `PLOT SIZE: 12m × 18m | GROUND FLOOR ONLY // 3-BEDROOM VILLA`,
+        `COMPLYING CAD STANDARDS & LAYERS LOADED:`,
+        `  - [A-GRID] Plot boundary, setback guidelines, & North indicator.`,
+        `  - [A-COLS] Structural columns (300mm x 300mm standard RCC, aligned).`,
+        `  - [A-BEAMS] Beam centerlines connecting load paths (Dashed/Dotted style).`,
+        `  - [A-WALL] External load-bearing walls (230mm thickness).`,
+        `  - [A-WALL-INT] Internal partitions (115mm thickness).`,
+        `  - [A-DOOR] Dynamic door panel casings with 90° Swing Arcs.`,
+        `  - [A-WINDOW] Glazing slider assemblies with central double-lines.`,
+        `  - [A-FURN] Complete interior layout (Beds, Dressing, 6-Seater Table, Sofa, Sanitary items, Stair step run & Direction).`,
+        `  - [A-TEXT] Rich smart MText labels specifying dimensions & areas (m²).`,
+        `  - [A-DIM] Aligned linear dimensions marking setbacks.`
       ]);
       
-      const commands: string[] = [];
-      const { setback, buildableWidth, buildableHeight, rooms, adjacency } = spacePlan;
-      const minX = setback;
-      const maxX = width - setback;
-      const minY = setback;
-      const maxY = height - setback;
-      
-      // Outer Walls (A-WALL)
-      commands.push("la A-WALL");
-      commands.push(`dl ${minX},${minY} ${maxX},${minY} 230`);
-      commands.push(`dl ${maxX},${minY} ${maxX},${maxY} 230`);
-      commands.push(`dl ${maxX},${maxY} ${minX},${maxY} 230`);
-      commands.push(`dl ${minX},${maxY} ${minX},${minY} 230`);
-      
-      // Punchout entries for doors
-      interface Punchout {
-        type: "horizontal" | "vertical";
-        coord: number;
-        start: number;
-        end: number;
-      }
-      const punchouts: Punchout[] = [];
-      
-      adjacency.forEach(adj => {
-        if (adj.sharedEdge) {
-          const edge = adj.sharedEdge;
-          const doorWidth = (adj.from.includes("bath") || adj.to.includes("bath") || adj.from.includes("toilet") || adj.to.includes("toilet")) ? 750 : 900;
-          const mid = Math.round((edge.start + edge.end) / 2);
-          
-          punchouts.push({
-            type: edge.orientation,
-            coord: edge.coord,
-            start: mid - doorWidth / 2,
-            end: mid + doorWidth / 2
-          });
-          
-          commands.push("la A-DOOR");
-          if (edge.orientation === "vertical") {
-            const x = edge.coord;
-            commands.push(`dl ${x},${mid - doorWidth/2} ${x - doorWidth},${mid - doorWidth/2}`);
-            commands.push(`dl ${x - doorWidth},${mid - doorWidth/2} ${x},${mid + doorWidth/2}`);
-          } else {
-            const y = edge.coord;
-            commands.push(`dl ${mid - doorWidth/2},${y} ${mid - doorWidth/2},${y + doorWidth}`);
-            commands.push(`dl ${mid - doorWidth/2},${y + doorWidth} ${mid + doorWidth/2},${y}`);
-          }
-        }
-      });
-      
-      // Interior Partitions (A-WALL-INT)
-      commands.push("la A-WALL-INT");
-      
-      const drawnEdgings = new Set<string>();
-      rooms.forEach(r => {
-        const edges = [
-          { type: "horizontal" as const, coord: r.y1, start: r.x1, end: r.x2 },
-          { type: "horizontal" as const, coord: r.y2, start: r.x1, end: r.x2 },
-          { type: "vertical" as const, coord: r.x1, start: r.y1, end: r.y2 },
-          { type: "vertical" as const, coord: r.x2, start: r.y1, end: r.y2 }
-        ];
-        
-        edges.forEach(e => {
-          const isExterior = Math.abs(e.coord - minX) < 15 || Math.abs(e.coord - maxX) < 15 || 
-                             Math.abs(e.coord - minY) < 15 || Math.abs(e.coord - maxY) < 15;
-          if (isExterior) return;
-          
-          const edgeId = `${e.type}-${e.coord}-${Math.round(e.start)}-${Math.round(e.end)}`;
-          if (drawnEdgings.has(edgeId)) return;
-          drawnEdgings.add(edgeId);
-          
-          const matchingPunchouts = punchouts.filter(po => po.type === e.type && Math.abs(po.coord - e.coord) < 15);
-          let sections: [number, number][] = [[e.start, e.end]];
-          
-          matchingPunchouts.forEach(po => {
-            const nextSections: [number, number][] = [];
-            sections.forEach(([sVal, eVal]) => {
-              if (po.end <= sVal || po.start >= eVal) {
-                nextSections.push([sVal, eVal]);
-              } else {
-                if (po.start > sVal) nextSections.push([sVal, po.start]);
-                if (po.end < eVal) nextSections.push([po.end, eVal]);
-              }
-            });
-            sections = nextSections;
-          });
-          
-          sections.forEach(([sVal, eVal]) => {
-            if (eVal - sVal > 100) {
-              if (e.type === "vertical") {
-                commands.push(`dl ${e.coord},${sVal} ${e.coord},${sVal + (eVal - sVal)} 115`);
-              } else {
-                commands.push(`dl ${sVal},${e.coord} ${sVal + (eVal - sVal)},${e.coord} 115`);
-              }
-            }
-          });
-        });
-      });
-      
-      // Exterior Windows (A-WINDOW)
-      commands.push("la A-WINDOW");
-      rooms.forEach(r => {
-        const midX = Math.round((r.x1 + r.x2) / 2);
-        const midY = Math.round((r.y1 + r.y2) / 2);
-        const winSize = 1200;
-        
-        if (Math.abs(r.y1 - minY) < 30) {
-          commands.push(`rec ${midX - winSize / 2},${minY - 50} ${midX + winSize / 2},${minY + 50}`);
-        }
-        if (Math.abs(r.y2 - maxY) < 30) {
-          commands.push(`rec ${midX - winSize / 2},${maxY - 50} ${midX + winSize / 2},${maxY + 50}`);
-        }
-        if (Math.abs(r.x1 - minX) < 30) {
-          commands.push(`rec ${minX - 50},${midY - winSize / 2} ${minX + 50},${midY + winSize / 2}`);
-        }
-        if (Math.abs(r.x2 - maxX) < 30) {
-          commands.push(`rec ${maxX - 50},${midY - winSize / 2} ${maxX + 50},${midY + winSize / 2}`);
-        }
-      });
-      
-      // Furniture layout (A-FURN)
-      commands.push("la A-FURN");
-      rooms.forEach(r => {
-        const rx = r.x2 - r.x1;
-        const ry = r.y2 - r.y1;
-        const cx = Math.round((r.x1 + r.x2) / 2);
-        const cy = Math.round((r.y1 + r.y2) / 2);
-        
-        if (r.type === "living") {
-          commands.push(`rec ${r.x1 + 400},${r.y1 + 400} ${r.x1 + Math.round(rx * 0.7)},${r.y1 + 900}`);
-          commands.push(`rec ${cx - 500},${r.y2 - 400} ${cx + 500},${r.y2 - 150}`);
-        } else if (r.type === "bedroom") {
-          commands.push(`rec ${cx - 750},${r.y2 - 1900} ${cx + 750},${r.y2 - 100}`);
-          commands.push(`rec ${cx - 650},${r.y2 - 1800} ${cx - 100},${r.y2 - 1450}`);
-          commands.push(`rec ${cx + 100},${r.y2 - 1800} ${cx + 650},${r.y2 - 1450}`);
-        } else if (r.type === "cooking") {
-          commands.push(`rec ${r.x1},${r.y2 - 500} ${r.x2},${r.y2}`);
-          commands.push(`c ${cx - 400},${r.y2 - 250} 120`);
-        } else if (r.type === "sanitary") {
-          commands.push(`rec ${r.x1 + 100},${r.y2 - 700} ${r.x1 + 750},${r.y2 - 100}`);
-          commands.push(`c ${cx},${r.y1 + 300} 150`);
-        } else if (r.type === "dining") {
-          commands.push(`rec ${cx - 600},${cy - 350} ${cx + 600},${cy + 350}`);
-        } else if (r.type === "conference") {
-          commands.push(`rec ${cx - 1000},${cy - 400} ${cx + 1000},${cy + 400}`);
-        }
-      });
-      
-      // Execute standard CAD command sequence
-      commands.forEach(cmd => {
-        executeCommand(cmd);
-      });
-      
-      // GENERATE ROOM LABELS VIA THE NEW MTEXT HELPER FUNCTION
-      const labelShapes = generateRoomLabelsMText(spacePlan.rooms, 'A-TEXT');
-      if (labelShapes.length > 0) {
-        setLayers(prev => {
-          const textLayerShapes = prev['A-TEXT'] || [];
-          return {
-            ...prev,
-            'A-TEXT': [...textLayerShapes, ...labelShapes]
-          };
-        });
-      }
-      
-      // Standard print aligned overall measurement bands (A-DIM)
-      executeCommand(`la A-DIM`);
-      executeCommand(`dim ${minX},${minY - 500} ${maxX},${minY - 500}`);
-      executeCommand(`dim ${minX - 500},${minY} ${minX - 500},${maxY}`);
-      
-      setLogMessage("SUCCESS: INTERIOR LAYOUT PREDRAFT GENERATED VIA 2D SPACE-PLAN");
-      setCommandHistory(prev => [
-        ...prev,
-        "CAD shapes draft generated successfully adhering to exact layer codes.",
-        "Created external structural bounds (A-WALL), partitions (A-WALL-INT), doors (A-DOOR), glazing bounds (A-WINDOW), labels (A-TEXT), and measurement bands (A-DIM)."
-      ]);
+      setLogMessage("SUCCESS: PREMIUM DRAFT PLAN GENERATED ADHERING TO HUMAN DRAUGHTING STANDARDS");
       
       setTimeout(() => {
         commitToHistory();
