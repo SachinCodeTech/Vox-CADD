@@ -304,6 +304,26 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
                          </button>
                     </div>
                     <div className="space-y-4">
+                        <button 
+                            type="button"
+                            onClick={() => onSettingsChange({ unlimitedGrid: !settings.unlimitedGrid })} 
+                            className={`w-full flex justify-between items-center p-5 rounded-2xl border transition-all cursor-pointer ${settings.unlimitedGrid !== false ? 'bg-[#00bcd4]/10 border-[#00bcd4]/20 text-[#00bcd4]' : 'bg-neutral-900/50 border-white/5 text-neutral-600'}`}
+                         >
+                            <div className="flex items-center gap-4">
+                                <Compass size={20} />
+                                <div className="flex flex-col items-start text-left">
+                                    <span className="text-[10px] font-black uppercase tracking-widest">Unlimited Grid Area</span>
+                                    <span className="text-[7.5px] font-bold opacity-65 uppercase">Display grid dynamically past traditional drawing or limits bounds</span>
+                                </div>
+                            </div>
+                            <div className="ml-auto">
+                                <div className={`w-10 h-5 rounded-full relative transition-all ${settings.unlimitedGrid !== false ? 'bg-[#00bcd4]' : 'bg-neutral-800'}`}>
+                                    <div className={`absolute top-1 w-3 h-3 rounded-full bg-white shadow-lg transition-all ${settings.unlimitedGrid !== false ? 'right-1' : 'left-1'}`} />
+                                </div>
+                            </div>
+                         </button>
+                    </div>
+                    <div className="space-y-4">
                         <label className="text-[8px] font-black text-neutral-600 uppercase tracking-[0.25em] px-1">Spacing Values</label>
                         <div className="grid grid-cols-3 gap-3">
                            <div className="space-y-2">

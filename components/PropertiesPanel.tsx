@@ -37,6 +37,8 @@ interface PropertiesPanelProps {
   onCommand?: (cmd: string) => void;
   onFilterType?: (type: string) => void;
   onOpenColorSelector?: (currentColor: string, onSelect: (color: string) => void, title?: string) => void;
+  modelShapes?: Shape[];
+  blocks?: Record<string, any>;
 }
 
 const LineTypePreview = ({ type, color = "#00bcd4", weight = 1 }: { type: LineType, color?: string, weight?: number }) => {
@@ -77,7 +79,7 @@ const LineTypePreview = ({ type, color = "#00bcd4", weight = 1 }: { type: LineTy
 };
 
 const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ 
-    selectedShapes, onUpdateShape, layers, lineTypeDefinitions, settings, onUpdateSettings, onClose, activeLayout, onUpdateLayout, onCommand, onFilterType, onOpenColorSelector
+    selectedShapes, onUpdateShape, layers, lineTypeDefinitions, settings, onUpdateSettings, onClose, activeLayout, onUpdateLayout, onCommand, onFilterType, onOpenColorSelector, modelShapes, blocks
 }) => {
   const isImperial = settings.units === 'imperial';
   const [pos, setPos] = useState({ x: 0, y: 0 });
@@ -923,7 +925,63 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                         }
                                         
                                         const updatedViewports = activeLayout.viewports.map((v, i) => 
-                                            i === index ? { ...v, x: newX, y: newY, width: newW, height: newH } : v
+                                            i === index ? { ...v, ...updates, x: newX, y: newY, width: newW, height: newH } : v
+                                        );
+                                        onUpdateLayout?.(activeLayout.id, { viewports: updatedViewports });
+                                    };
+
+                                    const zoomToFitViewport = () => {
+                                        if (!modelShapes || modelShapes.length === 0) return;
+                                        
+                                        // Calculate extents of model space entities exactly
+                                        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                                        modelShapes.forEach(s => {
+                                            if (!s || s.type === 'ray' || s.type === 'xline') return;
+                                            if (s.type === 'line') {
+                                                minX = Math.min(minX, s.x1 ?? 0, s.x2 ?? 0);
+                                                minY = Math.min(minY, s.y1 ?? 0, s.y2 ?? 0);
+                                                maxX = Math.max(maxX, s.x1 ?? 0, s.x2 ?? 0);
+                                                maxY = Math.max(maxY, s.y1 ?? 0, s.y2 ?? 0);
+                                            } else if ((s.type === 'pline' || s.type === 'spline' || s.type === 'polygon' || s.type === 'hatch') && Array.isArray(s.points)) {
+                                                s.points.forEach((p: any) => {
+                                                    if (p && typeof p.x === 'number') {
+                                                        minX = Math.min(minX, p.x);
+                                                        minY = Math.min(minY, p.y);
+                                                        maxX = Math.max(maxX, p.x);
+                                                        maxY = Math.max(maxY, p.y);
+                                                    }
+                                                });
+                                            } else if (typeof (s as any).x === 'number' && typeof (s as any).y === 'number') {
+                                                const sx = (s as any).x;
+                                                const sy = (s as any).y;
+                                                const r = (s as any).radius || 10;
+                                                minX = Math.min(minX, sx - r);
+                                                minY = Math.min(minY, sy - r);
+                                                maxX = Math.max(maxX, sx + r);
+                                                maxY = Math.max(maxY, sy + r);
+                                            }
+                                        });
+                                        
+                                        if (minX === Infinity || minY === Infinity || maxX === -Infinity || maxY === -Infinity) {
+                                            return;
+                                        }
+                                        
+                                        const bw = Math.max(1, maxX - minX);
+                                        const bh = Math.max(1, maxY - minY);
+                                        const bcx = (maxX + minX) / 2;
+                                        const bcy = (maxY + minY) / 2;
+                                        
+                                        // Fit exactly inside the viewport dimensions (adding 20% margin for visual aesthetics)
+                                        const vScale = Math.min(vp.width / (bw * 1.20), vp.height / (bh * 1.20));
+                                        
+                                        const newViewState = {
+                                            scale: vScale,
+                                            originX: -bcx * vScale,
+                                            originY: bcy * vScale
+                                        };
+                                        
+                                        const updatedViewports = activeLayout.viewports.map((v, i) => 
+                                            i === index ? { ...v, viewState: newViewState } : v
                                         );
                                         onUpdateLayout?.(activeLayout.id, { viewports: updatedViewports });
                                     };
@@ -964,6 +1022,64 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                                     />
                                                 </div>
                                             </div>
+
+                                            {/* Customizable border settings */}
+                                            <div className="space-y-2 pt-2 border-t border-white/5">
+                                                <div className="flex items-center gap-2 pt-1 font-sans">
+                                                    <input 
+                                                        type="checkbox"
+                                                        id={`vp-border-vis-${vp.id}`}
+                                                        className="w-3.5 h-3.5 rounded border-white/10 bg-neutral-900 accent-[#00bcd4] cursor-pointer"
+                                                        checked={vp.borderVisible !== false}
+                                                        onChange={e => handleVpUpdate({ borderVisible: e.target.checked })}
+                                                    />
+                                                    <label htmlFor={`vp-border-vis-${vp.id}`} className="text-[7.5px] text-neutral-400 font-black uppercase tracking-wider cursor-pointer select-none">
+                                                        Border Visible
+                                                    </label>
+                                                </div>
+
+                                                <div className="grid grid-cols-2 gap-2 pt-1">
+                                                    <div className="flex flex-col gap-1">
+                                                        <span className="text-[7px] font-black text-neutral-500 uppercase">Border Style</span>
+                                                        <select
+                                                            className="w-full bg-[#121214] border border-white/5 text-[9px] text-[#adadad] font-black uppercase rounded-xl px-2 py-2 outline-none cursor-pointer"
+                                                            value={vp.borderStyle || 'solid'}
+                                                            onChange={e => handleVpUpdate({ borderStyle: e.target.value as any })}
+                                                        >
+                                                            <option value="solid">SOLID</option>
+                                                            <option value="dashed">DASHED</option>
+                                                            <option value="dotted">DOTTED</option>
+                                                        </select>
+                                                    </div>
+
+                                                    <div className="flex flex-col gap-1">
+                                                        <span className="text-[7px] font-black text-neutral-500 uppercase">Border Color</span>
+                                                        <div className="flex gap-1.5 items-center">
+                                                            <div 
+                                                                className="w-5 h-5 rounded-md border border-white/15 cursor-pointer shrink-0"
+                                                                style={{ backgroundColor: vp.borderColor || '#adadad' }}
+                                                                onClick={() => onOpenColorSelector?.(vp.borderColor || '#adadad', (col) => handleVpUpdate({ borderColor: col }), `Viewport ${index + 1} Border`)}
+                                                            />
+                                                            <input 
+                                                                type="text"
+                                                                style={{ fontSize: '7.5px' }}
+                                                                className="w-full bg-[#121214] border border-white/5 text-white font-mono rounded-xl px-2 py-1.5 outline-none"
+                                                                value={vp.borderColor || '#adadad'}
+                                                                onChange={e => handleVpUpdate({ borderColor: e.target.value })}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Auto-Zoom / fit extents trigger button */}
+                                            <button
+                                                className="w-full mt-2 bg-gradient-to-r from-[#00bcd4]/10 to-teal-500/10 hover:from-[#00bcd4]/20 hover:to-teal-500/20 border border-[#00bcd4]/20 hover:border-[#00bcd4]/35 text-[#00bcd4] text-[8.5px] font-black uppercase tracking-widest py-2 rounded-xl transition-all shadow-md active:scale-95 flex items-center justify-center gap-1.5 font-sans"
+                                                onClick={zoomToFitViewport}
+                                            >
+                                                <Maximize2 size={10} />
+                                                Zoom to Fit Geometry
+                                            </button>
                                         </div>
                                     );
                                 })}

@@ -488,7 +488,7 @@ const LayerManager: React.FC<LayerManagerProps> = ({
         )}
       </div>
 
-      <div className="flex-1 overflow-auto bg-[#0a0a0c] scrollbar-none">
+      <div className="flex-1 overflow-auto bg-[#0a0a0c] scrollbar-thin scrollbar-thumb-zinc-700/85 scrollbar-track-transparent">
         <div className="min-w-[812px] flex flex-col h-full"> 
           {/* Header Row - Sticky inside the horizontal scroll container */}
           <div className="flex items-center text-[9px] text-neutral-600 font-black uppercase border-b border-white/5 bg-[#121214] sticky top-0 z-20 select-none shrink-0 shadow-sm">

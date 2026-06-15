@@ -164,6 +164,7 @@ const InfoPanel: React.FC<InfoPanelProps> = ({ type, onClose, onSwitch }) => {
         <CommandItem cmd="CIRCLE" alias="C" desc="Draw circles by center point and radius." />
         <CommandItem cmd="ARC" alias="A" desc="Create arcs (3-Point, Start-Center-End [C], or Start-End-Radius [E])." />
         <CommandItem cmd="SKETCH" alias="SK" desc="Draw rough freehand shapes for AI interpretation." />
+        <CommandItem cmd="REVCLOUD" alias="REVC" desc="Draw revision clouds (Freehand, Rectangular, or Polygonal)." />
         <CommandItem cmd="TEXT" alias="T" desc="Add annotations to your drawing." />
       </HelpSection>
 

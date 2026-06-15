@@ -649,6 +649,295 @@ export class PolyCommand implements CADCommand {
     onCancel() { this.ctx.onFinish(); }
 }
 
+const buildCloudFromPath = (vertices: Point[], arcLength: number, invert: boolean = false): Point[] => {
+    const cloudPoints: Point[] = [];
+    const bulgeVal = invert ? -0.5 : 0.5;
+    
+    for (let i = 0; i < vertices.length; i++) {
+        const p1 = vertices[i];
+        const nextIdx = (i + 1) % vertices.length;
+        const p2 = vertices[nextIdx];
+        
+        const d = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+        const numDivisions = Math.max(1, Math.round(d / arcLength));
+        for (let j = 0; j < numDivisions; j++) {
+            const t = j / numDivisions;
+            cloudPoints.push({
+                x: p1.x + (p2.x - p1.x) * t,
+                y: p1.y + (p2.y - p1.y) * t,
+                bulge: bulgeVal
+            });
+        }
+    }
+    return cloudPoints;
+};
+
+export class RevCloudCommand implements CADCommand {
+    name = "REVCLOUD";
+    public pts: Point[] = [];
+    public corners: Point[] = [];
+    public mode: 'freehand' | 'rectangular' | 'polygonal' = 'freehand';
+    public step: number = 0;
+    public arcLength: number | null = null;
+    
+    constructor(public ctx: CommandContext) {}
+    
+    onStart() {
+        this.pts = [];
+        this.corners = [];
+        this.step = 0;
+        this.ctx.setMessage("REVCLOUD: Click start point or [Rectangular/Polygonal/Freehand/Arc length] <Freehand>:");
+    }
+    
+    onClick(p: Point, snapped: boolean) {
+        if (this.corners.length === 0 && this.pts.length === 0) {
+            if (this.mode === 'rectangular') {
+                this.corners.push(p);
+                this.step = 1;
+                this.ctx.setMessage("REVCLOUD [Rectangular]: Specify opposite corner:");
+            } else if (this.mode === 'polygonal') {
+                this.corners.push(p);
+                this.ctx.setMessage("REVCLOUD [Polygonal]: Specify next point or [Close/Undo]:");
+            } else {
+                this.mode = 'freehand';
+                this.pts.push(p);
+                this.ctx.setMessage("REVCLOUD: Move mouse to draw cloud. Finish near start point.");
+            }
+            return;
+        }
+        
+        if (this.mode === 'rectangular') {
+            if (this.step === 1) {
+                const p1 = this.corners[0];
+                const p2 = p;
+                const rectPts = [
+                    { x: p1.x, y: p1.y },
+                    { x: p2.x, y: p1.y },
+                    { x: p2.x, y: p2.y },
+                    { x: p1.x, y: p2.y }
+                ];
+                const scale = this.ctx.getViewState().scale;
+                const finalArcLen = this.getArcLength(scale);
+                this.pts = buildCloudFromPath(rectPts, finalArcLen);
+                this.saveCloud(true);
+            }
+        } else if (this.mode === 'polygonal') {
+            const start = this.corners[0];
+            const dist = distance(start, p);
+            const scale = this.ctx.getViewState().scale;
+            const threshold = 15 / scale;
+            
+            if (this.corners.length > 2 && dist < threshold) {
+                this.closePolygonalCloud();
+            } else {
+                this.corners.push(p);
+                this.ctx.setMessage(`REVCLOUD [Polygonal]: Specify next point (${this.corners.length}) or [Close/Undo]:`);
+                this.onMove(p, snapped);
+            }
+        }
+    }
+    
+    onMove(p: Point, snapped: boolean) {
+        const scale = this.ctx.getViewState().scale;
+        const currentArcLen = this.getArcLength(scale);
+        const style = getStyleSettings(this.ctx);
+        
+        if (this.mode === 'freehand') {
+            if (this.pts.length > 0) {
+                const last = this.pts[this.pts.length - 1];
+                const dist = distance(last, p);
+                
+                if (dist > currentArcLen) {
+                    last.bulge = 0.5;
+                    this.pts.push({ x: p.x, y: p.y });
+                    
+                    if (this.pts.length > 3) {
+                        const distToStart = distance(p, this.pts[0]);
+                        if (distToStart < currentArcLen * 1.5) {
+                            this.pts[this.pts.length - 1].bulge = 0.5;
+                            this.saveCloud(true);
+                            return;
+                        }
+                    }
+                }
+                
+                const previewPts = JSON.parse(JSON.stringify(this.pts));
+                if (previewPts.length > 0) {
+                    previewPts[previewPts.length - 1].bulge = 0.5;
+                    previewPts.push({ x: p.x, y: p.y });
+                }
+                this.ctx.setPreview([{
+                    id: 'p_revcloud',
+                    type: 'pline',
+                    isPreview: true,
+                    layer: style.layer,
+                    color: style.color || '#ff0055',
+                    points: previewPts,
+                    closed: false
+                } as any]);
+            }
+        } else if (this.mode === 'rectangular') {
+            if (this.corners.length === 1) {
+                const p1 = this.corners[0];
+                const p2 = p;
+                const rectPts = [
+                    { x: p1.x, y: p1.y },
+                    { x: p2.x, y: p1.y },
+                    { x: p2.x, y: p2.y },
+                    { x: p1.x, y: p2.y }
+                ];
+                const cloudPts = buildCloudFromPath(rectPts, currentArcLen);
+                this.ctx.setPreview([{
+                    id: 'p_revcloud',
+                    type: 'pline',
+                    isPreview: true,
+                    layer: style.layer,
+                    color: style.color || '#ff0055',
+                    points: cloudPts,
+                    closed: true
+                } as any]);
+            }
+        } else if (this.mode === 'polygonal') {
+            if (this.corners.length > 0) {
+                const currentVertices = [...this.corners, p];
+                const cloudPts = buildCloudFromPath(currentVertices, currentArcLen);
+                this.ctx.setPreview([{
+                    id: 'p_revcloud',
+                    type: 'pline',
+                    isPreview: true,
+                    layer: style.layer,
+                    color: style.color || '#ff0055',
+                    points: cloudPts,
+                    closed: false
+                } as any]);
+            }
+        }
+    }
+    
+    onInput(text: string): boolean {
+        const t = text.trim().toLowerCase();
+        
+        if (t === 'r' || t === 'rectangular') {
+            this.mode = 'rectangular';
+            this.corners = [];
+            this.pts = [];
+            this.step = 0;
+            this.ctx.setMessage("REVCLOUD [Rectangular]: Specify first corner:");
+            return true;
+        }
+        if (t === 'p' || t === 'polygonal') {
+            this.mode = 'polygonal';
+            this.corners = [];
+            this.pts = [];
+            this.step = 0;
+            this.ctx.setMessage("REVCLOUD [Polygonal]: Specify start point of polygon:");
+            return true;
+        }
+        if (t === 'f' || t === 'freehand') {
+            this.mode = 'freehand';
+            this.corners = [];
+            this.pts = [];
+            this.step = 0;
+            this.ctx.setMessage("REVCLOUD [Freehand]: Specify start point:");
+            return true;
+        }
+        if (t === 'a' || t === 'arc' || t === 'l' || t === 'length') {
+            this.ctx.setMessage("Specify custom bubble arc length:");
+            this.step = 99;
+            return true;
+        }
+        
+        if (this.step === 99) {
+            const val = parseFloat(t);
+            if (!isNaN(val) && val > 0) {
+                this.arcLength = val;
+                this.ctx.addLog(`REVCLOUD: Arc length set to ${val}`);
+            } else {
+                this.ctx.addLog("Invalid arc length. Using adaptive default.");
+            }
+            this.onStart();
+            return true;
+        }
+        
+        if (this.mode === 'polygonal' && this.corners.length > 0) {
+            if (t === 'c' || t === 'close' || t === '') {
+                if (this.corners.length >= 3) {
+                    this.closePolygonalCloud();
+                    return true;
+                } else {
+                    this.ctx.addLog("At least 3 points required to close.");
+                    return true;
+                }
+            }
+            if (t === 'u' || t === 'undo') {
+                this.corners.pop();
+                this.ctx.setMessage(`REVCLOUD [Polygonal]: Specify next point (${this.corners.length}) or [Close/Undo]:`);
+                return true;
+            }
+        }
+        
+        const last = this.corners.length > 0 ? this.corners[this.corners.length - 1] : (this.pts.length > 0 ? this.pts[this.pts.length-1] : null);
+        const p = resolvePointInput(text, last, this.ctx.getSettings(), this.ctx.lastMousePoint);
+        if (p) {
+            this.onClick(p, false);
+            return true;
+        }
+        return false;
+    }
+    
+    private closePolygonalCloud() {
+        const scale = this.ctx.getViewState().scale;
+        const currentArcLen = this.getArcLength(scale);
+        const cloudPts = buildCloudFromPath(this.corners, currentArcLen);
+        this.pts = cloudPts;
+        this.saveCloud(true);
+    }
+    
+    private getArcLength(scale: number): number {
+        if (this.arcLength !== null) return this.arcLength;
+        return Math.max(0.1, 24 / scale);
+    }
+    
+    private saveCloud(closed: boolean) {
+        if (this.pts.length < 3) {
+            this.ctx.onFinish();
+            return;
+        }
+        
+        const style = getStyleSettings(this.ctx);
+        const s: PolyShape = {
+            id: generateId(),
+            type: 'pline',
+            layer: style.layer,
+            color: style.color || '#ff0055',
+            points: JSON.parse(JSON.stringify(this.pts)),
+            closed: closed,
+            thickness: style.thickness || 2,
+            lineType: style.lineType || 'continuous'
+        };
+        
+        this.ctx.setLayers(prev => ({
+            ...prev,
+            [style.layer]: [...(prev[style.layer] || []), s]
+        }));
+        
+        this.ctx.addLog("REVCLOUD: revision cloud entity created.");
+        this.ctx.onFinish();
+    }
+    
+    onEnter() {
+        if (this.mode === 'polygonal' && this.corners.length >= 3) {
+            this.closePolygonalCloud();
+        } else {
+            this.saveCloud(false);
+        }
+    }
+    
+    onCancel() {
+        this.ctx.onFinish();
+    }
+}
+
 export class SplineCommand implements CADCommand {
     name = "SPLINE";
     public pts: Point[] = [];

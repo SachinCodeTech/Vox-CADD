@@ -2,7 +2,7 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo, useImperativeHandle, forwardRef } from 'react';
 import { AlertCircle, Ruler, Layers, Activity, ChevronDown, ChevronUp, Eye, EyeOff, X } from 'lucide-react';
 import { Shape, ViewState, AppSettings, SnapPoint, LayerConfig, Point, MTextShape, BlockDefinition, LayoutDefinition, LineTypeDefinition, LineType, CtbFile } from '../types';
-import { hitTestShape, findBestSnap, formatLength, formatAngle, formatDimensionValue, calculateDimensionValue, getShapesInRect, getShapeBounds, isRectIntersecting, formatDualLength, isShapeClosed, isPointInsideShape, getPolylineOffsetPoints, calculateShapeLength, distance, getAllShapesBounds, projectPointOnLine, calculateArea, getShapeBoundaryPoints, formatDualArea } from '../services/cadService';
+import { hitTestShape, findBestSnap, formatLength, formatAngle, formatDimensionValue, calculateDimensionValue, getShapesInRect, getShapeBounds, isRectIntersecting, formatDualLength, isShapeClosed, isPointInsideShape, getPolylineOffsetPoints, calculateShapeLength, distance, getAllShapesBounds, projectPointOnLine, calculateArea, getShapeBoundaryPoints, formatDualArea, resolvePointInput } from '../services/cadService';
 import { resolveShapeProperties, resolveColor, resolveLineWeight, resolveLineType } from '../services/propertyService';
 import { DrawingSpatialIndex } from '../services/spatialIndex';
 
@@ -44,6 +44,7 @@ interface CADCanvasProps {
   aiRecommendation?: string | null;
   isContextMenuOpen?: boolean;
   collaborators?: any[];
+  editingBlockName?: string | null;
 }
 
 export interface CADCanvasHandle {
@@ -59,7 +60,8 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     commandInput = '',
     aiRecommendation = null,
     isContextMenuOpen = false,
-    collaborators = []
+    collaborators = [],
+    editingBlockName = null
 }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
@@ -240,6 +242,10 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   const selectionSpatialIndex = useMemo(() => {
     return new DrawingSpatialIndex(allSelectableShapes, blocks);
   }, [allSelectableShapes, blocks]);
+
+  const drawingBoundsMemo = useMemo(() => {
+    return getAllShapesBounds(layers, blocks);
+  }, [layers, blocks]);
 
   const getAllShapesForRendering = useCallback(() => allRenderableShapes, [allRenderableShapes]);
 
@@ -509,13 +515,28 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               const isActive = isViewportActive && vp.id === activeViewportId;
               
               ctx.translate(vX, vY);
-              ctx.strokeStyle = isActive ? "#00bcd4" : "#adadad"; 
-              ctx.lineWidth = isActive ? 2 : 1;
-              ctx.strokeRect(0, 0, vW, vH);
               
-              const region = new Path2D();
-              region.rect(0, 0, vW, vH);
-              ctx.clip(region);
+              // Custom, optional, customizable border style for layout viewports
+              const borderVisible = vp.borderVisible !== false;
+              if (borderVisible || isActive) {
+                  ctx.save();
+                  ctx.strokeStyle = isActive ? "#00bcd4" : (vp.borderColor || "#adadad"); 
+                  ctx.lineWidth = isActive ? 1.8 : 1.0;
+                  if (vp.borderStyle === 'dashed') {
+                      ctx.setLineDash([6, 4]);
+                  } else if (vp.borderStyle === 'dotted') {
+                      ctx.setLineDash([2, 2]);
+                  } else {
+                      ctx.setLineDash([]);
+                  }
+                  ctx.strokeRect(0, 0, vW, vH);
+                  ctx.restore();
+              }
+              
+              // Watertight clipping path/stencil to prevent drafting content bleeding
+              ctx.beginPath();
+              ctx.rect(0, 0, vW, vH);
+              ctx.clip();
               
               // Render model space inside viewport
               const vts = vp.viewState.scale * ts;
@@ -527,11 +548,16 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               const halfVpH = (vp.height / 2) / vp.viewState.scale;
               const cx = -vp.viewState.originX;
               const cy = -vp.viewState.originY;
+              
+              // Add a generous 20% spatial padding so that dimensions, text labels, and 
+              // extension boundaries near layout viewport borders do not get clipped
+              const padX = halfVpW * 0.20;
+              const padY = halfVpH * 0.20;
               const vpBounds = {
-                  xMin: cx - halfVpW,
-                  yMin: cy - halfVpH,
-                  xMax: cx + halfVpW,
-                  yMax: cy + halfVpH
+                  xMin: cx - halfVpW - padX,
+                  yMin: cy - halfVpH - padY,
+                  xMax: cx + halfVpW + padX,
+                  yMax: cy + halfVpH + padY
               };
               const vShapes = renderingSpatialIndex.query(vpBounds);
               const visibleVShapes = vShapes.slice(0, MAX_RENDERED_ENTITIES);
@@ -565,6 +591,23 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         const sMin = calculateScreenToWorld(0, 0, view, w, h);
         const sMax = calculateScreenToWorld(w, h, view, w, h);
         
+        let minX = sMin.x;
+        let maxX = sMax.x;
+        let minY = sMax.y;
+        let maxY = sMin.y;
+
+        if (settings.unlimitedGrid === false) {
+            const limMinX = Math.min(settings.limitsMin.x, settings.limitsMax.x);
+            const limMaxX = Math.max(settings.limitsMin.x, settings.limitsMax.x);
+            const limMinY = Math.min(settings.limitsMin.y, settings.limitsMax.y);
+            const limMaxY = Math.max(settings.limitsMin.y, settings.limitsMax.y);
+
+            minX = Math.max(minX, limMinX);
+            maxX = Math.min(maxX, limMaxX);
+            minY = Math.max(minY, limMinY);
+            maxY = Math.min(maxY, limMaxY);
+        }
+
         let g = settings.gridSpacing;
         const majorEvery = settings.gridMajorInterval || 5;
         
@@ -573,10 +616,10 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         while (g * ts_adj < 5) g *= 5;
         
         if (settings.isometricGrid) {
-            const left = sMin.x;
-            const right = sMax.x;
-            const bottom = sMax.y;
-            const top = sMin.y;
+            const left = minX;
+            const right = maxX;
+            const bottom = minY;
+            const top = maxY;
 
             // 1. Draw Vertical lines
             ctx.lineWidth = 0.5 / ts;
@@ -675,14 +718,14 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
             ctx.lineWidth = 0.5 / ts;
             ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
             ctx.beginPath();
-            for(let x=Math.floor(sMin.x/g)*g; x<=sMax.x; x+=g){ 
+            for(let x=Math.floor(minX/g)*g; x<=maxX; x+=g){ 
                 if (Math.abs(x % (g * majorEvery)) > 0.001 && Math.abs(x) > 0.001) {
-                    ctx.moveTo(x, sMin.y); ctx.lineTo(x, sMax.y); 
+                    ctx.moveTo(x, minY); ctx.lineTo(x, maxY); 
                 }
             }
-            for(let y=Math.floor(sMax.y/g)*g; y<=sMin.y; y+=g){ 
+            for(let y=Math.floor(minY/g)*g; y<=maxY; y+=g){ 
                 if (Math.abs(y % (g * majorEvery)) > 0.001 && Math.abs(y) > 0.001) {
-                    ctx.moveTo(sMin.x, y); ctx.lineTo(sMax.x, y); 
+                    ctx.moveTo(minX, y); ctx.lineTo(maxX, y); 
                 }
             }
             ctx.stroke();
@@ -690,14 +733,14 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
             // Major Grid Lines
             ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
             ctx.beginPath();
-            for(let x=Math.floor(sMin.x/(g * majorEvery))*(g * majorEvery); x<=sMax.x; x+=(g * majorEvery)){
+            for(let x=Math.floor(minX/(g * majorEvery))*(g * majorEvery); x<=maxX; x+=(g * majorEvery)){
                 if (Math.abs(x) > 0.001) {
-                    ctx.moveTo(x, sMin.y); ctx.lineTo(x, sMax.y);
+                    ctx.moveTo(x, minY); ctx.lineTo(x, maxY);
                 }
             }
-            for(let y=Math.floor(sMax.y/(g * majorEvery))*(g * majorEvery); y<=sMin.y; y+=(g * majorEvery)){
+            for(let y=Math.floor(minY/(g * majorEvery))*(g * majorEvery); y<=maxY; y+=(g * majorEvery)){
                 if (Math.abs(y) > 0.001) {
-                    ctx.moveTo(sMin.x, y); ctx.lineTo(sMax.x, y);
+                    ctx.moveTo(minX, y); ctx.lineTo(maxX, y);
                 }
             }
             ctx.stroke();
@@ -705,21 +748,55 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
             // Main Axes (Origin Lines)
             ctx.strokeStyle = "rgba(0, 188, 212, 0.3)"; // Subtle Cyan for Origin
             ctx.beginPath();
-            if (0 >= sMin.x && 0 <= sMax.x) { ctx.moveTo(0, sMin.y); ctx.lineTo(0, sMax.y); }
-            if (0 >= sMax.y && 0 <= sMin.y) { ctx.moveTo(sMin.x, 0); ctx.lineTo(sMax.x, 0); }
+            if (0 >= minX && 0 <= maxX) { ctx.moveTo(0, minY); ctx.lineTo(0, maxY); }
+            if (0 >= minY && 0 <= maxY) { ctx.moveTo(minX, 0); ctx.lineTo(maxX, 0); }
             ctx.stroke();
         }
+      }
+
+      if (editingBlockName) {
+        const radius = 10 / ts;
+        ctx.strokeStyle = "rgba(16, 185, 129, 0.85)";
+        ctx.lineWidth = 1.8 / ts;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(-20 / ts, 0); ctx.lineTo(20 / ts, 0);
+        ctx.moveTo(0, -20 / ts); ctx.lineTo(0, 20 / ts);
+        ctx.stroke();
+
+        ctx.save();
+        ctx.scale(1, -1);
+        ctx.font = `bold ${10 / ts}px monospace`;
+        ctx.fillStyle = "rgba(16, 185, 129, 0.95)";
+        ctx.textAlign = "center";
+        ctx.fillText("BLOCK INSERTION ORIGIN (0,0)", 0, - (24 / ts));
+        if (settings.snap) {
+          ctx.font = `${8 / ts}px monospace`;
+          ctx.fillStyle = "rgba(16, 185, 129, 0.65)";
+          ctx.fillText(`GRID SNAP ACTIVE`, 0, - (36 / ts));
+        }
+        ctx.restore();
       }
     
       const renderable = getAllShapesForRendering();
       
       const sMin = calculateScreenToWorld(0, 0, view, w, h);
       const sMax = calculateScreenToWorld(w, h, view, w, h);
+      const rawXMin = Math.min(sMin.x, sMax.x);
+      const rawYMin = Math.min(sMin.y, sMax.y);
+      const rawXMax = Math.max(sMin.x, sMax.x);
+      const rawYMax = Math.max(sMin.y, sMax.y);
+      const padX = (rawXMax - rawXMin) * 0.20;
+      const padY = (rawYMax - rawYMin) * 0.20;
+      
       const viewportBounds = { 
-          xMin: Math.min(sMin.x, sMax.x), 
-          yMin: Math.min(sMin.y, sMax.y), 
-          xMax: Math.max(sMin.x, sMax.x), 
-          yMax: Math.max(sMin.y, sMax.y) 
+          xMin: rawXMin - padX, 
+          yMin: rawYMin - padY, 
+          xMax: rawXMax + padX, 
+          yMax: rawYMax + padY 
       };
       
       const visibleShapes = renderingSpatialIndex.query(viewportBounds);
@@ -738,11 +815,18 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
 
     const sMin = calculateScreenToWorld(0, 0, view, w, h);
     const sMax = calculateScreenToWorld(w, h, view, w, h);
+    const rawXMin = Math.min(sMin.x, sMax.x);
+    const rawYMin = Math.min(sMin.y, sMax.y);
+    const rawXMax = Math.max(sMin.x, sMax.x);
+    const rawYMax = Math.max(sMin.y, sMax.y);
+    const padX = (rawXMax - rawXMin) * 0.20;
+    const padY = (rawYMax - rawYMin) * 0.20;
+
     const viewportBounds = { 
-        xMin: Math.min(sMin.x, sMax.x), 
-        yMin: Math.min(sMin.y, sMax.y), 
-        xMax: Math.max(sMin.x, sMax.x), 
-        yMax: Math.max(sMin.y, sMax.y) 
+        xMin: rawXMin - padX, 
+        yMin: rawYMin - padY, 
+        xMax: rawXMax + padX, 
+        yMax: rawYMax + padY 
     };
     const visibleShapes = renderingSpatialIndex.query(viewportBounds);
 
@@ -981,6 +1065,97 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
             }
         });
         ctx.restore();
+    }
+
+    // Real-time Coordinate Input Preview Ghost
+    if (isCommandActive && commandInput && commandInput.trim() !== '') {
+        const pGhost = resolvePointInput(commandInput, basePoint || null, settings, worldCursorRef.current);
+        if (pGhost && !isNaN(pGhost.x) && !isNaN(pGhost.y)) {
+            const screenGhost = worldToScreen(pGhost.x, pGhost.y);
+
+            ctx.save();
+            ctx.setTransform(r, 0, 0, r, 0, 0); // stable screen space for overlay label
+
+            // 1. Draw a prominent blinking target crosshair & circle at the parsed point
+            const pulse = (Math.sin(Date.now() / 150) + 1) / 2;
+            ctx.strokeStyle = `rgba(236, 72, 153, ${0.7 + pulse * 0.3})`; // neon pink pulse
+            ctx.lineWidth = 2;
+            
+            // Draw circle
+            ctx.beginPath();
+            ctx.arc(screenGhost.x, screenGhost.y, 8, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Draw outer dashed circle
+            ctx.save();
+            ctx.strokeStyle = `rgba(236, 72, 153, ${0.4 + pulse * 0.3})`;
+            ctx.setLineDash([4, 2]);
+            ctx.beginPath();
+            ctx.arc(screenGhost.x, screenGhost.y, 16, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+
+            // Draw center cross hair of the target
+            ctx.beginPath();
+            ctx.moveTo(screenGhost.x - 12, screenGhost.y);
+            ctx.lineTo(screenGhost.x + 12, screenGhost.y);
+            ctx.moveTo(screenGhost.x, screenGhost.y - 12);
+            ctx.lineTo(screenGhost.x, screenGhost.y + 12);
+            ctx.stroke();
+
+            // 2. Draw a dashed connector line from basePoint (clicked origin) to pGhost
+            if (basePoint) {
+                const screenBase = worldToScreen(basePoint.x, basePoint.y);
+                ctx.save();
+                ctx.strokeStyle = "rgba(236, 72, 153, 0.45)";
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.moveTo(screenBase.x, screenBase.y);
+                ctx.lineTo(screenGhost.x, screenGhost.y);
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            // 3. Draw a floating text label displaying the coordinates and relationship
+            ctx.font = '700 10px "JetBrains Mono", "Fira Code", monospace';
+            let label = `GHOST POINT: (${formatLength(pGhost.x, settings)}, ${formatLength(pGhost.y, settings)})`;
+            if (basePoint) {
+                const dist = distance(basePoint, pGhost);
+                const angle = Math.atan2(pGhost.y - basePoint.y, pGhost.x - basePoint.x) * 180 / Math.PI;
+                const posAngle = (angle + 360) % 360;
+                label += ` [Offset: ${formatLength(dist, settings)} < ${posAngle.toFixed(1)}°]`;
+            }
+            
+            const tw = ctx.measureText(label).width;
+            const padX = 8;
+            const padY = 4;
+            const rectW = tw + padX * 2;
+            const rectH = 18;
+            const bx = screenGhost.x + 15;
+            const by = screenGhost.y - 35;
+
+            // Draw background pill
+            ctx.fillStyle = 'rgba(17, 12, 18, 0.9)'; // rich dark plum background
+            ctx.beginPath();
+            if (ctx.roundRect) {
+                ctx.roundRect(bx, by, rectW, rectH, 4);
+            } else {
+                ctx.rect(bx, by, rectW, rectH);
+            }
+            ctx.fill();
+
+            // Border
+            ctx.strokeStyle = 'rgba(236, 72, 153, 0.7)';
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+
+            // Text
+            ctx.fillStyle = '#f472b6'; // pastel pink
+            ctx.fillText(label, bx + padX, by + 12);
+
+            ctx.restore();
+        }
     }
 
     // AI Thinking Overlay
@@ -1787,9 +1962,27 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           // Use size from shape (if parsed from DWG) or from style
           // User suggestion: Text height = Drawing scale * 1.65
           const defaultH = (settings.drawingScale || 1.0) * 1.65;
-          const finalDimTextSize = s.size || s.height || ds.textSize || defaultH;
-          const arrowS = (s.size ? s.size * 0.8 : (ds.arrowSize || defaultH * 0.8)) * (ds.arrowScale || 1.0);
-          const tOffset = s.size ? s.size * 0.4 : (ds.textOffset || defaultH * 0.4);
+          const rawSize = s.size || s.height || ds.textSize || defaultH;
+          
+          // Compute adaptive auto-scale factor depending on general drawing bounds size vs raw text size
+          let finalDimScale = 1.0;
+          const shapesBounds = drawingBoundsMemo;
+          if (shapesBounds) {
+              const drawingSize = Math.max(shapesBounds.xMax - shapesBounds.xMin, shapesBounds.yMax - shapesBounds.yMin);
+              if (drawingSize > 1.0) {
+                  const optimalTextH = drawingSize * 0.016; // 1.6% of overall drawing extents
+                  const currentTextH = rawSize * finalDimScale;
+                  if (currentTextH > drawingSize * 0.032 || currentTextH < drawingSize * 0.005) {
+                      finalDimScale = optimalTextH / rawSize;
+                  }
+              }
+          }
+
+          const finalDimTextSize = rawSize * finalDimScale;
+          // Scale arrow size in direct proportion to visual text size to prevent bloating in imported drawings
+          const rawArrowS = (s.size ? s.size * 0.72 : (ds.arrowSize || rawSize * 0.72)) * (ds.arrowScale || 1.0) * finalDimScale;
+          const arrowS = Math.max(finalDimTextSize * 0.15, Math.min(finalDimTextSize * 0.32, rawArrowS * 0.32));
+          const tOffset = (s.size ? s.size * 0.4 : (ds.textOffset || defaultH * 0.4)) * finalDimScale;
 
           const measuredValue = calculateDimensionValue(s, s.dimX, s.dimY);
           const rawText = s.text || '<>';
@@ -1950,6 +2143,14 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
               break;
           }
           
+          // Fallback safeguards for unpopulated or NaN dimension points
+          if (typeof s.x1 !== 'number' || isNaN(s.x1)) s.x1 = 0;
+          if (typeof s.y1 !== 'number' || isNaN(s.y1)) s.y1 = 0;
+          if (typeof s.x2 !== 'number' || isNaN(s.x2)) s.x2 = s.x1 + 10;
+          if (typeof s.y2 !== 'number' || isNaN(s.y2)) s.y2 = s.y1;
+          if (typeof s.dimX !== 'number' || isNaN(s.dimX)) s.dimX = (s.x1 + s.x2) / 2;
+          if (typeof s.dimY !== 'number' || isNaN(s.dimY)) s.dimY = (s.y1 + s.y2) / 2 + 15;
+
           let dx = s.x2 - s.x1, dy = s.y2 - s.y1;
           let d_len = Math.sqrt(dx * dx + dy * dy);
           if (d_len === 0) break;
@@ -2118,9 +2319,30 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
           const a = Math.atan2(dy, dx);
           
-          // Use dimStyle standard arrow size or a default if not defined
-          const ds = settings.dimStyles[settings.activeDimStyle] || settings.dimStyles['standard'] || { arrowSize: 200 };
-          const arrowS = ds.arrowSize * (ds.arrowScale || 1.0);
+          // Use proportion setup centered on active dimension style features
+          const ds = settings.dimStyles[settings.activeDimStyle] || settings.dimStyles['standard'] || {
+            arrowSize: 2.5, textSize: 2.5, textOffset: 0.6, extendLine: 1.25, offsetLine: 0.6, precision: 2
+          };
+          
+          const defaultH = (settings.drawingScale || 1.0) * 1.65;
+          const rawSize = s.size || s.height || ds.textSize || defaultH;
+          
+          let finalDimScale = 1.0;
+          const shapesBounds = drawingBoundsMemo;
+          if (shapesBounds) {
+              const drawingSize = Math.max(shapesBounds.xMax - shapesBounds.xMin, shapesBounds.yMax - shapesBounds.yMin);
+              if (drawingSize > 1.0) {
+                  const optimalTextH = drawingSize * 0.016; // 1.6% of overall drawing extents
+                  const currentTextH = rawSize * finalDimScale;
+                  if (currentTextH > drawingSize * 0.032 || currentTextH < drawingSize * 0.005) {
+                      finalDimScale = optimalTextH / rawSize;
+                  }
+              }
+          }
+
+          const finalDimTextSize = rawSize * finalDimScale;
+          const rawArrowS = (s.size ? s.size * 0.72 : (ds.arrowSize || rawSize * 0.72)) * (ds.arrowScale || 1.0) * finalDimScale;
+          const arrowS = Math.max(finalDimTextSize * 0.15, Math.min(finalDimTextSize * 0.32, rawArrowS * 0.32));
           
           ctx.save();
           ctx.translate(s.x1, s.y1);
@@ -2440,7 +2662,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         }
         break;
     }
-    if(s.filled) { ctx.fillStyle = baseColor; ctx.globalAlpha = isS ? 0.35 : isH ? 0.3 : 0.25; ctx.fill(); ctx.globalAlpha = 1.0; }
+    if(s.filled) { ctx.fillStyle = baseColor; ctx.globalAlpha = isS ? 0.35 : isH ? 0.3 : 0.08; ctx.fill(); ctx.globalAlpha = 1.0; }
     
     if (isComplexLT && !s.isPreview && !isH && !isS) {
         let pts: Point[] = [];
@@ -2527,7 +2749,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     
     if (finalPattern === 'solid') {
       ctx.fillStyle = hatchColor;
-      ctx.globalAlpha = 0.5; // Slightly more opaque for solid hatch
+      ctx.globalAlpha = 0.08; // Beautiful soft opacity for solid hatch fills so underlying vectors remain visible
       ctx.beginPath();
       ctx.moveTo(points[0].x, points[0].y);
       points.forEach((p, idx) => { if (idx > 0) ctx.lineTo(p.x, p.y); });

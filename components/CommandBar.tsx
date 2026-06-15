@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Bot, Send, Terminal, Mic, MicOff, ChevronUp, ChevronDown, Paperclip, X, Check, History, Target } from 'lucide-react';
+import { Bot, Send, Terminal, Mic, MicOff, ChevronUp, ChevronDown, Paperclip, X, Check, History, Target, Image, Sparkles, UploadCloud, Camera } from 'lucide-react';
 
 interface CommandBarProps {
   onCommand: (cmd: string) => void;
@@ -30,6 +30,7 @@ export const COMMAND_LIST = [
     { cmd: 'DONUT', alias: 'DO', desc: 'Create filled circles or pipes' }, 
     { cmd: 'POINT', alias: 'PO', desc: 'Create point objects' }, 
     { cmd: 'SKETCH', alias: 'SKETCH', desc: 'Freehand sketching' },
+    { cmd: 'REVCLOUD', alias: 'REVC', desc: 'Create revision clouds' },
     { cmd: 'MOVE', alias: 'M', desc: 'Move objects' }, 
     { cmd: 'COPY', alias: 'CO', desc: 'Copy objects' }, 
     { cmd: 'ROTATE', alias: 'RO', desc: 'Rotate objects' },
@@ -95,6 +96,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
   const dragStartY = useRef<number>(0);
   const startHeight = useRef<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const rightFileInputRef = useRef<HTMLInputElement>(null);
 
   const isHistoryOpen = historyHeight > 0;
 
@@ -105,15 +107,14 @@ const CommandBar: React.FC<CommandBarProps> = ({
   useEffect(() => {
     if (value && value.trim()) {
       setShowSuggestions(true);
-    } else {
+    } else if (activeTab === 'cli') {
       setShowSuggestions(false);
     }
-  }, [value]);
+  }, [value, activeTab]);
 
   const suggestions = useMemo(() => {
-    if (!value) return [];
-    
     if (activeTab === 'cli') {
+        if (!value) return [];
         const search = value.trim().toUpperCase();
         if (!search) return [];
         
@@ -121,19 +122,54 @@ const CommandBar: React.FC<CommandBarProps> = ({
           let score = 0;
           const cmd = c.cmd.toUpperCase();
           const alias = c.alias ? c.alias.toUpperCase() : '';
+          const desc = c.desc ? c.desc.toUpperCase() : '';
           
           if (cmd === search) {
-            score = 100;
+            score = 1000;
           } else if (alias === search) {
-            score = 90;
+            score = 900;
           } else if (cmd.startsWith(search)) {
-            score = 80;
+            score = 800 - (cmd.length - search.length);
           } else if (alias.startsWith(search)) {
-            score = 70;
+            score = 700 - (alias.length - search.length);
           } else if (cmd.includes(search)) {
-            score = 50;
+            score = 600 - cmd.indexOf(search);
           } else if (alias.includes(search)) {
-            score = 40;
+            score = 500 - alias.indexOf(search);
+          } else {
+            // Fuzzy match: check if all characters of search appear sequentially within cmd
+            let cmdIdx = 0;
+            let matchCount = 0;
+            for (let char of search) {
+              const foundIdx = cmd.indexOf(char, cmdIdx);
+              if (foundIdx !== -1) {
+                matchCount++;
+                cmdIdx = foundIdx + 1;
+              } else {
+                break;
+              }
+            }
+            if (matchCount === search.length) {
+              score = 400 - cmdIdx;
+            } else {
+              // Try the same sequential match on alias
+              let aliasIdx = 0;
+              let aliasMatchCount = 0;
+              for (let char of search) {
+                const foundIdx = alias.indexOf(char, aliasIdx);
+                if (foundIdx !== -1) {
+                  aliasMatchCount++;
+                  aliasIdx = foundIdx + 1;
+                } else {
+                  break;
+                }
+              }
+              if (aliasMatchCount === search.length) {
+                score = 300 - aliasIdx;
+              } else if (desc.includes(search)) {
+                score = 100 - desc.indexOf(search);
+              }
+            }
           }
           
           return { ...c, score, type: 'cmd' as const };
@@ -362,7 +398,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
                     <div className="absolute bottom-full left-0 mb-2 w-full bg-[#111] border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,1)] z-[200] overflow-hidden backdrop-blur-xl max-h-[260px] flex flex-col">
                         <div className="px-3 py-1.5 border-b border-white/5 bg-[#161619] flex justify-between items-center shrink-0">
                             <span className="text-[7.5px] font-black text-cyan-400/80 uppercase tracking-widest leading-relaxed">
-                                {activeTab === 'cli' ? `CMD SUGGESTIONS STARTING WITH "${value.toUpperCase()}"` : 'Architectural Prompts'}
+                                {activeTab === 'cli' ? `CMD SUGGESTIONS FOR "${value.toUpperCase()}"` : 'Architectural Prompts'}
                             </span>
                             {activeTab === 'ai' && <Bot size={10} className="text-indigo-500" />}
                         </div>
@@ -463,128 +499,170 @@ const CommandBar: React.FC<CommandBarProps> = ({
                     </button>
                 </div>
             </form>
-          ) : (
-            <form onSubmit={handleSubmit} className={`flex items-end gap-2 bg-[#0a0a0c] border rounded-xl px-3 py-1.5 min-h-10 transition-all ${isAiThinking ? 'border-indigo-500 shadow-[0_0_20px_rgba(99,102,241,0.2)]' : 'border-white/10 focus-within:border-indigo-500/50'}`}>
-                {showSuggestions && suggestions.length > 0 && (
-                    <div className="absolute bottom-full left-0 mb-2 w-full bg-[#111] border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,1)] z-[200] overflow-hidden backdrop-blur-xl max-h-[260px] flex flex-col">
-                        <div className="px-3 py-1.5 border-b border-white/5 bg-[#161619] flex gap-2 items-center shrink-0">
-                            <Bot size={10} className="text-indigo-500" />
-                            <span className="text-[7.5px] font-black text-neutral-500 uppercase tracking-widest leading-relaxed">Architectural Patterns</span>
-                        </div>
-                        <div className="overflow-y-auto flex-1 divide-y divide-white/5 animate-in fade-in-50 duration-200">
-                            {suggestions.map((s: any, i) => (
-                                <button 
-                                  key={`suggestion-ai-${i}`} 
-                                  type="button" 
-                                  onClick={() => { 
-                                    onAiQuery(s.cmd);
-                                    onChange(''); 
-                                    setShowSuggestions(false); 
-                                    setSuggestionIdx(-1); 
-                                  }} 
-                                  className={`w-full px-4 py-3 text-left transition-all flex flex-col gap-0.5 ${suggestionIdx === i ? 'bg-indigo-600 text-white' : 'text-neutral-300 hover:bg-white/5'}`}
-                                >
-                                    <span className={`text-[10px] font-black uppercase tracking-tight ${suggestionIdx === i ? 'text-white' : 'text-indigo-400'}`}>{s.label}</span>
-                                    <span className={`text-[8.5px] line-clamp-1 normal-case font-medium ${suggestionIdx === i ? 'text-white/70' : 'text-neutral-500'}`}>{s.cmd}</span>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                )}
-                <div className="flex items-center gap-2 shrink-0 pb-2">
-                  <div className="relative">
-                    <Bot size={14} className={isAiThinking ? 'text-indigo-400 animate-pulse' : 'text-indigo-500'} />
-                    {isAiThinking && <div className="absolute inset-0 bg-indigo-500/20 blur-sm animate-ping rounded-full" />}
-                  </div>
-                  {onAction && (
-                    <div className="flex items-center gap-1">
-                      <input 
-                        type="file" 
-                        ref={fileInputRef} 
-                        className="hidden" 
-                        accept="image/*" 
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                             const reader = new FileReader();
-                             reader.onload = (event) => {
-                                const dataUrl = event.target?.result as string;
-                                onAction('interpret_sketch', dataUrl);
-                             };
-                             reader.readAsDataURL(file);
-                          }
-                        }}
-                      />
-                      <button 
-                        type="button"
-                        disabled={isAiThinking}
-                        onClick={() => fileInputRef.current?.click()}
-                        className="w-7 h-7 flex items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500 hover:text-white transition-all disabled:opacity-30"
-                        title="Upload Rough Sketch"
-                      >
-                        <Paperclip size={12} />
-                      </button>
-                      <button 
-                        type="button"
-                        disabled={isAiThinking}
-                        onClick={() => onAction('interpret_sketch')}
-                        className="w-7 h-7 flex items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500 hover:text-white transition-all disabled:opacity-30"
-                        title="Capture Component Area"
-                      >
-                        <Target size={12} />
-                      </button>
-                    </div>
+           ) : (
+              <form onSubmit={handleSubmit} className={`flex flex-col gap-2.5 bg-[#040406]/95 border rounded-[22px] p-3 w-full transition-all relative shadow-[0_15px_35px_rgba(0,0,0,0.6)] ${isAiThinking ? 'border-indigo-500 shadow-[0_0_24px_rgba(99,102,241,0.2)]' : 'border-indigo-500/25 focus-within:border-indigo-500/50 focus-within:shadow-[0_0_24px_rgba(99,102,241,0.15)]'}`}>
+                  {showSuggestions && suggestions.length > 0 && (
+                      <div className="absolute bottom-full left-0 mb-2 w-full bg-[#111] border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,1)] z-[200] overflow-hidden backdrop-blur-xl max-h-[260px] flex flex-col">
+                          <div className="px-3 py-1.5 border-b border-white/5 bg-[#161619] flex gap-2 items-center shrink-0">
+                              <Bot size={10} className="text-indigo-500" />
+                              <span className="text-[7.5px] font-black text-neutral-500 uppercase tracking-widest leading-relaxed">Architectural Patterns</span>
+                          </div>
+                          <div className="overflow-y-auto flex-1 divide-y divide-white/5 animate-in fade-in-50 duration-200">
+                              {suggestions.map((s: any, i) => (
+                                  <button 
+                                    key={`suggestion-ai-${i}`} 
+                                    type="button" 
+                                    onClick={() => { 
+                                      onAiQuery(s.cmd);
+                                      onChange(''); 
+                                      setShowSuggestions(false); 
+                                      setSuggestionIdx(-1); 
+                                    }} 
+                                    className={`w-full px-4 py-3 text-left transition-all flex flex-col gap-0.5 ${suggestionIdx === i ? 'bg-indigo-600 text-white' : 'text-neutral-300 hover:bg-white/5'}`}
+                                  >
+                                      <span className={`text-[10px] font-black uppercase tracking-tight ${suggestionIdx === i ? 'text-white' : 'text-indigo-400'}`}>{s.label}</span>
+                                      <span className={`text-[8.5px] line-clamp-1 normal-case font-medium ${suggestionIdx === i ? 'text-white/70' : 'text-neutral-500'}`}>{s.cmd}</span>
+                                  </button>
+                              ))}
+                          </div>
+                      </div>
                   )}
-                </div>
-                <div className="flex-1 min-w-0 h-full">
-                    <textarea 
-                        autoFocus
-                        id="ai-command-input"
-                        disabled={isAiThinking}
-                        name={`vox-ai-${Date.now()}`}
-                        value={value}
-                        onFocus={() => setShowSuggestions(true)}
-                        onChange={e => {
-                            onChange(e.target.value);
-                            e.target.style.height = 'auto';
-                            e.target.style.height = `${Math.max(32, Math.min(e.target.scrollHeight, 120))}px`;
-                        }}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter' && !e.shiftKey && !isAiThinking) {
-                            e.preventDefault();
-                            handleSubmit(e as any);
-                            (e.target as HTMLTextAreaElement).style.height = '32px';
-                          }
-                        }}
-                        className="w-full bg-transparent text-white outline-none text-[12px] placeholder:text-neutral-800 tracking-tight disabled:opacity-50 select-text font-medium resize-none py-1.5 h-[32px] max-h-[120px] scrollbar-none block focus:ring-0 ring-offset-0 ring-0"
-                        placeholder={isAiThinking ? "PRINCIPAL ARCHITECT IS THINKING..." : "INTERACT WITH AI (E.G. 'PLAN 50x50 PLOT', 'REPLACE ALL CIRCLES')..."}
-                        autoComplete="new-ai-query"
-                        autoCorrect="off"
-                        autoCapitalize="off"
-                        spellCheck={false}
-                        data-lpignore="true"
-                        role="presentation"
-                    />
-                </div>
-                <div className="flex items-center gap-1.5 py-1 shrink-0 pl-1">
-                    <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) {
-                            const r = new FileReader();
-                            r.onload = (ev) => setAttachment(ev.target?.result as string);
-                            r.readAsDataURL(f);
-                        }
-                    }} accept="image/*" />
-                    <button type="button" title="Attach Sketch" disabled={isAiThinking} onClick={() => fileInputRef.current?.click()} className={`w-8 h-8 rounded-lg flex items-center justify-center hover:bg-white/5 transition-colors ${attachment ? 'text-cyan-400 bg-cyan-400/10' : 'text-neutral-600'}`}><Paperclip size={14} /></button>
-                    <button type="button" title="Microphone Toggle" disabled={isAiThinking} onClick={onLiveToggle} className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${isLiveActive ? 'text-white bg-red-600 animate-pulse' : 'text-neutral-600 hover:bg-white/5'}`}>
-                        {isLiveActive ? <MicOff size={14} /> : <Mic size={14} />}
-                    </button>
-                    <button type="submit" disabled={isAiThinking || (!value.trim() && !attachment)} className={`w-9 h-9 rounded-xl text-white flex items-center justify-center shadow-lg active:scale-95 transition-all shrink-0 ${isAiThinking ? 'bg-neutral-800' : 'bg-indigo-600 shadow-indigo-900/20'}`}>
-                        {isAiThinking ? <div className="w-3 h-3 border-2 border-white/20 border-t-white rounded-full animate-spin" /> : <Send size={15} strokeWidth={3} />}
-                    </button>
-                </div>
-            </form>
-          )}
+                  
+                  {/* Center Query Textbox */}
+                  <div className="w-full flex items-center px-1">
+                      <textarea 
+                         autoFocus
+                         id="ai-command-input"
+                         disabled={isAiThinking}
+                         name={`vox-ai-${Date.now()}`}
+                         value={value}
+                         onFocus={() => setShowSuggestions(true)}
+                         onChange={e => {
+                             onChange(e.target.value);
+                             e.target.style.height = 'auto';
+                             e.target.style.height = `${Math.max(36, Math.min(e.target.scrollHeight, 120))}px`;
+                         }}
+                         onKeyDown={e => {
+                           if (e.key === 'Enter' && !e.shiftKey && !isAiThinking) {
+                             e.preventDefault();
+                             handleSubmit(e as any);
+                             (e.target as HTMLTextAreaElement).style.height = '36px';
+                           }
+                         }}
+                         className="w-full bg-transparent text-white outline-none text-[13px] placeholder:text-neutral-500 tracking-wider disabled:opacity-50 select-text font-bold resize-none py-1.5 h-[36px] max-h-[120px] scrollbar-none block focus:ring-0 ring-offset-0 ring-0 transition-colors"
+                         placeholder={isAiThinking ? "PRINCIPAL ARCHITECT IS THINKING..." : "INTERACT WITH AI / E.G. \"PLAN...\""}
+                         autoComplete="new-ai-query"
+                         autoCorrect="off"
+                         autoCapitalize="off"
+                         spellCheck={false}
+                         data-lpignore="true"
+                         role="presentation"
+                      />
+                  </div>
+
+                  {/* Bottom Control Bar splitting left actions and right actions */}
+                  <div className="flex items-center justify-between border-t border-white/5 pt-2 px-1">
+                      {/* Left Action Buttons */}
+                      <div className="flex items-center gap-1.5">
+                          <button 
+                             type="button"
+                             onClick={() => {
+                                 const el = document.getElementById('ai-command-input');
+                                 if (el) el.focus();
+                                 setShowSuggestions(prev => !prev);
+                             }}
+                             className={`w-8 h-8 flex items-center justify-center rounded-xl bg-indigo-500/10 border border-indigo-500/15 text-indigo-400 hover:bg-indigo-500 hover:text-black active:scale-95 transition-all outline-none cursor-pointer disabled:opacity-30 ${showSuggestions ? 'ring-1 ring-indigo-500bg-indigo-500/20' : ''}`}
+                             title="Show AI Commands & Architectural Patterns List"
+                             disabled={isAiThinking}
+                          >
+                             <Sparkles size={13} className={isAiThinking ? 'text-indigo-400 animate-pulse' : ''} />
+                          </button>
+
+                          <input 
+                             type="file" 
+                             ref={fileInputRef} 
+                             className="hidden" 
+                             accept="image/*" 
+                             onChange={(e) => {
+                               const file = e.target.files?.[0];
+                               if (file) {
+                                  const reader = new FileReader();
+                                  reader.onload = (event) => {
+                                     const dataUrl = event.target?.result as string;
+                                     if (onAction) onAction('interpret_sketch', dataUrl);
+                                  };
+                                  reader.readAsDataURL(file);
+                               }
+                             }}
+                          />
+                          <button 
+                             type="button"
+                             disabled={isAiThinking}
+                             onClick={() => fileInputRef.current?.click()}
+                             className="w-8 h-8 flex items-center justify-center rounded-xl bg-emerald-500/10 border border-emerald-500/15 text-emerald-400 hover:bg-emerald-500 hover:text-black active:scale-95 transition-all outline-none cursor-pointer disabled:opacity-30"
+                             title="Upload photo or sketch component to instantly convert into professional vector CAD drawing"
+                          >
+                             <UploadCloud size={13} />
+                          </button>
+
+                          <button 
+                             type="button"
+                             disabled={isAiThinking}
+                             onClick={() => onAction && onAction('interpret_sketch')}
+                             className="w-8 h-8 flex items-center justify-center rounded-xl bg-cyan-500/10 border border-cyan-500/15 text-cyan-400 hover:bg-cyan-500 hover:text-black active:scale-95 transition-all outline-none cursor-pointer disabled:opacity-30"
+                             title="Screen Capture the active workspace canvas and auto-vectorize its contents"
+                          >
+                             <Camera size={13} />
+                          </button>
+
+                          <input 
+                             type="file" 
+                             ref={rightFileInputRef} 
+                             className="hidden" 
+                             onChange={(e) => {
+                                 const f = e.target.files?.[0];
+                                 if (f) {
+                                     const r = new FileReader();
+                                     r.onload = (ev) => setAttachment(ev.target?.result as string);
+                                     r.readAsDataURL(f);
+                                 }
+                             }} 
+                             accept="image/*" 
+                          />
+                          <button 
+                             type="button" 
+                             title="Attach a reference graphic or sketch to your text prompt context" 
+                             disabled={isAiThinking} 
+                             onClick={() => rightFileInputRef.current?.click()} 
+                             className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-95 disabled:opacity-30 border ${attachment ? 'text-violet-400 bg-violet-500/10 border-violet-500/20' : 'text-violet-500/80 hover:text-violet-400 bg-violet-500/5 hover:bg-violet-500/10 border-violet-500/5'}`}
+                          >
+                             <Paperclip size={13} />
+                          </button>
+                      </div>
+
+                      {/* Right Actions: Voice Mic, Send */}
+                      <div className="flex items-center gap-1.5">
+                          <button 
+                             type="button" 
+                             title="Microphone Toggle (Voice Input)" 
+                             disabled={isAiThinking} 
+                             onClick={onLiveToggle} 
+                             className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-95 disabled:opacity-30 ${isLiveActive ? 'text-white bg-red-600 animate-pulse' : 'text-neutral-500 hover:text-neutral-300 bg-indigo-500/5 hover:bg-indigo-500/10'}`}
+                          >
+                             {isLiveActive ? <MicOff size={13} /> : <Mic size={13} />}
+                          </button>
+
+                          <button 
+                             type="submit" 
+                             disabled={isAiThinking || (!value.trim() && !attachment)} 
+                             className={`w-8 h-8 rounded-full text-white flex items-center justify-center shadow-lg active:scale-95 transition-all shrink-0 cursor-pointer disabled:opacity-30 ${isAiThinking ? 'bg-neutral-800' : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-500/25'}`}
+                          >
+                             {isAiThinking ? <div className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" /> : <Send size={13} strokeWidth={3} />}
+                          </button>
+                      </div>
+                  </div>
+              </form>
+            )}
         </div>
       </div>
 

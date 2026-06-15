@@ -632,7 +632,6 @@ export const getShapeBounds = (s: Shape, blocks?: Record<string, BlockDefinition
         case 'pline':
         case 'polygon':
         case 'spline':
-        case 'hatch':
             if (!s.points || s.points.length === 0) {
                 bounds = { xMin: 0, yMin: 0, xMax: 0, yMax: 0 };
             } else {
@@ -643,7 +642,7 @@ export const getShapeBounds = (s: Shape, blocks?: Record<string, BlockDefinition
                     pxMax = Math.max(pxMax, p1.x); pyMax = Math.max(pyMax, p1.y);
                     
                     const nextIdx = (i + 1) % s.points.length;
-                    const isActuallyClosed = s.type === 'polygon' || s.type === 'hatch' || !!(s as any).closed;
+                    const isActuallyClosed = s.type === 'polygon' || (s.type as string) === 'hatch' || !!(s as any).closed;
                     if (nextIdx === 0 && !isActuallyClosed) continue;
                     const p2 = s.points[nextIdx];
                     
@@ -763,6 +762,35 @@ export const getShapeBounds = (s: Shape, blocks?: Record<string, BlockDefinition
                 bounds = { xMin: dxMin - s.thickness/2, yMin: dyMin - s.thickness/2, xMax: dxMax + s.thickness/2, yMax: dyMax + s.thickness/2 };
             }
             break;
+        case 'hatch': {
+            let hxMin = Infinity, hyMin = Infinity, hxMax = -Infinity, hyMax = -Infinity;
+            const hLoops = (s as any).loops || ((s as any).points ? [(s as any).points] : []);
+            hLoops.forEach((loop: Point[]) => {
+                loop.forEach((p: Point) => {
+                    hxMin = Math.min(hxMin, p.x); hyMin = Math.min(hyMin, p.y);
+                    hxMax = Math.max(hxMax, p.x); hyMax = Math.max(hyMax, p.y);
+                });
+            });
+            if (hxMin === Infinity) {
+                bounds = { xMin: 0, yMin: 0, xMax: 0, yMax: 0 };
+            } else {
+                bounds = { xMin: hxMin, yMin: hyMin, xMax: hxMax, yMax: hyMax };
+            }
+            break;
+        }
+        case 'leader': {
+            if ((s as any).points && (s as any).points.length > 0) {
+                let lxMin = (s as any).points[0].x, lyMin = (s as any).points[0].y, lxMax = (s as any).points[0].x, lyMax = (s as any).points[0].y;
+                (s as any).points.forEach((p: Point) => {
+                    lxMin = Math.min(lxMin, p.x); lyMin = Math.min(lyMin, p.y);
+                    lxMax = Math.max(lxMax, p.x); lyMax = Math.max(lyMax, p.y);
+                });
+                bounds = { xMin: lxMin, yMin: lyMin, xMax: lxMax, yMax: lyMax };
+            } else {
+                bounds = { xMin: Math.min(s.x1, s.x2), yMin: Math.min(s.y1, s.y2), xMax: Math.max(s.x1, s.x2), yMax: Math.max(s.y1, s.y2) };
+            }
+            break;
+        }
         case 'dimension':
             bounds = { 
                 xMin: Math.min(s.x1, s.x2, s.dimX), 
@@ -808,31 +836,143 @@ export const getAllShapesBounds = (
     blocks?: Record<string, BlockDefinition>, 
     limits?: { min: Point, max: Point }
 ): { xMin: number, yMin: number, xMax: number, yMax: number } | null => {
-    let xMin = Infinity, yMin = Infinity, xMax = -Infinity, yMax = -Infinity;
-    let hasShapes = false;
+    const list: Shape[] = Array.isArray(layers) ? layers : Object.values(layers).flat();
+    
+    // Filter out rays/xlines and non-geometry elements
+    const eligible = list.filter(s => s && s.type !== 'ray' && s.type !== 'xline');
+    if (eligible.length === 0) return null;
 
-    const updateBounds = (b: { xMin: number, yMin: number, xMax: number, yMax: number }) => {
-        if (b.xMin <= -1e8 || b.xMax >= 1e8) return; // Skip infinite lines or invalid bounds
+    // Retrieve bounding boxes and centroids for eligible shapes
+    const boundsList: { shape: Shape; bounds: { xMin: number; yMin: number; xMax: number; yMax: number }; cx: number; cy: number }[] = [];
+    
+    eligible.forEach(s => {
+        try {
+            const b = getShapeBounds(s, blocks);
+            if (b && b.xMin > -1e8 && b.xMax < 1e8 && b.yMin > -1e8 && b.yMax < 1e8) {
+                boundsList.push({
+                    shape: s,
+                    bounds: b,
+                    cx: (b.xMin + b.xMax) / 2,
+                    cy: (b.yMin + b.yMax) / 2
+                });
+            }
+        } catch (e) {
+            // ignore
+        }
+    });
+
+    if (boundsList.length === 0) return null;
+
+    let targetBoundsList = boundsList;
+
+    // Apply resilient Tukey's Fences outlier filtering if there are enough elements to perform statistical clustering
+    if (boundsList.length >= 15) {
+        const cxList = boundsList.map(item => item.cx).sort((a, b) => a - b);
+        const cyList = boundsList.map(item => item.cy).sort((a, b) => a - b);
+        
+        const n = boundsList.length;
+        const q1X = cxList[Math.floor(n * 0.25)];
+        const q3X = cxList[Math.floor(n * 0.75)];
+        const iqrX = q3X - q1X;
+
+        const q1Y = cyList[Math.floor(n * 0.25)];
+        const q3Y = cyList[Math.floor(n * 0.75)];
+        const iqrY = q3Y - q1Y;
+
+        const xSpan = cxList[n - 1] - cxList[0];
+        const ySpan = cyList[n - 1] - cyList[0];
+        
+        // Define robust tolerances. Highly structured drawings shouldn't clip minor elements, but should omit extreme layout points/offsets.
+        const tolX = Math.max(iqrX * 15.0, xSpan * 0.85, 5000.0);
+        const tolY = Math.max(iqrY * 15.0, ySpan * 0.85, 5000.0);
+
+        const lowerFenceX = q1X - tolX;
+        const upperFenceX = q3X + tolX;
+        const lowerFenceY = q1Y - tolY;
+        const upperFenceY = q3Y + tolY;
+
+        // Determine if (0,0) is a far-away, detached outlier relative to the actual core geometry
+        const centroidX = cxList[Math.floor(n * 0.5)];
+        const centroidY = cyList[Math.floor(n * 0.5)];
+        const isOriginOutlier = Math.abs(centroidX) > 200.0 || Math.abs(centroidY) > 200.0;
+
+        const filtered = boundsList.filter(item => {
+            const fitsFences = item.cx >= lowerFenceX && item.cx <= upperFenceX &&
+                               item.cy >= lowerFenceY && item.cy <= upperFenceY;
+            
+            if (!fitsFences) return false;
+
+            // Filter out individual segments connecting directly to (0,0) only if they represent huge radiating outline bugs (dist > 1e5)
+            if (isOriginOutlier) {
+                const s = item.shape;
+                if (s.type === 'line' || s.type === 'section') {
+                    const l = s as any;
+                    const isV1Zero = Math.abs(l.x1) < 1e-3 && Math.abs(l.y1) < 1e-3;
+                    const isV2Zero = Math.abs(l.x2) < 1e-3 && Math.abs(l.y2) < 1e-3;
+                    if (isV1Zero || isV2Zero) {
+                        const dist = Math.hypot(l.x1 - l.x2, l.y1 - l.y2);
+                        if (dist > 1e5) return false;
+                    }
+                } else if (s.type === 'pline' || s.type === 'polygon' || s.type === 'spline') {
+                    const pts = (s as any).points || [];
+                    if (pts.length > 0) {
+                        const hasZeroPt = pts.some((p: Point) => Math.abs(p.x) < 1e-3 && Math.abs(p.y) < 1e-3);
+                        if (hasZeroPt) {
+                            let maxDist = 0;
+                            for (const p of pts) {
+                                maxDist = Math.max(maxDist, Math.hypot(p.x, p.y));
+                            }
+                            if (maxDist > 1e5) return false;
+                        }
+                    }
+                }
+            }
+            return true;
+        });
+
+        // Fallback safety to original list if we filtered too aggressively or if raw bounds with borders are valid
+        if (filtered.length >= 8) {
+            let xMinFiltered = Infinity, yMinFiltered = Infinity, xMaxFiltered = -Infinity, yMaxFiltered = -Infinity;
+            filtered.forEach(item => {
+                const b = item.bounds;
+                if (b.xMin < xMinFiltered) xMinFiltered = b.xMin;
+                if (b.yMin < yMinFiltered) yMinFiltered = b.yMin;
+                if (b.xMax > xMaxFiltered) xMaxFiltered = b.xMax;
+                if (b.yMax > yMaxFiltered) yMaxFiltered = b.yMax;
+            });
+
+            let xMinRaw = Infinity, yMinRaw = Infinity, xMaxRaw = -Infinity, yMaxRaw = -Infinity;
+            boundsList.forEach(item => {
+                const b = item.bounds;
+                if (b.xMin < xMinRaw) xMinRaw = b.xMin;
+                if (b.yMin < yMinRaw) yMinRaw = b.yMin;
+                if (b.xMax > xMaxRaw) xMaxRaw = b.xMax;
+                if (b.yMax > yMaxRaw) yMaxRaw = b.yMax;
+            });
+
+            const widthFiltered = xMaxFiltered - xMinFiltered;
+            const widthRaw = xMaxRaw - xMinRaw;
+
+            // If raw bounds width is not excessively larger than filtered width (within 2.5x),
+            // prefer raw bounds so that border elements, legends, and title blocks aren't clipped.
+            if (xMinRaw !== Infinity && widthRaw < widthFiltered * 2.5) {
+                targetBoundsList = boundsList;
+            } else {
+                targetBoundsList = filtered;
+            }
+        } else {
+            targetBoundsList = boundsList;
+        }
+    }
+
+    let xMin = Infinity, yMin = Infinity, xMax = -Infinity, yMax = -Infinity;
+    targetBoundsList.forEach(item => {
+        const b = item.bounds;
         if (b.xMin < xMin) xMin = b.xMin;
         if (b.yMin < yMin) yMin = b.yMin;
         if (b.xMax > xMax) xMax = b.xMax;
         if (b.yMax > yMax) yMax = b.yMax;
-        hasShapes = true;
-    };
-
-    if (Array.isArray(layers)) {
-        for (const s of layers) {
-            if (s.type === 'ray' || s.type === 'xline') continue;
-            updateBounds(getShapeBounds(s, blocks));
-        }
-    } else {
-        for (const layerShapes of Object.values(layers)) {
-            for (const s of layerShapes) {
-                if (s.type === 'ray' || s.type === 'xline') continue;
-                updateBounds(getShapeBounds(s, blocks));
-            }
-        }
-    }
+    });
 
     if (limits) {
         const lxMin = Math.min(limits.min.x, limits.max.x);
@@ -840,14 +980,28 @@ export const getAllShapesBounds = (
         const lxMax = Math.max(limits.min.x, limits.max.x);
         const lyMax = Math.max(limits.min.y, limits.max.y);
 
-        if (lxMin < xMin) xMin = lxMin;
-        if (lyMin < yMin) yMin = lyMin;
-        if (lxMax > xMax) xMax = lxMax;
-        if (lyMax > yMax) yMax = lyMax;
-        hasShapes = true;
+        const geomW = xMax - xMin;
+        const geomH = yMax - yMin;
+        const limW = lxMax - lxMin;
+        const limH = lyMax - lyMin;
+
+        // If default or overly massive limits exist, only include them if geometry is empty or limits are tight
+        const isDefaultPresetLimits = Math.abs(lxMin) < 1e-3 && Math.abs(lyMin) < 1e-3 && Math.abs(lxMax - 42000) < 1.0 && Math.abs(lyMax - 29700) < 1.0;
+        
+        if (!isDefaultPresetLimits && xMin !== Infinity && yMin !== Infinity && geomW > 1 && geomH > 1 && limW < geomW * 5 && limH < geomH * 5) {
+            if (lxMin < xMin) xMin = lxMin;
+            if (lyMin < yMin) yMin = lyMin;
+            if (lxMax > xMax) xMax = lxMax;
+            if (lyMax > yMax) yMax = lyMax;
+        } else if (xMin === Infinity) {
+            xMin = lxMin;
+            yMin = lyMin;
+            xMax = lxMax;
+            yMax = lyMax;
+        }
     }
 
-    if (!hasShapes || xMin === Infinity) return null;
+    if (xMin === Infinity) return null;
     return { xMin, yMin, xMax, yMax };
 };
 
@@ -1473,8 +1627,9 @@ export const resolvePointInput = (input: string, lastPoint: Point | null, settin
         }
     }
 
-    let isRelative = text.startsWith('@');
-    let workingText = isRelative ? text.substring(1) : text;
+    let isAbsolute = text.startsWith('#');
+    let isRelative = text.startsWith('@') || (!isAbsolute && lastPoint !== null);
+    let workingText = (text.startsWith('@') || text.startsWith('#')) ? text.substring(1) : text;
     let base = (isRelative && lastPoint) ? lastPoint : { x: 0, y: 0 };
 
     if (workingText.includes('<')) {

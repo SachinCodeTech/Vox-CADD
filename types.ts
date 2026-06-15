@@ -257,6 +257,9 @@ export interface LayoutViewport {
   width: number;
   height: number;
   viewState: ViewState;
+  borderVisible?: boolean;
+  borderColor?: string;
+  borderStyle?: 'solid' | 'dashed' | 'dotted';
 }
 
 export interface LayoutDefinition {
@@ -292,6 +295,8 @@ export interface LayerConfig {
   color: string;
   thickness: number;
   lineType: LineType;
+  on?: boolean;
+  lineTypeScale?: number;
 }
 
 export interface SnapOptions {
@@ -435,6 +440,7 @@ export interface AppSettings {
   wallCleanupMode?: boolean;
   isometricGrid?: boolean;
   showSimulatedCollaborators?: boolean;
+  unlimitedGrid?: boolean;
 }
 
 export interface VoxProject {

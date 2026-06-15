@@ -14,9 +14,55 @@ export const resolveColor = (
     activeTab: string = 'model',
     blockContext?: { color: string, thickness: number, lineType: LineType }
 ): string => {
-    let color = shape.color || 'bylayer';
+    let rawColor: any = shape.color || 'bylayer';
+    let color = 'bylayer';
+    if (typeof rawColor === 'number') {
+        if (rawColor >= 0 && rawColor < 256) {
+            const hex = aciToHex(rawColor);
+            color = hex === 'bylayer' ? 'bylayer' : hex;
+        } else {
+            color = `#${rawColor.toString(16).padStart(6, '0')}`;
+        }
+    } else if (typeof rawColor === 'string') {
+        const trimmed = rawColor.trim();
+        if (/^\d+$/.test(trimmed)) {
+            const num = parseInt(trimmed, 10);
+            if (num >= 0 && num < 256) {
+                const hex = aciToHex(num);
+                color = hex === 'bylayer' ? 'bylayer' : hex;
+            } else {
+                color = `#${num.toString(16).padStart(6, '0')}`;
+            }
+        } else {
+            color = trimmed;
+        }
+    }
+
     if (color.toLowerCase() === 'bylayer') {
-        color = layerConf?.color || '#FFFFFF';
+        const layerColor: any = layerConf?.color || '#FFFFFF';
+        if (typeof layerColor === 'number') {
+            if (layerColor >= 0 && layerColor < 256) {
+                const hex = aciToHex(layerColor);
+                color = hex === 'bylayer' ? '#FFFFFF' : hex;
+            } else {
+                color = `#${layerColor.toString(16).padStart(6, '0')}`;
+            }
+        } else if (typeof layerColor === 'string') {
+            const trimmed = layerColor.trim();
+            if (/^\d+$/.test(trimmed)) {
+                const num = parseInt(trimmed, 10);
+                if (num >= 0 && num < 256) {
+                    const hex = aciToHex(num);
+                    color = hex === 'bylayer' ? '#FFFFFF' : hex;
+                } else {
+                    color = `#${num.toString(16).padStart(6, '0')}`;
+                }
+            } else {
+                color = trimmed;
+            }
+        } else {
+            color = '#FFFFFF';
+        }
     } else if (color.toLowerCase() === 'byblock' && blockContext) {
         color = blockContext.color;
     }
@@ -36,6 +82,9 @@ export const resolveLineWeight = (
     blockContext?: { color: string, thickness: number, lineType: LineType }
 ): number => {
     let weight: number | string = shape.thickness !== undefined ? shape.thickness : 'bylayer';
+    if (typeof weight === 'number' && weight > 5) {
+        weight = 'bylayer';
+    }
     if (typeof weight === 'string') {
         const wStr = weight.toLowerCase();
         if (wStr === 'bylayer') {
@@ -73,29 +122,54 @@ export const resolveShapeProperties = (
     blockContext?: { color: string, thickness: number, lineType: LineType },
     activeTab: string = 'model'
 ): ResolvedProperties => {
-    // 1. Resolve Color
     let rawColor: any = shape.color || 'bylayer';
     let color = 'bylayer';
     if (typeof rawColor === 'number') {
-        color = `#${rawColor.toString(16).padStart(6, '0')}`;
-    } else if (typeof rawColor === 'string') {
-        if (/^\d+$/.test(rawColor)) {
-            const num = parseInt(rawColor, 10);
-            color = `#${num.toString(16).padStart(6, '0')}`;
+        if (rawColor >= 0 && rawColor < 256) {
+            const hex = aciToHex(rawColor);
+            color = hex === 'bylayer' ? 'bylayer' : hex;
         } else {
-            color = rawColor;
+            color = `#${rawColor.toString(16).padStart(6, '0')}`;
+        }
+    } else if (typeof rawColor === 'string') {
+        const trimmed = rawColor.trim();
+        if (/^\d+$/.test(trimmed)) {
+            const num = parseInt(trimmed, 10);
+            if (num >= 0 && num < 256) {
+                const hex = aciToHex(num);
+                color = hex === 'bylayer' ? 'bylayer' : hex;
+            } else {
+                color = `#${num.toString(16).padStart(6, '0')}`;
+            }
+        } else {
+            color = trimmed;
         }
     }
     
     if (color.toLowerCase() === 'bylayer') {
-        const layerColor = layerConfig[shape.layer]?.color || '#FFFFFF';
+        const layerColor: any = layerConfig[shape.layer]?.color || '#FFFFFF';
         if (typeof layerColor === 'number') {
-            color = `#${(layerColor as number).toString(16).padStart(6, '0')}`;
-        } else if (typeof layerColor === 'string' && /^\d+$/.test(layerColor)) {
-            const num = parseInt(layerColor, 10);
-            color = `#${num.toString(16).padStart(6, '0')}`;
+            if (layerColor >= 0 && layerColor < 256) {
+                const hex = aciToHex(layerColor);
+                color = hex === 'bylayer' ? '#FFFFFF' : hex;
+            } else {
+                color = `#${layerColor.toString(16).padStart(6, '0')}`;
+            }
+        } else if (typeof layerColor === 'string') {
+            const trimmed = layerColor.trim();
+            if (/^\d+$/.test(trimmed)) {
+                const num = parseInt(trimmed, 10);
+                if (num >= 0 && num < 256) {
+                    const hex = aciToHex(num);
+                    color = hex === 'bylayer' ? '#FFFFFF' : hex;
+                } else {
+                    color = `#${num.toString(16).padStart(6, '0')}`;
+                }
+            } else {
+                color = trimmed;
+            }
         } else {
-            color = layerColor || '#FFFFFF';
+            color = '#FFFFFF';
         }
     } else if (color.toLowerCase() === 'byblock' && blockContext) {
         color = blockContext.color;
@@ -107,6 +181,9 @@ export const resolveShapeProperties = (
 
     // 2. Resolve LineWeight
     let weight: any = shape.thickness !== undefined ? shape.thickness : 'bylayer';
+    if (typeof weight === 'number' && weight > 5) {
+        weight = 'bylayer';
+    }
     if (typeof weight === 'string') {
         const wStr = weight.toLowerCase();
         if (wStr === 'bylayer') {

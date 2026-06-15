@@ -486,8 +486,8 @@ const parseLayers = (dxf: any, lineTypes: Record<string, LineTypeDefinition>): R
     const layers: Record<string, LayerConfig> = {};
     
     // Ensure default layers exist
-    layers['0'] = { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FF0000', thickness: 0.25, lineType: 'continuous' };
-    layers['defpoints'] = { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, plottable: false, color: '#666666', thickness: 0.1, lineType: 'continuous' };
+    layers['0'] = { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous', on: true, lineTypeScale: 1 };
+    layers['defpoints'] = { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, plottable: false, color: '#666666', thickness: 0.1, lineType: 'continuous', on: true, lineTypeScale: 1 };
 
     if (dxf.tables && dxf.tables.layer && dxf.tables.layer.layers) {
         const dLayers = Object.values(dxf.tables.layer.layers);
@@ -501,20 +501,28 @@ const parseLayers = (dxf: any, lineTypes: Record<string, LineTypeDefinition>): R
             if (lowerLayerName === 'defpoints') layerName = 'defpoints';
             if (layerName === '0' || lowerLayerName === '0') layerName = '0';
 
-            const ltName = (l.lineTypeName || 'continuous').toLowerCase();
+            const ltName = (l.lineTypeName || l.lineType || l.linetype || 'continuous').toLowerCase();
             const aci = l.color !== undefined ? l.color : 7;
             const flags = l.flags || 0;
             
+            const isOff = aci < 0 || l.isOff === true || l.off === true;
+            const isFrozen = !!(flags & 1) || l.frozen === true || l.isFrozen === true || l.is_frozen === true;
+            const isLocked = !!(flags & 4) || l.locked === true || l.isLocked === true || l.is_locked === true;
+            const visible = !isOff && !isFrozen;
+            const lineScale = l.lineTypeScale !== undefined ? l.lineTypeScale : (l.ltScale !== undefined ? l.ltScale : 1);
+
             layers[layerName] = {
                 id: layerName,
                 name: layerName,
-                visible: aci >= 0 && !(flags & 1),
-                locked: !!(flags & 4),
-                frozen: !!(flags & 1),
-                plottable: layerName.toLowerCase() !== 'defpoints' && (l.isPlottable !== false),
+                visible,
+                locked: isLocked,
+                frozen: isFrozen,
+                plottable: layerName.toLowerCase() !== 'defpoints' && l.isPlottable !== false && l.is_plottable !== false && l.plottable !== false,
                 color: aciToHex(Math.abs(aci)) || '#FFFFFF',
-                thickness: mapLineweight(l.lineWeight) || 0.25,
-                lineType: ltName as any
+                thickness: mapLineweight(l.lineWeight !== undefined ? l.lineWeight : l.lineweight) || 0.25,
+                lineType: ltName as any,
+                on: !isOff,
+                lineTypeScale: lineScale
             };
         }
     }
@@ -599,7 +607,7 @@ export const dxfToProject = async (dxfString: string, defaultSettings: AppSettin
         dimStyles = parseDimStyles(dxf);
         const paperEntities: Shape[] = [];
 
-        const convertEntity = (entity: any, offset: { x: number, y: number } = { x: 0, y: 0 }): Shape | null => {
+        const convertEntityInner = (entity: any, offset: { x: number, y: number } = { x: 0, y: 0 }): Shape | null => {
             if (!entity) return null;
             
             // Handle layer as string or object
@@ -626,7 +634,7 @@ export const dxfToProject = async (dxfString: string, defaultSettings: AppSettin
 
             // Ensure layer metadata exists for this layer name
             if (!layers[layer]) {
-                layers[layer] = { id: layer, name: layer, visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' };
+                layers[layer] = { id: layer, name: layer, visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous', on: true, lineTypeScale: 1 };
             }
 
             switch (entity.type) {
@@ -874,6 +882,15 @@ export const dxfToProject = async (dxfString: string, defaultSettings: AppSettin
                     break;
             }
             return null;
+        };
+
+        const convertEntity = (entity: any, offset: { x: number, y: number } = { x: 0, y: 0 }): Shape | null => {
+            const s = convertEntityInner(entity, offset);
+            if (s) {
+                const lineScale = entity.lineTypeScale !== undefined ? entity.lineTypeScale : (entity.ltScale !== undefined ? entity.ltScale : 1);
+                s.lineScale = lineScale;
+            }
+            return s;
         };
 
         if (dxf.blocks) {

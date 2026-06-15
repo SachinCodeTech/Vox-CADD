@@ -11,7 +11,7 @@ import {
   Infinity, ArrowUpRight, Rows, Dot, CircleOff, Type, AlignLeft, MousePointer, 
   Zap, Pencil, Activity, Grid3X3, Layers2, Settings2, Info, Lock, Eye, EyeOff, Sparkles,
   Package, Grid2X2, Download, Search, Filter, MonitorPlay,
-  ArrowRightLeft, Radius, Diameter, Settings, History, DraftingCompass
+  ArrowRightLeft, Radius, Diameter, Settings, History, DraftingCompass, Cloud
 } from 'lucide-react';
 import { AppSettings } from '../types';
 import { ToolbarCategory } from './App';
@@ -146,6 +146,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
             <ToolCircleBtn onClick={() => onCommand('dl')} icon={<Rows />} label="DLINE" active={activeCommandName === 'DLINE'} />
             <ToolCircleBtn onClick={() => onCommand('po')} icon={<Dot />} label="POINT" active={activeCommandName === 'POINT'} />
             <ToolCircleBtn onClick={() => onCommand('donut')} icon={<CircleOff />} label="DONUT" active={activeCommandName === 'DONUT'} />
+            <ToolCircleBtn onClick={() => onCommand('revcloud')} icon={<Cloud />} label="RCLOUD" active={activeCommandName === 'REVCLOUD'} />
           </>
         );
       case 'Modify':

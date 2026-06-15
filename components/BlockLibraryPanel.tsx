@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Search, PlusCircle, Box, AlertCircle, Copy, Trash2, ArrowDown } from 'lucide-react';
+import { X, Search, PlusCircle, Box, AlertCircle, Copy, Trash2, ArrowDown, Wrench } from 'lucide-react';
 import { BlockDefinition, Point, Shape } from '../types';
 
 interface BlockLibraryPanelProps {
@@ -7,6 +7,7 @@ interface BlockLibraryPanelProps {
   onCreateBlockFromSelection: (name: string) => void;
   onInsertBlock: (blockId: string) => void;
   onDeleteBlock: (blockId: string) => void;
+  onEditBlock: (blockId: string) => void;
   selectedCount: number;
   onClose: () => void;
 }
@@ -146,6 +147,7 @@ export default function BlockLibraryPanel({
   onCreateBlockFromSelection,
   onInsertBlock,
   onDeleteBlock,
+  onEditBlock,
   selectedCount,
   onClose
 }: BlockLibraryPanelProps) {
@@ -469,6 +471,16 @@ export default function BlockLibraryPanel({
 
                 {/* Hover Action Indicators overlay */}
                 <div className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-all flex gap-1 animate-in slide-in-from-top-1 duration-200">
+                  <button
+                    title="Edit block definition"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEditBlock(key);
+                    }}
+                    className="p-1.5 bg-emerald-950/20 border border-emerald-500/20 rounded-lg text-emerald-400 hover:bg-emerald-500 hover:text-black active:scale-95 transition-all outline-none cursor-pointer"
+                  >
+                    <Wrench size={10} />
+                  </button>
                   {activeTab === 'custom' && (
                     <button
                       title="Delete block definition"
@@ -476,7 +488,7 @@ export default function BlockLibraryPanel({
                         e.stopPropagation();
                         onDeleteBlock(key);
                       }}
-                      className="p-1.5 bg-red-950/20 border border-red-500/20 rounded-lg text-red-500 hover:text-red-400 active:scale-95 transition-all outline-none"
+                      className="p-1.5 bg-red-950/20 border border-red-500/20 rounded-lg text-red-500 hover:text-red-400 active:scale-95 transition-all outline-none cursor-pointer"
                     >
                       <Trash2 size={10} />
                     </button>

@@ -1,18 +1,21 @@
-# VoxCADD Professional
+# Vox-CADD
 
-VoxCADD is a high-precision architectural CAD engine with AI-assisted drafting capabilities.
+A modern, fast, and beautiful **2D Web CAD** application built with React + TypeScript.
 
-## Workflow
+### Features
+- Smooth drawing tools with live preview
+- DWG Import (Best-effort, ~80-90% visual fidelity)
+- Advanced .vox native project format
+- Grid + Snapping + Undo/Redo
+- Properties Panel
+- Command Line interface
+- Auto-fit on import
 
-This project follows a streamlined development and deployment workflow:
-1. **App Development**: Developed and iterated in **Google AI Studio**.
-2. **Push Updates**: Code changes are pushed to **GitHub**.
-3. **Backup & Deployment**: GitHub provides source code backup and manages **deployment** (via GitHub Actions to GitHub Pages or integration with **Vercel**).
+### Current Limitations
+- DWG import is not 100% perfect (common for browser-based CAD)
+- Complex Dynamic Blocks and SHX fonts have limited support
 
-## Features
-
-- High-precision CAD drafting.
-- AI Architect for intelligent layout suggestions.
-- Real-time feedback and dynamic coordinate input.
-- Plot Style (CTB) management.
-- Unit conversion with auto-rescaling.
+### How to Use
+1. Open DWG or .vox files
+2. Draw using toolbar or command line
+3. Save as .vox for best compatibility

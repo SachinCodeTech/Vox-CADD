@@ -115,8 +115,8 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
         const entities: Shape[] = [];
         const blocks: Record<string, BlockDefinition> = {};
         const layers: Record<string, LayerConfig> = {
-            '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FF0000', thickness: 0.25, lineType: 'continuous' },
-            'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, plottable: false, color: '#666666', thickness: 0.1, lineType: 'continuous' }
+            '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FF0000', thickness: 0.25, lineType: 'continuous', on: true, lineTypeScale: 1 },
+            'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, plottable: false, color: '#666666', thickness: 0.1, lineType: 'continuous', on: true, lineTypeScale: 1 }
         };
         const stats = { total: 0, unsupported: 0, counts: {} as Record<string, number> };
         const paperEntities: Shape[] = [];
@@ -199,25 +199,55 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
             const lowerLayer = layer.toLowerCase();
             if (lowerLayer === 'defpoints') layer = 'defpoints';
             else if (layer === '0' || lowerLayer === '0') layer = '0';
+            else {
+                // Match case-insensitively with registered layers to avoid casing fragmentation
+                const registeredNames = Object.keys(layers);
+                const matchedName = registeredNames.find(n => n.toLowerCase() === lowerLayer);
+                if (matchedName) {
+                    layer = matchedName;
+                }
+            }
             
             // Robust type detection
             const type = (ent.type || ent.objectType || '').toUpperCase().trim();
             
             // Use ACI color (1-255), True Color, or ByLayer(256)/ByBlock(0)
-            const rawTrueColor = ent.true_color || ent.trueColor || ent.truecolor || 0;
-            const color = aciToHex(ent.color !== undefined ? ent.color : 256, rawTrueColor !== 0 ? rawTrueColor : undefined);
+            const rawTrueColor = ent.true_color || ent.trueColor || ent.truecolor || 
+                                 (ent.color && typeof ent.color === 'object' && ent.color.trueColor) || 0;
+            
+            let entityAci = 256; // Default to ByLayer (256)
+            if (typeof ent.color === 'number') {
+                entityAci = ent.color;
+            } else if (typeof ent.colorIndex === 'number') {
+                entityAci = ent.colorIndex;
+            } else if (typeof ent.color_index === 'number') {
+                entityAci = ent.color_index;
+            } else if (ent.color && typeof ent.color === 'object') {
+                if (typeof ent.color.aci === 'number') entityAci = ent.color.aci;
+                else if (typeof ent.color.colorIndex === 'number') entityAci = ent.color.colorIndex;
+                else if (typeof ent.color.color_index === 'number') entityAci = ent.color.color_index;
+            }
+            
+            const color = aciToHex(entityAci, rawTrueColor !== 0 ? rawTrueColor : undefined);
             
             // Map thickness/lineweight
             let thickness = 0.25;
             if (ent.thickness !== undefined && typeof ent.thickness === 'number' && ent.thickness > 0) {
                 thickness = ent.thickness;
             } else {
-                const lw = ent.lineweight !== undefined ? ent.lineweight : (ent.lineWeight !== undefined ? ent.lineWeight : -1);
+                const lw = ent.lineweight !== undefined ? ent.lineweight : 
+                           (ent.lineWeight !== undefined ? ent.lineWeight : 
+                           (ent.linewidth !== undefined ? ent.linewidth : 
+                           (ent.line_weight !== undefined ? ent.line_weight : 
+                           (ent.lineweight_enum !== undefined ? ent.lineweight_enum : -1))));
                 thickness = mapLineweight(lw) || 0.25;
             }
 
-            const lineType = (ent.lineType || ent.linetype || 'bylayer').toLowerCase();
-            const lineScale = ent.ltScale || ent.lineTypeScale || 1;
+            const ltVal = ent.lineType || ent.linetype || ent.line_type || ent.linestyle || 'bylayer';
+            let lineType = typeof ltVal === 'string' ? ltVal : (ltVal?.name || ltVal?.id || 'bylayer');
+            lineType = lineType.toLowerCase();
+            
+            const lineScale = ent.ltScale || ent.lineTypeScale || ent.line_type_scale || 1;
 
             const isValid = (val: any) => typeof val === 'number' && isFinite(val) && Math.abs(val) < 1e12;
             
@@ -266,7 +296,7 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                                 }
                                 lastNonZero--;
                             }
-                            vertices = vertices.slice(0, lastNonZero + 2);
+                            vertices = vertices.slice(0, lastNonZero + 1);
                         }
                         if (vertices.length > 1) {
                             return { id: nextId(), type: 'pline', layer, color, points: vertices.map((v: any) => ({ x: v.x, y: v.y, bulge: v.bulge || 0 })), closed: !!(ent.flag & 1) || !!ent.closed || !!ent.isClosed || !!(ent.flags & 1), thickness, lineType, lineScale } as any;
@@ -284,7 +314,7 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                                 }
                                 lastNonZero--;
                             }
-                            splPoints = splPoints.slice(0, lastNonZero + 2);
+                            splPoints = splPoints.slice(0, lastNonZero + 1);
                         }
                         if (splPoints.length > 1) {
                             return { id: nextId(), type: 'spline', layer, color, points: splPoints.map((v: any) => ({ x: v.x, y: v.y })), closed: !!ent.closed || !!ent.isClosed || !!(ent.flags & 1), thickness, lineType, lineScale } as any;
@@ -433,6 +463,47 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                             } as any;
                         }
                         break;
+                    case type.includes('POINT'): {
+                        const pt = ent.position || ent.centerPoint || ent.insertionPoint || ent;
+                        if (pt && isValid(pt.x) && isValid(pt.y)) {
+                            return { id: nextId(), type: 'point', layer, color, x: pt.x, y: pt.y, thickness } as any;
+                        }
+                        break;
+                    }
+                    case type.includes('XLINE') || type.includes('RAY'): {
+                        const start = ent.startPoint || ent.basePoint || ent.position || ent.point1 || ent.start;
+                        const direction = ent.direction || ent.dirVector || ent.secondPoint || ent.point2 || ent.end;
+                        if (start && direction && isValid(start.x) && isValid(start.y) && isValid(direction.x) && isValid(direction.y)) {
+                            let x2 = direction.x, y2 = direction.y;
+                            if (Math.abs(direction.x) < 2 && Math.abs(direction.y) < 2) {
+                                x2 = start.x + direction.x * 1000;
+                                y2 = start.y + direction.y * 1000;
+                            }
+                            return { id: nextId(), type: type.includes('RAY') ? 'ray' : 'xline', layer, color, x1: start.x, y1: start.y, x2, y2, thickness, lineType, lineScale } as any;
+                        }
+                        break;
+                    }
+                    case type.includes('LEADER'): {
+                        let vertices = (ent.vertices || ent.points || []).filter((v: any) => v && isValid(v.x) && isValid(v.y));
+                        if (vertices.length >= 2) {
+                            return { id: nextId(), type: 'leader', layer, color, x1: vertices[0].x, y1: vertices[0].y, x2: vertices[1].x, y2: vertices[1].y, points: vertices, thickness, lineType, lineScale } as any;
+                        }
+                        break;
+                    }
+                    case type.includes('SOLID') || type.includes('TRACE') || type.includes('3DFACE'): {
+                        let corners = (ent.corners || ent.points || ent.vertices || []).filter((v: any) => v && isValid(v.x) && isValid(v.y));
+                        if (corners.length >= 3) {
+                            const is3D = type.includes('3DFACE');
+                            if (!is3D && corners.length >= 4) {
+                                // Swap index 2 and index 3 to uncross the classic bow-tie of SOLID/TRACE
+                                const temp = corners[2];
+                                corners[2] = corners[3];
+                                corners[3] = temp;
+                            }
+                            return { id: nextId(), type: 'polygon', layer, color, points: corners, closed: true, filled: !is3D, thickness, lineType, lineScale } as any;
+                        }
+                        break;
+                    }
                     case type.includes('INSERT') || type.includes('BLOCK'):
                         const insPoint = ent.insertPoint || ent.position || ent.insertionPoint || ent.insertion_point || ent.basePoint || ent.base_point || { x: 0, y: 0 };
                         const bItem = ent.blockName || ent.name || ent.block || ent.blockRecord || ent.block_record || ent.block_record_id || ent.block_record_handle || ent.block_header || ent.block_header_handle || ent.block_header_id || ent.block_id || ent.block_handle;
@@ -490,14 +561,21 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                         const center = ent.center || ent.arcCenter || ent.arc_center || ent.centerPoint || ent.center_point;
                         
                         // Fallbacks for dimension points
-                        const x1 = (d1?.x ?? 0), y1 = (d1?.y ?? 0);
-                        const x2 = (d2?.x ?? (ent.insertionPoint?.x ?? x1)), y2 = (d2?.y ?? (ent.insertionPoint?.y ?? y1));
-                        const x3 = (d3?.x ?? x1), y3 = (d3?.y ?? y1);
+                        // CAD specifications mapping:
+                        // d2 is extension line 1 start (Measured Point 1)
+                        // d3 is extension line 2 start (Measured Point 2)
+                        // d1 is dimension line location (determines the offset height/distance)
+                        const x1 = d2?.x !== undefined ? d2.x : (d1?.x ?? 0);
+                        const y1 = d2?.y !== undefined ? d2.y : (d1?.y ?? 0);
+                        const x2 = d3?.x !== undefined ? d3.x : (ent.insertionPoint?.x ?? (d1?.x ?? x1));
+                        const y2 = d3?.y !== undefined ? d3.y : (ent.insertionPoint?.y ?? (d1?.y ?? y1));
+                        
+                        const x3 = (d1?.x ?? x1), y3 = (d1?.y ?? y1);
                         const x4 = (d4?.x ?? x2), y4 = (d4?.y ?? y2);
                         const cx = (center?.x ?? 0), cy = (center?.y ?? 0);
 
-                        const dimX = (d3?.x ?? (ent.textPosition?.x ?? (ent.text_position?.x ?? (ent.textPoint?.x ?? (ent.text_point?.x ?? (x1 + x2)/2)))));
-                        const dimY = (d3?.y ?? (ent.textPosition?.y ?? (ent.text_position?.y ?? (ent.textPoint?.y ?? (ent.text_point?.y ?? (y1 + y2)/2)))));
+                        const dimX = (d1?.x ?? (ent.textPosition?.x ?? (ent.text_position?.x ?? (ent.textPoint?.x ?? (ent.text_point?.x ?? (x1 + x2)/2)))));
+                        const dimY = (d1?.y ?? (ent.textPosition?.y ?? (ent.text_position?.y ?? (ent.textPoint?.y ?? (ent.text_point?.y ?? (y1 + y2)/2)))));
 
                         // Detect dimension type
                         let dimType: any = 'aligned';
@@ -553,8 +631,14 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
         };
 
         // Layers Setup
-        layers['0'] = { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' };
+        layers['0'] = { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous', on: true, lineTypeScale: 1 };
         
+        const toBool = (val: any): boolean => {
+            if (val === true || val === 1 || val === 'true' || val === '1') return true;
+            if (val === false || val === 0 || val === 'false' || val === '0') return false;
+            return !!val;
+        };
+
         const processLayer = (l: any) => {
             if (!l) return;
             let name = typeof l.name === 'string' ? l.name : (l.layerName || l.layer_name || String(l.id || '0'));
@@ -565,39 +649,120 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
             if (name === '0' || lowerName === '0') name = '0';
 
             // Extract ACI color - try multiple variants as provided by WASM
-            const aci = l.color !== undefined ? l.color : 
-                        (l.aci !== undefined ? l.aci : 
-                        (l.color_index !== undefined ? l.color_index : 
-                        (l.colorIndex !== undefined ? l.colorIndex : 7)));
-            
-            const rawLayerTrueColor = l.true_color || l.trueColor || l.truecolor || 0;
-            const lColor = aciToHex(Math.abs(aci), rawLayerTrueColor !== 0 ? rawLayerTrueColor : undefined);
-
-            if (name === '0' && layers['0']) {
-                layers['0'].color = lColor;
-                return;
+            let aci = 7;
+            if (typeof l.color === 'number') {
+                aci = l.color;
+            } else if (typeof l.colorIndex === 'number') {
+                aci = l.colorIndex;
+            } else if (typeof l.color_index === 'number') {
+                aci = l.color_index;
+            } else if (typeof l.aci === 'number') {
+                aci = l.aci;
+            } else if (l.color && typeof l.color === 'object') {
+                if (typeof l.color.aci === 'number') aci = l.color.aci;
+                else if (typeof l.color.colorIndex === 'number') aci = l.color.colorIndex;
+                else if (typeof l.color.color_index === 'number') aci = l.color.color_index;
+                else if (typeof l.color.index === 'number') aci = l.color.index;
+            } else {
+                aci = l.aci !== undefined ? l.aci : 
+                      (l.color_index !== undefined ? l.color_index : 
+                      (l.colorIndex !== undefined ? l.colorIndex : 7));
             }
             
+            let rawLayerTrueColor = l.true_color || l.trueColor || l.truecolor || 0;
+            if (l.color && typeof l.color === 'object' && typeof l.color.raw === 'number') {
+                rawLayerTrueColor = l.color.raw;
+            }
+            
+            let lColor = '';
+            if (typeof l.color === 'string' && l.color.trim() !== '') {
+                const sColor = l.color.trim();
+                if (sColor.startsWith('#')) {
+                    lColor = sColor.toUpperCase();
+                } else if (/^[0-9a-fA-F]{6}$/.test(sColor)) {
+                    lColor = `#${sColor}`.toUpperCase();
+                } else {
+                    lColor = sColor;
+                }
+            } else if (typeof l.true_color === 'string' && l.true_color.startsWith('#')) {
+                lColor = l.true_color.toUpperCase();
+            } else if (typeof l.trueColor === 'string' && l.trueColor.startsWith('#')) {
+                lColor = l.trueColor.toUpperCase();
+            }
+
+            if (!lColor) {
+                if (l.color && typeof l.color === 'object' && typeof l.color.r === 'number' && typeof l.color.g === 'number' && typeof l.color.b === 'number') {
+                    const r = l.color.r, g = l.color.g, b = l.color.b;
+                    lColor = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`.toUpperCase();
+                } else {
+                    lColor = aciToHex(Math.abs(aci), rawLayerTrueColor !== 0 ? rawLayerTrueColor : undefined);
+                }
+            }
+
+            const namedColorMap: Record<string, string> = {
+                'red': '#FF0000', 'yellow': '#FFFF00', 'green': '#00FF00', 'cyan': '#00FFFF',
+                'blue': '#0000FF', 'magenta': '#FF00FF', 'white': '#FFFFFF', 'black': '#000000',
+                'gray': '#808080', 'grey': '#808080'
+            };
+            if (lColor && namedColorMap[lColor.toLowerCase()]) {
+                lColor = namedColorMap[lColor.toLowerCase()];
+            }
+
+            // Fallback safeguards for layer color
+            if (!lColor || lColor === 'bylayer' || lColor === 'byblock' || !lColor.startsWith('#')) {
+                lColor = '#FFFFFF';
+            }
+
             const flag = l.flag !== undefined ? l.flag : (l.flags !== undefined ? l.flags : (l.status || 0));
             
+            const isOff = toBool(l.isOff) || toBool(l.is_off) || toBool(l.off) || aci < 0;
+            const isFrozen = toBool(l.frozen) || toBool(l.isFrozen) || toBool(l.is_frozen) || !!(flag & 1);
+            const isLocked = toBool(l.locked) || toBool(l.isLocked) || toBool(l.is_locked) || !!(flag & 4);
+            const visible = !isOff && !isFrozen;
+
             // Standard CAD Layer flags: 1=Frozen, 2=Frozen by default, 4=Locked
-            const lineTypeVal = (l.lineType || l.linetype || l.linestyle || l.line_type || 'continuous');
-            const layerLineTypeStr = typeof lineTypeVal === 'string' ? lineTypeVal : (lineTypeVal?.name || lineTypeVal?.id || 'continuous');
+            const lineTypeVal = (l.lineType || l.linetype || l.linestyle || l.line_type || l.lineTypeName || l.line_type_name || l.linetype_name || l.linetypeName || 'continuous');
+            let layerLineTypeStr = typeof lineTypeVal === 'string' ? lineTypeVal : (lineTypeVal?.name || lineTypeVal?.id || 'continuous');
+            if (layerLineTypeStr.toLowerCase() === 'bylayer' || layerLineTypeStr.toLowerCase() === 'byblock') {
+                layerLineTypeStr = 'continuous';
+            }
+            const layerLineScale = l.ltScale !== undefined ? l.ltScale : 
+                                   (l.lineTypeScale !== undefined ? l.lineTypeScale : 
+                                   (l.line_type_scale !== undefined ? l.line_type_scale : 
+                                   (l.linetypeScale !== undefined ? l.linetypeScale :
+                                   (l.linetype_scale !== undefined ? l.linetype_scale : 1))));
             
+            const rawLineweight = l.lineweight !== undefined ? l.lineweight : 
+                                  (l.lineWeight !== undefined ? l.lineWeight : 
+                                  (l.line_weight !== undefined ? l.line_weight : 
+                                  (l.lineweight_enum !== undefined ? l.lineweight_enum : 
+                                  (l.lineweightEnum !== undefined ? l.lineweightEnum : 
+                                  (l.thickness !== undefined ? l.thickness : undefined)))));
+            const thicknessVal = mapLineweight(rawLineweight) || 0.25;
+
             layers[name] = { 
                 id: name, 
                 name: name, 
-                visible: aci >= 0 && !(flag & 1),
-                locked: !!(flag & 4), 
-                frozen: !!(flag & 1), 
-                plottable: name.toLowerCase() !== 'defpoints' && (l.is_plottable !== false && l.plot !== false && l.isPlottable !== false), 
+                visible,
+                locked: isLocked, 
+                frozen: isFrozen, 
+                plottable: name.toLowerCase() !== 'defpoints' && (l.is_plottable !== false && l.plot !== false && l.isPlottable !== false && l.plottable !== false), 
                 color: lColor, 
-                thickness: mapLineweight(l.lineweight !== undefined ? l.lineweight : (l.lineWeight !== undefined ? l.lineWeight : l.lineweight_enum)) || 0.25, 
-                lineType: layerLineTypeStr.toLowerCase() as any 
+                thickness: thicknessVal, 
+                lineType: layerLineTypeStr.toLowerCase() as any,
+                on: !isOff,
+                lineTypeScale: layerLineScale
             };
         };
         
-        const rawLayersList = db.layers || db.layer_records || db.layerRecords || db.layer || [];
+        let rawLayersList = db.layers || db.layer_records || db.layerRecords || db.layer || [];
+        if ((!rawLayersList || (Array.isArray(rawLayersList) && rawLayersList.length === 0)) && db.tables) {
+            const t = db.tables;
+            rawLayersList = t.layers || t.layer || t.layer_records || t.layerRecords || 
+                             (t.layer_table && (t.layer_table.layers || t.layer_table.records || t.layer_table.entries)) || 
+                             (t.layerTable && (t.layerTable.layers || t.layerTable.records || t.layerTable.entries)) || [];
+        }
+
         if (rawLayersList && Array.isArray(rawLayersList)) {
             const numLayers = rawLayersList.length;
             for (let i = 0; i < numLayers; i++) {

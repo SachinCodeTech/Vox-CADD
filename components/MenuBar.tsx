@@ -5,7 +5,8 @@ import {
   Settings, Info, HelpCircle, Layout, Grid, 
   Zap, Calculator, Layers, Sliders, Ruler, Target,
   Globe, Cpu, Type, MousePointer2, Settings2, Trash2, FileText, Palette,
-  Mail, MessageSquare, FileCode, XCircle, LogIn, LogOut, User as UserIcon, Cloud
+  Mail, MessageSquare, FileCode, XCircle, LogIn, LogOut, User as UserIcon, Cloud, LayoutDashboard,
+  FileEdit
 } from 'lucide-react';
 import { UnitType } from '../types';
 import { useSession } from './SessionContext';
@@ -18,20 +19,35 @@ interface MenuBarProps {
   units: UnitType;
 }
 
-const MenuButton = ({ icon: Icon, label, color, onClick, desc }: { icon: any, label: string, color: string, onClick: () => void, desc?: string }) => (
-  <button 
-    onClick={onClick}
-    className="flex items-center gap-3 sm:gap-4 p-3 sm:p-4 bg-[#181818] hover:bg-[#222] border border-white/5 rounded-2xl transition-all active:scale-[0.98] text-left w-full"
-  >
-    <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center ${color} bg-opacity-10 text-opacity-100 shadow-inner shrink-0`}>
-      <Icon size={18} className={color.replace('bg-', 'text-')} />
-    </div>
-    <div className="flex-1 overflow-hidden">
-      <div className="text-[11px] sm:text-xs font-black text-neutral-100 uppercase tracking-tight truncate">{label}</div>
-      {desc && <div className="text-[8px] sm:text-[9px] text-neutral-500 font-medium uppercase tracking-tighter truncate">{desc}</div>}
-    </div>
-  </button>
-);
+const COLOR_MAP: Record<string, { bg: string; border: string; text: string }> = {
+  emerald: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/25', text: 'text-emerald-400' },
+  cyan: { bg: 'bg-cyan-500/10', border: 'border-cyan-500/25', text: 'text-cyan-400' },
+  purple: { bg: 'bg-purple-500/10', border: 'border-purple-500/25', text: 'text-purple-400' },
+  amber: { bg: 'bg-amber-500/10', border: 'border-amber-500/25', text: 'text-amber-400' },
+  pink: { bg: 'bg-pink-500/10', border: 'border-pink-500/25', text: 'text-pink-400' },
+  indigo: { bg: 'bg-indigo-500/10', border: 'border-indigo-500/25', text: 'text-indigo-400' },
+  blue: { bg: 'bg-blue-500/10', border: 'border-blue-500/25', text: 'text-blue-400' },
+};
+
+const MenuButton = ({ icon: Icon, label, color, onClick, desc }: { icon: any, label: string, color: string, onClick: () => void, desc?: string }) => {
+  const key = color.replace('bg-', '').replace('-500', '');
+  const colors = COLOR_MAP[key] || { bg: 'bg-neutral-800/50', border: 'border-neutral-700/20', text: 'text-white' };
+
+  return (
+    <button 
+      onClick={onClick}
+      className="flex items-center gap-3 sm:gap-4 p-3 sm:p-4 bg-[#181818] hover:bg-[#222] border border-white/5 rounded-2xl transition-all active:scale-[0.98] text-left w-full group"
+    >
+      <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center ${colors.bg} border ${colors.border} shadow-inner shrink-0 transition-all`} >
+        <Icon size={18} className={colors.text} />
+      </div>
+      <div className="flex-1 overflow-hidden">
+        <div className="text-[11px] sm:text-xs font-black text-neutral-100 uppercase tracking-tight truncate">{label}</div>
+        {desc && <div className="text-[8px] sm:text-[9px] text-neutral-500 font-medium uppercase tracking-tighter truncate">{desc}</div>}
+      </div>
+    </button>
+  );
+};
 
 const SectionHeader = ({ label }: { label: string }) => (
   <div className="px-2 mb-3 mt-6">
@@ -106,7 +122,14 @@ const MenuBar: React.FC<MenuBarProps> = ({ onAction, currentFileName, units }) =
           <div className="w-2.5 h-2.5 rounded-full bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.6)] animate-pulse"></div>
           <span className="text-[9px] font-black text-neutral-500 uppercase tracking-widest">Active Workspace</span>
         </div>
-        <div className="text-lg font-black text-white truncate pr-2">{currentFileName || "Untitled Project"}</div>
+        <button 
+          onClick={() => onAction('rename')}
+          className="text-lg font-black text-white hover:text-cyan-400 text-left transition-colors truncate pr-2 flex items-center gap-1.5 active:scale-95 duration-150 group"
+          title="Rename Project"
+        >
+          <span>{currentFileName || "Untitled Project"}</span>
+          <FileEdit size={12} className="text-neutral-500 group-hover:text-cyan-400 inline-block shrink-0 transition-colors" />
+        </button>
         <div className="mt-4 flex flex-col gap-2">
           <div className="flex gap-2">
             <button onClick={() => onAction('save')} className="flex-1 py-3 bg-cyan-600 text-black text-[9px] font-black uppercase rounded-xl active:scale-95 transition-all shadow-lg shadow-cyan-900/20 flex items-center justify-center gap-2">
@@ -162,6 +185,13 @@ const MenuBar: React.FC<MenuBarProps> = ({ onAction, currentFileName, units }) =
             desc="Manage drawing metadata and statistics"
             color="bg-amber-500" 
             onClick={() => onAction('toggleDrawingProps')} 
+        />
+        <MenuButton 
+            icon={LayoutDashboard} 
+            label="Live Project Dashboard" 
+            desc="Model complexity & material takeoff estimation"
+            color="bg-pink-500" 
+            onClick={() => onAction('toggleDashboard')} 
         />
       </div>
 
