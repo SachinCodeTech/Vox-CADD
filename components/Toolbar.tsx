@@ -301,6 +301,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
             <ToolCircleBtn onClick={() => onAction('zoomIn')} icon={<ZoomIn />} label="Z- IN" />
             <ToolCircleBtn onClick={() => onAction('zoomOut')} icon={<ZoomOut />} label="Z- OU" />
             <ToolCircleBtn onClick={() => onAction('zoomRealTime')} icon={<Activity />} label="Z-R" />
+            <ToolCircleBtn onClick={() => onAction('zoomPrevious')} icon={<History />} label="Z-PREV" />
             <ToolCircleBtn onClick={() => onCommand('p')} icon={<Hand />} label="Z- PAN" active={activeCommandName === 'PAN'} />
           </>
         );

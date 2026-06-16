@@ -187,13 +187,24 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
             if (!ent) return null;
             
             // Handle layer as string or object
-            let layer = '0';
-            // Resolve Layer Name from various possible properties
-            if (typeof ent.layer === 'string') layer = ent.layer;
-            else if (ent.layerName && typeof ent.layerName === 'string') layer = ent.layerName;
-            else if (ent.layer && (ent.layer.name || ent.layer.layerName)) layer = ent.layer.name || ent.layer.layerName;
-            else if (ent.layer && ent.layer.id) layer = String(ent.layer.id);
-            else if (ent.layer_id) layer = String(ent.layer_id);
+            const entity = ent;
+            const base = {
+                layer: (typeof entity.layer === 'string' ? entity.layer : 
+                        (entity.layerName && typeof entity.layerName === 'string' ? entity.layerName :
+                        (entity.layer && (entity.layer.name || entity.layer.layerName) ? (entity.layer.name || entity.layer.layerName) :
+                        (entity.layer && entity.layer.id ? String(entity.layer.id) :
+                        (entity.layer_id ? String(entity.layer_id) : "0"))))),
+                color: entity.color !== undefined ? entity.color : 
+                       (entity.colorIndex !== undefined ? entity.colorIndex : 
+                       (entity.color_index !== undefined ? entity.color_index : 7)),
+                lineWeight: entity.lineWeight !== undefined ? entity.lineWeight : 
+                           (entity.lineweight !== undefined ? entity.lineweight : 
+                           (entity.linewidth !== undefined ? entity.linewidth : 
+                           (entity.line_weight !== undefined ? entity.line_weight : 1.5))),
+                lineType: entity.lineType || entity.linetype || entity.line_type || "CONTINUOUS",
+            };
+
+            let layer = typeof base.layer === 'string' ? base.layer : String(base.layer);
             
             // Normalize special AutoCAD layers
             const lowerLayer = layer.toLowerCase();
@@ -209,45 +220,36 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
             }
             
             // Robust type detection
-            const type = (ent.type || ent.objectType || '').toUpperCase().trim();
+            const type = (entity.type || entity.objectType || '').toUpperCase().trim();
             
             // Use ACI color (1-255), True Color, or ByLayer(256)/ByBlock(0)
-            const rawTrueColor = ent.true_color || ent.trueColor || ent.truecolor || 
-                                 (ent.color && typeof ent.color === 'object' && ent.color.trueColor) || 0;
+            const rawTrueColor = entity.true_color || entity.trueColor || entity.truecolor || 
+                                 (entity.color && typeof entity.color === 'object' && entity.color.trueColor) || 0;
             
             let entityAci = 256; // Default to ByLayer (256)
-            if (typeof ent.color === 'number') {
-                entityAci = ent.color;
-            } else if (typeof ent.colorIndex === 'number') {
-                entityAci = ent.colorIndex;
-            } else if (typeof ent.color_index === 'number') {
-                entityAci = ent.color_index;
-            } else if (ent.color && typeof ent.color === 'object') {
-                if (typeof ent.color.aci === 'number') entityAci = ent.color.aci;
-                else if (typeof ent.color.colorIndex === 'number') entityAci = ent.color.colorIndex;
-                else if (typeof ent.color.color_index === 'number') entityAci = ent.color.color_index;
+            if (typeof base.color === 'number') {
+                entityAci = base.color;
+            } else if (base.color && typeof base.color === 'object') {
+                if (typeof base.color.aci === 'number') entityAci = base.color.aci;
+                else if (typeof base.color.colorIndex === 'number') entityAci = base.color.colorIndex;
+                else if (typeof base.color.color_index === 'number') entityAci = base.color.color_index;
             }
             
             const color = aciToHex(entityAci, rawTrueColor !== 0 ? rawTrueColor : undefined);
             
             // Map thickness/lineweight
             let thickness = 0.25;
-            if (ent.thickness !== undefined && typeof ent.thickness === 'number' && ent.thickness > 0) {
-                thickness = ent.thickness;
+            if (entity.thickness !== undefined && typeof entity.thickness === 'number' && entity.thickness > 0) {
+                thickness = entity.thickness;
             } else {
-                const lw = ent.lineweight !== undefined ? ent.lineweight : 
-                           (ent.lineWeight !== undefined ? ent.lineWeight : 
-                           (ent.linewidth !== undefined ? ent.linewidth : 
-                           (ent.line_weight !== undefined ? ent.line_weight : 
-                           (ent.lineweight_enum !== undefined ? ent.lineweight_enum : -1))));
-                thickness = mapLineweight(lw) || 0.25;
+                thickness = mapLineweight(base.lineWeight) || 0.25;
             }
 
-            const ltVal = ent.lineType || ent.linetype || ent.line_type || ent.linestyle || 'bylayer';
+            const ltVal = base.lineType || 'bylayer';
             let lineType = typeof ltVal === 'string' ? ltVal : (ltVal?.name || ltVal?.id || 'bylayer');
             lineType = lineType.toLowerCase();
             
-            const lineScale = ent.ltScale || ent.lineTypeScale || ent.line_type_scale || 1;
+            const lineScale = entity.ltScale || entity.lineTypeScale || entity.line_type_scale || 1;
 
             const isValid = (val: any) => typeof val === 'number' && isFinite(val) && Math.abs(val) < 1e12;
             
@@ -486,7 +488,19 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
                     case type.includes('LEADER'): {
                         let vertices = (ent.vertices || ent.points || []).filter((v: any) => v && isValid(v.x) && isValid(v.y));
                         if (vertices.length >= 2) {
-                            return { id: nextId(), type: 'leader', layer, color, x1: vertices[0].x, y1: vertices[0].y, x2: vertices[1].x, y2: vertices[1].y, points: vertices, thickness, lineType, lineScale } as any;
+                            let lx1 = vertices[0].x;
+                            let ly1 = vertices[0].y;
+                            let lx2 = vertices[1].x;
+                            let ly2 = vertices[1].y;
+                            // Check if leader first point is near 0,0 but second is far away (e.g. > 10000)
+                            const dist = Math.hypot(lx2 - lx1, ly2 - ly1);
+                            if (Math.abs(lx1) < 1e-3 && Math.abs(ly1) < 1e-3 && dist > 10000) {
+                                // Rogue zero leader point, shift it to be next to the destination
+                                lx1 = lx2 - (lx2 > 0 ? 100 : -100);
+                                ly1 = ly2 - (ly2 > 0 ? 100 : -100);
+                                vertices[0] = { x: lx1, y: ly1 };
+                            }
+                            return { id: nextId(), type: 'leader', layer, color, x1: lx1, y1: ly1, x2: lx2, y2: ly2, points: vertices, thickness, lineType, lineScale } as any;
                         }
                         break;
                     }
@@ -606,12 +620,40 @@ export const dwgToProject = async (buffer: ArrayBuffer, defaultSettings: AppSett
 
                         const dimRot = ent.rotation || 0;
                         const finalDimRot = Math.abs(dimRot) > 2 * Math.PI ? dimRot * Math.PI / 180 : dimRot;
+
+                        // Sanitize dimX/dimY and x1/y1/x2/y2 coordinates to filter extreme offsets
+                        let finalX1 = x1;
+                        let finalY1 = y1;
+                        let finalX2 = x2;
+                        let finalY2 = y2;
+                        let finalDimX = dimX;
+                        let finalDimY = dimY;
+
+                        const midX = (finalX1 + finalX2) / 2;
+                        const midY = (finalY1 + finalY2) / 2;
+                        const span = Math.sqrt((finalX2 - finalX1) * (finalX2 - finalX1) + (finalY2 - finalY1) * (finalY2 - finalY1));
+
+                        const isPt1Zero = Math.abs(finalX1) < 1e-3 && Math.abs(finalY1) < 1e-3;
+                        const isPt2Zero = Math.abs(finalX2) < 1e-3 && Math.abs(finalY2) < 1e-3;
+                        if ((isPt1Zero || isPt2Zero) && span > 10000) {
+                            if (isPt1Zero) { finalX1 = finalX2; finalY1 = finalY2; }
+                            else { finalX2 = finalX1; finalY2 = finalY1; }
+                        }
+
+                        const offsetFromMid = Math.sqrt((finalDimX - midX) * (finalDimX - midX) + (finalDimY - midY) * (finalDimY - midY));
+                        const maxAllowedOffset = Math.max(span * 8.0, 5000);
+                        
+                        if (offsetFromMid > maxAllowedOffset || (Math.abs(finalDimX) < 1e-3 && Math.abs(finalDimY) < 1e-3 && (Math.abs(midX) > 1.0 || Math.abs(midY) > 1.0))) {
+                            finalDimX = midX;
+                            finalDimY = midY + (span > 0 ? span * 0.15 : 15);
+                        }
+
                         return { 
                             id: nextId(), type: 'dimension', dimType, 
                             layer, color, 
-                            x1, y1, x2, y2, x3, y3, x4, y4, cx, cy,
+                            x1: finalX1, y1: finalY1, x2: finalX2, y2: finalY2, x3, y3, x4, y4, cx, cy,
                             angle1, angle2,
-                            dimX, dimY,
+                            dimX: finalDimX, dimY: finalDimY,
                             text: formattedDimText,
                             size: dimH, height: dimH,
                             rotation: finalDimRot,

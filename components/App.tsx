@@ -130,6 +130,7 @@ const INITIAL_SETTINGS: AppSettings = {
   aiSuggestionsEnabled: true,
   wallCleanupMode: false,
   snapViewportToGrid: false,
+  autoFitPadding: 350,
   ctbFiles: {
     'voxcadd': voxCtb,
     'monochrome': monoCtb
@@ -880,6 +881,24 @@ const App: React.FC = () => {
     title?: string
   } | null>(null);
   const [isAiThinking, setIsAiThinking] = useState(false);
+  
+  const getCommandFromAIWithState = useCallback(async (
+    prompt: string, 
+    contextSummary: string = "", 
+    sketchData?: string | null, 
+    history: any[] = [],
+    drawingType?: string,
+    standards?: string
+  ) => {
+    setIsAiThinking(true);
+    try {
+      const res = await getCommandFromAI(prompt, contextSummary, sketchData, history, drawingType, standards);
+      return res;
+    } finally {
+      setIsAiThinking(false);
+    }
+  }, []);
+
   const [aiRecommendation, setAiRecommendation] = useState<string | null>(null);
   const [prevUnits, setPrevUnits] = useState(settings.units);
   const [lastAiCommandTime, setLastAiCommandTime] = useState(0);
@@ -1303,82 +1322,48 @@ const App: React.FC = () => {
   const fitToScreen = useCallback((currentShapes: any[]) => {
     if (!currentShapes || currentShapes.length === 0) return;
 
-    const bounds = getAllShapesBounds(currentShapes, blocks);
+    // Record the previous viewport scale and position before calling autoFitToDrawing
+    saveToViewHistory();
+
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
 
-    if (bounds) {
+    // Use our custom getAllShapesBounds as the primary bounds
+    const bounds = getAllShapesBounds(currentShapes, blocks);
+    if (bounds && bounds.xMin !== Infinity && bounds.yMin !== Infinity && bounds.xMax !== -Infinity && bounds.yMax !== -Infinity) {
       minX = bounds.xMin;
       minY = bounds.yMin;
       maxX = bounds.xMax;
       maxY = bounds.yMax;
-    } else {
+    }
+
+    // Secondary fallback bounds checking from raw points if bounds are rawly requested
+    if (minX === Infinity || minY === Infinity || maxX === -Infinity || maxY === -Infinity) {
       currentShapes.forEach((shape) => {
-        if (!shape) return;
-        if (shape.type === 'line' && shape.points) {
-          for (let i = 0; i < shape.points.length; i += 2) {
-            const px = shape.points[i];
-            const py = shape.points[i+1];
-            // Filter extreme outliers that cause coordinate system overflow & hanging
-            if (typeof px === 'number' && typeof py === 'number' && Math.abs(px) < 1e8 && Math.abs(py) < 1e8) {
-                minX = Math.min(minX, px);
-                minY = Math.min(minY, py);
-                maxX = Math.max(maxX, px);
-                maxY = Math.max(maxY, py);
+        if (shape.type === 'line' && (shape.points || shape.x1 !== undefined)) {
+          if (shape.points) {
+            for (let i = 0; i < shape.points.length; i += 2) {
+              minX = Math.min(minX, shape.points[i]);
+              minY = Math.min(minY, shape.points[i + 1]);
+              maxX = Math.max(maxX, shape.points[i]);
+              maxY = Math.max(maxY, shape.points[i + 1]);
             }
+          } else {
+            minX = Math.min(minX, shape.x1, shape.x2);
+            minY = Math.min(minY, shape.y1, shape.y2);
+            maxX = Math.max(maxX, shape.x1, shape.x2);
+            maxY = Math.max(maxY, shape.y1, shape.y2);
           }
-        } else if (shape.type === 'line') {
-          const x1 = shape.x1 !== undefined ? shape.x1 : (shape.x ?? 0);
-          const y1 = shape.y1 !== undefined ? shape.y1 : (shape.y ?? 0);
-          const x2 = shape.x2 !== undefined ? shape.x2 : (shape.x ?? 0);
-          const y2 = shape.y2 !== undefined ? shape.y2 : (shape.y ?? 0);
-          if (Math.abs(x1) < 1e8 && Math.abs(y1) < 1e8 && Math.abs(x2) < 1e8 && Math.abs(y2) < 1e8) {
-              minX = Math.min(minX, x1, x2);
-              minY = Math.min(minY, y1, y2);
-              maxX = Math.max(maxX, x1, x2);
-              maxY = Math.max(maxY, y1, y2);
-          }
-        } else if ((shape.type === 'pline' || shape.type === 'spline' || shape.type === 'hatch') && Array.isArray(shape.points)) {
-          shape.points.forEach((p: any) => {
-            if (p && typeof p.x === 'number' && typeof p.y === 'number' && Math.abs(p.x) < 1e8 && Math.abs(p.y) < 1e8) {
-              minX = Math.min(minX, p.x);
-              minY = Math.min(minY, p.y);
-              maxX = Math.max(maxX, p.x);
-              maxY = Math.max(maxY, p.y);
-            }
-          });
-        } else if ((shape.type === 'circle' || shape.type === 'arc') && typeof (shape.x || shape.centerX) === 'number' && typeof (shape.y || shape.centerY) === 'number') {
-          const x = shape.x || shape.centerX || 0;
-          const y = shape.y || shape.centerY || 0;
-          const r = shape.radius || 80;
-          if (Math.abs(x) < 1e8 && Math.abs(y) < 1e8 && Math.abs(r) < 1e8) {
-              minX = Math.min(minX, x - r);
-              minY = Math.min(minY, y - r);
-              maxX = Math.max(maxX, x + r);
-              maxY = Math.max(maxY, y + r);
-          }
-        } else if (shape.type === 'rect') {
-          const sx = typeof shape.x === 'number' ? shape.x : 0;
-          const sy = typeof shape.y === 'number' ? shape.y : 0;
-          const sw = typeof shape.width === 'number' ? shape.width : 50;
-          const sh = typeof shape.height === 'number' ? shape.height : 50;
-          if (Math.abs(sx) < 1e8 && Math.abs(sy) < 1e8) {
-              minX = Math.min(minX, sx);
-              minY = Math.min(minY, sy);
-              maxX = Math.max(maxX, sx + (sw || 0));
-              maxY = Math.max(maxY, sy + (sh || 0));
-          }
-        } else if (shape.type === 'text' || shape.type === 'mtext' || shape.type === 'block') {
-          const sx = typeof shape.x === 'number' ? shape.x : 0;
-          const sy = typeof shape.y === 'number' ? shape.y : 0;
-          if (Math.abs(sx) < 1e8 && Math.abs(sy) < 1e8) {
-              minX = Math.min(minX, sx);
-              minY = Math.min(minY, sy);
-              maxX = Math.max(maxX, sx + 120);
-              maxY = Math.max(maxY, sy + 40);
-          }
+        } else {
+          const x = shape.x || shape.centerX || shape.x1 || 0;
+          const y = shape.y || shape.centerY || shape.y1 || 0;
+          const size = 600; // Large safety buffer
+          minX = Math.min(minX, x - size);
+          minY = Math.min(minY, y - size);
+          maxX = Math.max(maxX, x + size);
+          maxY = Math.max(maxY, y + size);
         }
       });
     }
@@ -1387,36 +1372,68 @@ const App: React.FC = () => {
       return;
     }
 
-    const padding = 150;
+    // Use user-defined safe padding from drafting settings if available
+    const padding = settingsRef.current?.autoFitPadding !== undefined ? settingsRef.current.autoFitPadding : 350;
     const width = maxX - minX;
     const height = maxY - minY;
 
-    if (width < 10 || height < 10) return;
+    if (width < 100 || height < 100) return;
 
-    // Query actual workspace canvas client dimensions from handle (most accurate), element, or default window ratio
-    const size = canvasHandleRef?.current?.getCanvasSize();
-    const canvasEl = document.querySelector('canvas');
-    const stageWidth = size?.width && size.width > 100 ? size.width : (canvasEl && canvasEl.clientWidth > 100 ? canvasEl.clientWidth : window.innerWidth * 0.73);
-    const stageHeight = size?.height && size.height > 100 ? size.height : (canvasEl && canvasEl.clientHeight > 100 ? canvasEl.clientHeight : window.innerHeight * 0.68);
+    // Use extremely robust physical screenspace calculations to bypass race conditions
+    const stageWidth = window.innerWidth * 0.8;
+    const stageHeight = window.innerHeight * 0.7;
 
-    const scale = Math.min(stageWidth / (width + padding * 2), stageHeight / (height + padding * 2)) * 0.82;
+    // Calculate optimal scale using the user's aggressive 0.75 factor and padding
+    const baseScale = Math.min(stageWidth / (width + padding), stageHeight / (height + padding));
+    let scale = baseScale * 0.75; 
 
     if (scale <= 0 || !isFinite(scale)) return;
 
-    const centerX = (maxX + minX) / 2;
-    const centerY = (maxY + minY) / 2;
+    // Calculate dynamic center: base bounding box center weighted with shape density centroid to prevent severe outliner skew
+    let midX = minX + width / 2;
+    let midY = minY + height / 2;
+
+    const centroidShapes = currentShapes.filter(s => s && s.type !== 'ray' && s.type !== 'xline');
+    if (centroidShapes.length > 0) {
+      let sumX = 0;
+      let sumY = 0;
+      let cnt = 0;
+      centroidShapes.forEach(shape => {
+         const sx = shape.x || shape.centerX || shape.x1 || (shape.points ? shape.points[0] : undefined);
+         const sy = shape.y || shape.centerY || shape.y1 || (shape.points ? shape.points[1] : undefined);
+         if (sx !== undefined && sy !== undefined && isFinite(sx) && isFinite(sy)) {
+           sumX += sx;
+           sumY += sy;
+           cnt++;
+         }
+      });
+      if (cnt > 0) {
+        const cx = sumX / cnt;
+        const cy = sumY / cnt;
+        // 50% bounding box center, 50% geometric centroid
+        midX = midX * 0.5 + cx * 0.5;
+        midY = midY * 0.5 + cy * 0.5;
+      }
+    }
 
     const drawingScaleVal = settingsRef.current?.drawingScale || 1.0;
-    const finalScale = scale / drawingScaleVal;
+    let finalScale = scale / drawingScaleVal;
+
+    // Maximum zoom limit to prevent extreme magnification with sparse/empty files
+    const MAX_ZOOM_LIMIT = 5.0;
+    if (finalScale > MAX_ZOOM_LIMIT) {
+      finalScale = MAX_ZOOM_LIMIT;
+      scale = finalScale * drawingScaleVal;
+    }
 
     setView({
        scale: finalScale,
-       originX: -centerX * scale,
-       originY: centerY * scale
+       originX: -midX * scale,
+       originY: midY * scale
     });
 
-    console.log(`✅ Day 1 Auto-Fit Applied | Scale: ${finalScale.toFixed(3)}`);
-  }, [setView, blocks]);
+    console.log(`🚀 FINAL Auto-Fit Applied | Scale: ${finalScale.toFixed(3)} | Center: (${(-midX * scale).toFixed(0)}, ${(midY * scale).toFixed(0)}) | Padding: ${padding}`);
+  }, [setView, blocks, saveToViewHistory]);
 
   const autoFitDrawing = fitToScreen;
 
@@ -1653,27 +1670,23 @@ const App: React.FC = () => {
                     commitToHistory();
                 }, 500);
 
-                // Zoom extents if bounds exist
-                if (isDwg && project.entities) {
+                // Zoom extents on fresh drawing contents to ensure they fit correctly within the viewport on open
+                if (project.entities && project.entities.length > 0) {
                     setTimeout(() => {
                         autoFitDrawing(project.entities);
-                    }, 100);
+                    }, 50);
                     setTimeout(() => {
                         autoFitDrawing(project.entities);
-                    }, 400);
+                    }, 200);
                     setTimeout(() => {
                         autoFitDrawing(project.entities);
-                    }, 900);
-                } else {
+                    }, 450);   // Delayed auto-centering update as requested
                     setTimeout(() => {
-                        handleAction('zoomExtents');
-                    }, 100);
+                        autoFitDrawing(project.entities);
+                    }, 700);
                     setTimeout(() => {
-                        handleAction('zoomExtents');
-                    }, 400);
-                    setTimeout(() => {
-                        handleAction('zoomExtents');
-                    }, 900);
+                        autoFitDrawing(project.entities);
+                    }, 1200);
                 }
 
                 if (project.stats) {
@@ -3818,100 +3831,140 @@ Use only RECT and LINE commands.`;
     }
   };
 
-  const executeAiDrafting = (args: string) => {
+  const executeAiDrafting = async (args: string) => {
     setIsAiThinking(true);
     setLogMessage("INFO: Invoking 2D Space-Planning Engine...");
     
     try {
       const isCommercialRequest = /office|commercial|storey|20x30|20\s*x\s*30|lift|parking/i.test(args || "");
       const isDuplexRequest = /duplex|10x15|10\s*x\s*15/i.test(args || "");
+      const isVillaRequest = /villa|house|mansion|home/i.test(args || "") && !isCommercialRequest && !isDuplexRequest;
+      const isKeywordPlan = isCommercialRequest || isDuplexRequest || isVillaRequest || args === 'villa';
       
-      const draftResult = isCommercialRequest 
-        ? draft20x30CommercialOfficePlan() 
-        : isDuplexRequest 
-          ? draft10x15DuplexPlan() 
-          : draft12x18ModernVillaPlan();
-      
-      // Load standard layers into the editor configuration
-      setLayerConfig(prev => ({
-        ...prev,
-        ...draftResult.layerConfigs
-      }));
-      
-      // Render watertight shapes directly into layers
-      setLayers(prev => ({
-        ...prev,
-        ...draftResult.layers
-      }));
-      
-      if (isCommercialRequest) {
-        setCommandHistory(prev => [
+      if (isKeywordPlan) {
+        const draftResult = isCommercialRequest 
+          ? draft20x30CommercialOfficePlan() 
+          : isDuplexRequest 
+            ? draft10x15DuplexPlan() 
+            : draft12x18ModernVillaPlan();
+        
+        // Load standard layers into the editor configuration
+        setLayerConfig(prev => ({
           ...prev,
-          `AI SPACE PLAN ARCHITECT ENGINE COMPLETED SUCCESSFULLY!`,
-          `PLOT SIZE: 20m × 30m | 2-STOREY MULTI-FLOOR COMMERCIAL HEADQUARTERS OFFICE & PARKING`,
-          `COMPLYING CAD STANDARDS & LAYERS LOADED:`,
-          `  - [A-GRID] 20m x 30m plot boundary, 6m front parking court, North indicator, & road details.`,
-          `  - [A-COLS] Structural columns (300mm x 450mm commercial standard RCC, aligned vertically).`,
-          `  - [A-BEAMS] Grid beam centerlines connecting load paths (Dotted/Dashed CAD style).`,
-          `  - [A-WALL] Solid exterior structural walls (230mm thickness).`,
-          `  - [A-WALL-INT] Shared internal partitions & restroom stalls (115mm thickness).`,
-          `  - [A-DOOR] Dynamic client-side doors with 90-degree swings & double glass lobby panels.`,
-          `  - [A-WINDOW] Side and facade exterior glazing window guidelines (100% natural lighting).`,
-          `  - [A-FURN] Comprehensive office layout (50+ computer desks, custom task chairs, conference tables, executive cabins, pantries, secure server racks, wc stalls, and parked cars).`,
-          `  - [A-TEXT] Advanced MText annotations specifying rooms, sizes, area statements (m²), & occupancy capacities.`,
-          `  - [A-DIM] Linear annotations indicating setbacks, building dims, & grid sections.`
-        ]);
-        setLogMessage("SUCCESS: PREMIUM TWO-STOREY COMMERCIAL HQ DRAFT GENERATED SUCCESSFULLY");
-      } else if (isDuplexRequest) {
-        setCommandHistory(prev => [
+          ...draftResult.layerConfigs
+        }));
+        
+        // Render watertight shapes directly into layers
+        setLayers(prev => ({
           ...prev,
-          `AI MASTER ARCHITECT ENGINE COMPLETED SUCCESSFULLY!`,
-          `PLOT SIZE: 10m × 15m | MODERN DUPLEX RESIDENCE DRAWING PACKAGE`,
-          `COMPLYING CAD STANDARDS & LAYERS LOADED:`,
-          `  - [A-GRID] Real-time aligned 10m x 15m Plot Boundary, setbacks, & matching Floor Level Datums (Section A-A).`,
-          `  - [A-COLS] Structural columns (300mm x 300mm standard RCC, aligned vertically across floors).`,
-          `  - [A-BEAMS] Beam centerlines connecting load paths (Dotted/Dashed style).`,
-          `  - [A-WALL] Solid exterior masonry walls (230mm thickness equivalent).`,
-          `  - [A-WALL-INT] Internal partitions & dividers (115mm thickness equivalent).`,
-          `  - [A-DOOR] Dynamic door panel swings with hinged quarter-circle swing paths.`,
-          `  - [A-WINDOW] Sliding glass window fixtures with central double-lines.`,
-          `  - [A-FURN] Beautiful furniture layouts: sofa arrays, dining table, kitchen hob/sink counters, beds, wardrobes, toilet WC fixture.`,
-          `  - [A-TEXT] Clean MText annotations identifying spaces, sizes, and detailed building levels.`,
-          `  - [A-DIM] Linear aligned dimensions for clear setbacks, building dimensions, and heights.`,
-          `FOUR (4) PROFESSIONAL DRAWINGS GENERATED IN MODEL SPACE:`,
-          `  1. GROUND FLOOR PLAN (Local Origin: 0, 0)`,
-          `  2. FIRST FLOOR PLAN (Local Origin: 13000, 0)`,
-          `  3. BUILDING SECTION A-A (Local Origin: 0, 18000)`,
-          `  4. FRONT ELEVATION (Local Origin: 13000, 18000)`
-        ]);
-        setLogMessage("SUCCESS: PREMIUM DUPLEX RESIDENCE PLANS, SECTION & ELEVATION DRAFTS GENERATED ADHERING TO HIGH-SPEC HUMAN DRAUGHTING STANDARDS");
+          ...draftResult.layers
+        }));
+        
+        if (isCommercialRequest) {
+          setCommandHistory(prev => [
+            ...prev,
+            `AI SPACE PLAN ARCHITECT ENGINE COMPLETED SUCCESSFULLY!`,
+            `PLOT SIZE: 20m × 30m | 2-STOREY MULTI-FLOOR COMMERCIAL HEADQUARTERS OFFICE & PARKING`,
+            `COMPLYING CAD STANDARDS & LAYERS LOADED:`,
+            `  - [A-GRID] 20m x 30m plot boundary, 6m front parking court, North indicator, & road details.`,
+            `  - [A-COLS] Structural columns (300mm x 450mm commercial standard RCC, aligned vertically).`,
+            `  - [A-BEAMS] Grid beam centerlines connecting load paths (Dotted/Dashed CAD style).`,
+            `  - [A-WALL] Solid exterior structural walls (230mm thickness).`,
+            `  - [A-WALL-INT] Shared internal partitions & restroom stalls (115mm thickness).`,
+            `  - [A-DOOR] Dynamic client-side doors with 90-degree swings & double glass lobby panels.`,
+            `  - [A-WINDOW] Side and facade exterior glazing window guidelines (100% natural lighting).`,
+            `  - [A-FURN] Comprehensive office layout (50+ computer desks, custom task chairs, conference tables, executive cabins, pantries, secure server racks, wc stalls, and parked cars).`,
+            `  - [A-TEXT] Advanced MText annotations specifying rooms, sizes, area statements (m²), & occupancy capacities.`,
+            `  - [A-DIM] Linear annotations indicating setbacks, building dims, & grid sections.`
+          ]);
+          setLogMessage("SUCCESS: PREMIUM TWO-STOREY COMMERCIAL HQ DRAFT GENERATED SUCCESSFULLY");
+        } else if (isDuplexRequest) {
+          setCommandHistory(prev => [
+            ...prev,
+            `AI MASTER ARCHITECT ENGINE COMPLETED SUCCESSFULLY!`,
+            `PLOT SIZE: 10m × 15m | MODERN DUPLEX RESIDENCE DRAWING PACKAGE`,
+            `COMPLYING CAD STANDARDS & LAYERS LOADED:`,
+            `  - [A-GRID] Real-time aligned 10m x 15m Plot Boundary, setbacks, & matching Floor Level Datums (Section A-A).`,
+            `  - [A-COLS] Structural columns (300mm x 300mm standard RCC, aligned vertically across floors).`,
+            `  - [A-BEAMS] Beam centerlines connecting load paths (Dotted/Dashed style).`,
+            `  - [A-WALL] Solid exterior masonry walls (230mm thickness equivalent).`,
+            `  - [A-WALL-INT] Internal partitions & dividers (115mm thickness equivalent).`,
+            `  - [A-DOOR] Dynamic door panel swings with hinged quarter-circle swing paths.`,
+            `  - [A-WINDOW] Sliding glass window fixtures with central double-lines.`,
+            `  - [A-FURN] Beautiful furniture layouts: sofa arrays, dining table, kitchen hob/sink counters, beds, wardrobes, toilet WC fixture.`,
+            `  - [A-TEXT] Clean MText annotations identifying spaces, sizes, and detailed building levels.`,
+            `  - [A-DIM] Linear aligned dimensions for clear setbacks, building dimensions, and heights.`,
+            `FOUR (4) PROFESSIONAL DRAWINGS GENERATED IN MODEL SPACE:`,
+            `  1. GROUND FLOOR PLAN (Local Origin: 0, 0)`,
+            `  2. FIRST FLOOR PLAN (Local Origin: 13000, 0)`,
+            `  3. BUILDING SECTION A-A (Local Origin: 0, 18000)`,
+            `  4. FRONT ELEVATION (Local Origin: 13000, 18000)`
+          ]);
+          setLogMessage("SUCCESS: PREMIUM DUPLEX RESIDENCE PLANS, SECTION & ELEVATION DRAFTS GENERATED ADHERING TO HIGH-SPEC HUMAN DRAUGHTING STANDARDS");
+        } else {
+          setCommandHistory(prev => [
+            ...prev,
+            `AI SPACE PLAN ARCHITECT ENGINE COMPLETED SUCCESSFULLY!`,
+            `PLOT SIZE: 12m × 18m | GROUND FLOOR ONLY // 3-BEDROOM VILLA`,
+            `COMPLYING CAD STANDARDS & LAYERS LOADED:`,
+            `  - [A-GRID] Plot boundary, setback guidelines, & North indicator.`,
+            `  - [A-COLS] Structural columns (300mm x 300mm standard RCC, aligned).`,
+            `  - [A-BEAMS] Beam centerlines connecting load paths (Dashed/Dotted style).`,
+            `  - [A-WALL] External load-bearing walls (230mm thickness).`,
+            `  - [A-WALL-INT] Internal partitions (115mm thickness).`,
+            `  - [A-DOOR] Dynamic door panel casings with 90° Swing Arcs.`,
+            `  - [A-WINDOW] Glazing slider assemblies with central double-lines.`,
+            `  - [A-FURN] Complete interior layout (Beds, Dressing, 6-Seater Table, Sofa, Sanitary items, Stair step run & Direction).`,
+            `  - [A-TEXT] Rich smart MText labels specifying dimensions & areas (m²).`,
+            `  - [A-DIM] Aligned linear dimensions marking setbacks.`
+          ]);
+          setLogMessage("SUCCESS: PREMIUM DRAFT PLAN GENERATED ADHERING TO HUMAN DRAUGHTING STANDARDS");
+        }
+        
+        setTimeout(() => {
+          commitToHistory();
+          const allGeneratedShapes = Object.values(draftResult.layers).flat();
+          fitToScreen(allGeneratedShapes as any[]);
+        }, 100);
       } else {
-        setCommandHistory(prev => [
-          ...prev,
-          `AI SPACE PLAN ARCHITECT ENGINE COMPLETED SUCCESSFULLY!`,
-          `PLOT SIZE: 12m × 18m | GROUND FLOOR ONLY // 3-BEDROOM VILLA`,
-          `COMPLYING CAD STANDARDS & LAYERS LOADED:`,
-          `  - [A-GRID] Plot boundary, setback guidelines, & North indicator.`,
-          `  - [A-COLS] Structural columns (300mm x 300mm standard RCC, aligned).`,
-          `  - [A-BEAMS] Beam centerlines connecting load paths (Dashed/Dotted style).`,
-          `  - [A-WALL] External load-bearing walls (230mm thickness).`,
-          `  - [A-WALL-INT] Internal partitions (115mm thickness).`,
-          `  - [A-DOOR] Dynamic door panel casings with 90° Swing Arcs.`,
-          `  - [A-WINDOW] Glazing slider assemblies with central double-lines.`,
-          `  - [A-FURN] Complete interior layout (Beds, Dressing, 6-Seater Table, Sofa, Sanitary items, Stair step run & Direction).`,
-          `  - [A-TEXT] Rich smart MText labels specifying dimensions & areas (m²).`,
-          `  - [A-DIM] Aligned linear dimensions marking setbacks.`
-        ]);
-        setLogMessage("SUCCESS: PREMIUM DRAFT PLAN GENERATED ADHERING TO HUMAN DRAUGHTING STANDARDS");
+        // Handle dynamic customized AI drafting queries via generative model
+        setLogMessage("INFO: Contacting AI Principal Architect for custom layout synthesis...");
+        const ctxSummary = getAiContextSummary();
+        const res = await getCommandFromAI(args, ctxSummary);
+        
+        if (res.commands && res.commands.length > 0) {
+          setCommandHistory(prev => [...prev, `AI SYNTHESIZED LAYOUT FOR: "${args.toUpperCase()}"`]);
+          
+          res.commands.forEach((c: string) => {
+            const trimmed = c.trim();
+            if (!trimmed) return;
+            setCommandHistory(prev => [...prev, `AI> ${trimmed.toUpperCase()}`]);
+            executeCommand(trimmed);
+          });
+          
+          setLogMessage(res.text || "SUCCESS: DRAFT_GENERATED");
+          
+          setTimeout(() => {
+            commitToHistory();
+            // Read updated layers securely and fit viewport to custom AI drawings
+            setLayers(currentLayers => {
+              const allShapes = Object.values(currentLayers).flat();
+              fitToScreen(allShapes as any[]);
+              return currentLayers;
+            });
+          }, 300);
+        } else {
+          setLogMessage("WARN: No drawing commands generated by AI model.");
+          if (res.text) {
+             setLogMessage(`AI: ${res.text}`);
+             setCommandHistory(prev => [...prev, `AI> ${res.text}`]);
+          }
+        }
       }
-      
-      setTimeout(() => {
-        commitToHistory();
-      }, 100);
       
     } catch (err: any) {
       console.error(err);
-      setLogMessage("ERR: AI_DRAFTING_FAILED");
+      setLogMessage(`ERR: AI_DRAFTING_FAILED [${err.message || ""}]`);
     } finally {
       setIsAiThinking(false);
     }
@@ -3920,7 +3973,16 @@ Use only RECT and LINE commands.`;
   // Helper to rescales entity coordinates when standard units are changed
 
   const executeCommand = useCallback((cmdStr: string) => {
-    const trimmed = cmdStr.trim();
+    let cleanCmdStr = cmdStr;
+    const partsCheck = cmdStr.trim().split(/\s+/);
+    const firstWord = partsCheck[0]?.toLowerCase();
+    if (firstWord !== 'mt' && firstWord !== 'mtext' && firstWord !== 't' && firstWord !== 'text') {
+      const idx = cmdStr.indexOf(';');
+      if (idx !== -1) {
+        cleanCmdStr = cmdStr.substring(0, idx);
+      }
+    }
+    const trimmed = cleanCmdStr.trim();
     
     // Add length safety check to prevent garbled text rendering
     if (trimmed.length > 1000) {
@@ -4349,6 +4411,13 @@ Use only RECT and LINE commands.`;
           setActiveCommandName(undefined);
           return;
       }
+      if (cmdKey === 'zp' || cmdKey === 'zoomp' || cmdKey === 'zoomprevious' || cmdKey === 'zoomprev') {
+          handleAction('zoomPrevious');
+          setIsCommandActive(false);
+          setActiveCommandName(undefined);
+          setCommandInput('');
+          return;
+      }
       let cmd;
       if (cmdKey === 'dimlinear' || cmdKey === 'dim') cmd = new DimensionCommand(engineRef.current!.ctx, 'linear');
       else if (cmdKey === 'aligned') cmd = new DimensionCommand(engineRef.current!.ctx, 'aligned');
@@ -4380,6 +4449,12 @@ Use only RECT and LINE commands.`;
           inputParts.forEach(part => {
               if (part.trim()) engineRef.current!.input(part.trim());
           });
+          // Programmatic / Scripting invocation finalizer:
+          // If a multi-argument command is left active in writing/drawing state, 
+          // we simulate an Enter key (empty string input) to finalize and commit it!
+          if (engineRef.current && engineRef.current.active) {
+              engineRef.current.input("");
+          }
       }
     } else {
         setLogMessage(`ERR: CMD NOT FOUND [${cmdKey}]`);
@@ -5940,7 +6015,7 @@ Use only RECT and LINE commands.`;
                 <AiDraftingPanel 
                   onClose={() => setActivePanel('none')}
                   onCommand={executeCommand}
-                  getCommandFromAI={getCommandFromAI}
+                  getCommandFromAI={getCommandFromAIWithState}
                   getAiContextSummary={getAiContextSummary}
                   undo={undo}
                   setLogMessage={setLogMessage}

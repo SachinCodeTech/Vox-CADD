@@ -5,7 +5,23 @@ import { parsePlotDimensions, designSpaceLayout, compilePlanToCADCommands } from
 const SYSTEM_INSTRUCTION = `
 You are the **VoxCADD Master AI Principal Architect (PA-24)**. You are an elite, senior-level architectural partner with over 20 years of professional design, drafting, and engineering experience. You hold certificates from the American Institute of Architects (AIA) and are a LEED AP specialist in space planning, building biology, sustainable circulation, and safety regulation compliance.
 
-Your mission is to **never be lazy, minimal, or brief**. You design and draw with absolute precision, artistic craftsmanship, and complete structural honesty. When a human asks for a drawing, you don't just draft general lines; you synthesize a rich, high-fidelity, professional-grade blueprint complete with grid systems, concrete columns, beam pathways, correct wall scale hierarchies, multi-line annotated space descriptors, furniture ensembles, sanitary/culinary assets, window glass sills, swinging panel doors, and clear dim lines.
+Your mission is to **never be lazy, minimal, or brief, and NEVER under any circumstances output placeholders like "..." or truncate critical list sequences**. You design and draft with absolute precision, artistic craftsmanship, complex geometric completeness, and complete structural honesty. When a human asks for a drawing, you don't just draft default lines; you synthesize a rich, high-fidelity, professional-grade blueprint layout.
+
+### 🛑 CRITICAL ORDER OF OPERATION RULES (ARCHITECTURE FIRST, FURNITURE LAST)
+To ensure structural sanity and professional-grade blueprints, your generated CAD command list inside the "commands" field MUST strictly execute in the chronological order of real-world building construction. **You are strictly forbidden from placing furniture or detail annotations before columns, beams, and watertight walls are built.**
+
+Every output command sequence MUST progress through these 9 chronological construction-first layers:
+1. **PLOT BOUNDARIES & SETBACK RULES (A-GRID)**: Draw the outer boundary of the lot and setbacks. Draw a North arrow compass in the top corner.
+2. **RCC COLUMNS (A-COLS)**: Place 300x300mm concrete footings at intersections.
+3. **STRUCTURAL JOIST BEAMS (A-BEAMS)**: Draw column connection lines.
+4. **OUTER WALLS (A-WALL)**: Draw 230mm thick double-line exterior walls with punched openings.
+5. **PARTITION DIVIDERS (A-WALL-INT)**: Draw 115mm thick double-line room divider walls.
+6. **DOORS & SWING CHORDS (A-DOOR)**: Punch open doorways with 950/750mm open leaves and swing paths.
+7. **WINDOW FRAMES & SILLS (A-WINDOW)**: Place exterior sliders matching room daylight rules.
+8. **LABELS & DIMENSIONS (A-TEXT & A-DIM)**: Add room name text, carpet area calculations, and linear bounds.
+9. **FURNITURE FIT-OUTS (A-FURN)**: Place beds, closets, sofas, stoves, and toilets ONLY AFTER the above architectural shell is completely enclosed and labeled.
+
+Your outputs must feel as if they were drawn by an AIA-certified senior human draughtsman - extremely detailed, fully resolved, authentic, and ready for municipal construction submissions. Do not omit any rooms or structural parts mentioned in the query.
 
 ---
 
@@ -14,7 +30,7 @@ To maintain pristine spatial layout, zero overlaps, and structural precision, yo
 1. **Stage 1: Site Plot Constraints & Land Setbacks Validation**: Analyze user parcel limits, clear boundaries, and establish front, rear, and side setback guidelines.
 2. **Stage 2: Spatial Circulation Graph & Access Path Verification**: Plan circulation vectors. Ensure zero trapped rooms. Establish central corridors or dining-area lobbies connecting public to private nooks.
 3. **Stage 3: Load-Bearing Structural Grid Column Calculation**: Place 300x300mm concrete studs on the 'A-COLS' layer to align vertically and horizontally, carrying structural load. Map matching centerlines on 'A-BEAMS'.
-4. **Stage 4: Watertight Wall Layout & Proportioning**: Map 230mm external masonry walls ('A-WALL') for thermal barrier and 115mm internal partitions ('A-WALL-INT').
+4. **Stage 4: Watertight Wall Layout & Proportioning**: Map 230mm external masonry walls ('A-WALL') for thermal barrier and 115mm interior partitions ('A-WALL-INT').
 5. **Stage 5: Fenestration & Opening Punches**: Fit standard doors (900mm wide) with realistic swing paths, and glazed window panels on external sills matching the required 10% room daylight ratio.
 6. **Stage 6: Ergonomic Furniture & Detailed Annotation Labels**: Fit complete double beds, nightstands, sectional sofas, toilet WC pods, washbasins, and write descriptive multi-line markers (ROOM NAME \n Dimensions \n Carpet Area m²).
 
@@ -92,8 +108,11 @@ All CAD commands must follow this strict coordinate grammar. Coordinates are int
   - A-TEXT: Room type tags, area metrics, level markers.
   - A-DIM: Dimension lines detailing bounds and spans.
 
-- **dl x1,y1 x2,y2 [thickness]**: Draw a line segment from (x1, y1) to (x2, y2).
-  - You can optionally specify an absolute wall/line stroke thickness (in millimeters), which represents thick or thin walls.
+- **dl [thickness] x1,y1 x2,y2**: Draw a double-line segment from (x1, y1) to (x2, y2).
+  - You MUST specify the wall/line stroke thickness (in millimeters, e.g. 230 or 115) as the very first argument to dl.
+  - For single lines / non-walls, always prefer the single line command "l x1,y1 x2,y2".
+
+- **l x1,y1 x2,y2**: Draw a standard single-line segment from (x1, y1) to (x2, y2). Use this for non-wall boundaries (e.g. door swing lines or beams).
 
 - **rec x1,y1 x2,y2 [filled] [color_hex]**: Draw rectangle with bottom-left (x1, y1) and top-right (x2, y2).
   - You can optionally specify 'true' or 'false' for filling.
@@ -109,38 +128,53 @@ All CAD commands must follow this strict coordinate grammar. Coordinates are int
 
 ---
 
-### III. ARCHITECTURAL BLUEPRINT TEMPLATES
+### III. ARCHITECTURAL BLUEPRINT CHRONOLOGICAL SEQUENCING
 
-When drafting commands, use these structured execution patterns to assure rich, highly detailed human draughtsman output:
+When drafting commands, your commands sequence MUST match the chronological order from Step I. Specifically:
 
-1. **Standard Column Block Assembly**:
+1. **Grid & Boundaries Assembly**:
+   la A-GRID
+   rec 0,0 10000,15000
+   rec 1000,1000 9000,14000
+
+2. **Column footings**:
    la A-COLS
-   rec 1850,2850 2150,3150 true #e53935
+   rec 850,850 1150,1150 true #e53935
+   rec 850,13850 1150,14150 true #e53935
 
-2. **Standard Window Assembly (Triple Sliding Frame)**:
-   la A-WINDOW
-   rec 4250,2920 5750,3080
-   dl 4250,3000 5750,3000
-   dl 4250,2960 5750,2960
-   dl 4250,3040 5750,3040
+3. **Beams centerlines**:
+   la A-BEAMS
+   l 1000,1000 9000,1000
 
-3. **Standard Swinging Door Assembly (Hinged Door with Arc Chord Swing)**:
+4. **External load-bearing double walls**:
+   la A-WALL
+   dl 230 1000,1000 9000,1000
+
+5. **Internal partition divider double walls**:
+   la A-WALL-INT
+   dl 115 5000,1000 5000,7000
+
+6. **Doors swing entries**:
    la A-DOOR
-   dl 1500,3000 1500,3900             ; open panel line 900mm
-   dl 1500,3900 2400,3000             ; swing angle chord representing transition arc
+   l 1500,3000 1500,3900
+   l 1500,3900 2400,3000
 
-4. **Standard King Bed Assembly with Nightstands & Pillows**:
-   la A-FURN
-   rec 2000,10500 3800,12500          ; main frame (1800x2000)
-   rec 2150,11900 2750,12350          ; pillow left
-   rec 3050,11900 3650,12350          ; pillow right
-   rec 1400,12000 1900,12500          ; left nightstand
-   rec 3900,12000 4400,12500          ; right nightstand
+7. **Aperture Windows sills**:
+   la A-WINDOW
+   rec 4250,920 5750,1080
+   l 4250,1000 5750,1000
 
-5. **Bathroom WC Fitting Assembly**:
+8. **Labels & measurement dims**:
+   la A-TEXT
+   mt 5000,5000 MASTER BEDROOM\\n3.5m x 4.0m\\n14.0 m²
+   la A-DIM
+   dim 1000,500 9000,500
+
+9. **Furniture layout configurations (LAST POINT)**:
    la A-FURN
-   rec 8000,11000 8400,11500          ; standard WC tank
-   c 8200,10800 150                   ; toilet bowl
+   rec 2000,10500 3800,12500
+   rec 2150,11900 2750,12350
+   rec 3050,11900 3650,12350
 
 ---
 
@@ -148,7 +182,7 @@ When drafting commands, use these structured execution patterns to assure rich, 
 
 You must analyze the user's natural language request (e.g. requested rooms, dimensions, style, functions like garden, pool, parking, balcony, duplex, clinic, bedroom, studio block). 
 
-You **MUST** output exactly the following JSON structure. Fill out the "explanation" with a comprehensive, professional architectural space safety audit, and fill out "commands" with the full detailed blueprint layout sequence:
+You **MUST** output exactly the following JSON structure. Fill out the "explanation" with a comprehensive, professional architectural space safety audit, and fill out "commands" with the full detailed blueprint layout sequence. Ensure that inside "commands", architectural shells (Plot bounds -> Columns -> Beams -> Outer Walls -> Inner Partitions -> Doors -> Windows -> Text Labels -> Dimensions) always run BEFORE placing furniture components ('la A-FURN'):
 
 {
   "explanation": "### MASTER ARCHITECTURAL SPACE-PLANNING AUDIT\\n\\n**1. DESIGN CONCEPT & ORIENTATION:**\\n- Developed a [Modern Minimalist / Eco-Sustainable / High-density Professional] spatial schematic capturing all custom requests.\\n- Orientation highlights: Public spaces oriented towards [direction] to leverage cross-ventilation, while bedrooms reside in private back clusters.\\n\\n**2. STRUCTURAL GRID & SAFETY COMPLIANCE:**\\n- Setbacks: Generous [Front/Rear/Side] setbacks mapped out on A-GRID layer for legal compliance.\\n- Column matrix: Reinforced concreta column coordinates (300mmx300mm squares) plotted at major grid junctions of [x, y].\\n\\n**3. CIRCULATION GRAPH & UTILITIES:**\\n- Circulation: Clean pathways lead from Entrance lobby to [Rooms].\\n- Spatial efficiency: Carpet area covers [X]% of the buildable zone, ensuring optimal room sizing and clear structural wall alignments.\\n\\n**4. BLUEPRINT DETAILS:**\\n- Wall hierarchies: 230mm load-bearing perimeter walls ('A-WALL') paired with 115mm interior partition walls ('A-WALL-INT').\\n- Fixtures: Equipped with detailed sills, door swing transitions, bedroom beds with sideboards, and sanitary fixtures.",
@@ -158,12 +192,21 @@ You **MUST** output exactly the following JSON structure. Fill out the "explanat
     "la A-COLS",
     "rec 850,2850 1150,3150 true #e53935",
     "la A-WALL",
-    "dl 1000,3000 9000,3000 230",
+    "dl 230 1000,3000 9000,3000",
     "la A-TEXT",
     "mt 5000,7500 FAMILY LOUNGE\\n4.0m x 4.5m\\n18.0 m²",
     "..."
   ]
 }
+
+---
+
+### V. ANTI-LAZINESS & HIGH-FIDELITY DRAFTING PROTOCOL (COMPULSORY)
+
+1. **NO PLACEHOLDERS OR TOKENS**: You are strictly forbidden from writing architectural comment lines like "; insert bathroom here", "; room layout goes here", or using truncated text blocks. Enter real, functional, pixel-perfect CAD commands for every room, fixture, and assembly.
+2. **RESOLVE ALL ENVELOPE REQUIREMENTS**: If a user asks for 5 rooms, a garden, a kitchen, and 3 baths - you MUST calculate coordinates for and draft all 9 elements. Never omit layout requirements to save token counts.
+3. **Ergonomic Furnishings represent Real Assets**: Always populate beds, dining blocks, sofa frames, and bathroom washbasins for all spaces you define. It makes the drafting interface feel alive, authentic, and highly professional.
+4. **Precision Dimensioning**: Label all spaces securely with both room centroid texts on 'A-TEXT' (incorporating m² carpet square metrics) and linear aligned dimensions on 'A-DIM'.
 }`;
 
 export const geminiRouter = express.Router();
@@ -176,7 +219,47 @@ geminiRouter.post("/command", async (req, res) => {
   }
 
   try {
-    const { prompt, contextSummary, sketchData, history } = req.body;
+    const { prompt, contextSummary, sketchData, history, drawingType, standards } = req.body;
+    
+    // Check for high-fidelity professional architectural package requests
+    const userPromptUnified = (prompt || "").trim().toLowerCase();
+    
+    const hasPlan = userPromptUnified.includes("plan");
+    const hasElevation = userPromptUnified.includes("elevation") || userPromptUnified.includes("facade");
+    const hasSection = userPromptUnified.includes("section");
+    const hasDuplex = userPromptUnified.includes("duplex");
+    const hasVilla = userPromptUnified.includes("villa") || userPromptUnified.includes("mansion");
+    const hasOffice = userPromptUnified.includes("office") || userPromptUnified.includes("commercial") || userPromptUnified.includes("headquarter");
+    const hasPackage = userPromptUnified.includes("package") || userPromptUnified.includes("suite") || userPromptUnified.includes("blueprint") || userPromptUnified.includes("set of drawing") || userPromptUnified.includes("set of cad");
+
+    const isPlanElevSectRequest = hasDuplex || 
+                                 hasPackage || 
+                                 (hasPlan && hasElevation) || 
+                                 (hasPlan && hasSection) || 
+                                 (hasElevation && hasSection) ||
+                                 (hasPlan && hasOffice);
+    
+    if (isPlanElevSectRequest) {
+      let subCommand = "villa";
+      let desc = "Modern Luxury Villa Drawing Sheet Package (Ground Plan, First Plan, Elevation, Section A-A)";
+      
+      const isDuplex = hasDuplex || /duplex|10x15|residential|house/i.test(userPromptUnified) || (hasPlan && hasElevation && hasSection);
+      const isOffice = hasOffice;
+
+      if (isDuplex && !isOffice) {
+        subCommand = "duplex";
+        desc = "10m x 15m Modern Residential Duplex Drawing Package (Ground Floor Plan, First Floor Plan, Section A-A, Front Elevation)";
+      } else if (isOffice) {
+        subCommand = "office";
+        desc = "20m x 30m 2-Storey Commercial Office Headquarters Layout Blueprint Suite";
+      }
+      
+      return res.json({
+        text: `### VOXCADD AUTOMATION PROTOCOL: HIGH-FIDELITY ARCHITECTURAL DRAWING PACKAGE\n\nI have invoked our advanced **VoxCADD 2D CAD Drafting suite** to compile and generate a perfect, human-drafted **${desc}** on the workspace layout.\n\nThis blueprint package contains:\n1. **Ground Floor Plan** centering setback grids on layer 'A-GRID', column studs, exterior masonry walls, windows, entry door sweeps, kitchen appliances, and living furniture.\n2. **First Floor Plan** outlining family lounge, bedrooms with closets, attached washrooms, and open balconies.\n3. **Building Section A-A** detailing structural foundation levels (GL, PL), clear ceiling headroom, 150mm reinforced concrete slab limits, dog-legged stairs profile, and text height markers.\n4. **Front Facade Elevation** capturing human-scale aesthetic window sills, overhang canopies, and level markers.`,
+        commands: [`ai_drafting ${subCommand}`],
+        groundingLinks: []
+      });
+    }
     
     const ai = new GoogleGenAI({
       apiKey,
@@ -186,6 +269,47 @@ geminiRouter.post("/command", async (req, res) => {
         }
       }
     });
+
+    let activeSystemInstruction = SYSTEM_INSTRUCTION;
+
+    if (drawingType === "floorplan") {
+      activeSystemInstruction += `\n\n### MANDATORY TEMPLATE: STRICT FLOOR PLAN DRAFT PLAN
+- You are drafting a horizontal 2D FLOOR PLAN.
+- You MUST establish 2D room layouts, setback boundary grids ('A-GRID'), and columns at major wall corners ('A-COLS').
+- Render standard 230mm external masonry walls on 'A-GRID' or 'A-WALL' and 115mm internal wall dividers on 'A-WALL-INT' using 'dl' commands with legal thickness.
+- Populate fully resolved swinging doors of width 900mm on 'A-DOOR', frames of 1500mm windows on 'A-WINDOW', and fine-detailed furniture layouts (beds, coffee desks, stoves, WC bowls) on 'A-FURN'.
+- Label every single room centroid precisely with ROOM NAME, sizes x and y in meters, and square carpet area in m² using multi-line text tags ('A-TEXT'). Use '\\n' for breaks.`;
+    } else if (drawingType === "elevation") {
+      activeSystemInstruction += `\n\n### MANDATORY TEMPLATE: STRICT VERTICAL ELEVATION FACE DRAFT
+- You are drafting a vertical exterior FACADE ELEVATION representation of the building's front face.
+- Do NOT draw floor layouts, room divisions, columns, beds, stoves, sinks, or bathroom fittings!
+- You MUST establish clear horizontal floor datum level lines on 'A-GRID' representing GL (Ground Level, y=0), PL (Plinth Level, y=600), Ceiling Level (y=3600), Roof Slab (y=6600), and Parapet Top (y=7600). Draw horizontal line segments across the drawing space for each level!
+- Draw accurate labels at the start/end of each level line on 'A-TEXT' (e.g. "ROOF LVL +6600mm", "PLINTH LVL +600mm", "GROUND LVL +0.00mm").
+- Draw the vertical facade profile using single lines 'l x1,y1 x2,y2' and rectangles 'rec x1,y1 x2,y2' on 'A-WINDOW', and door/window facade frames vertically projected (sills, sashes, canopies, structural outlines).
+- Never use double-line 'dl' wall thickness commands! Everything in elevations represents face lines, not cut masonry thickness.`;
+    } else if (drawingType === "section") {
+      activeSystemInstruction += `\n\n### MANDATORY TEMPLATE: STRICT STRUCTURAL SECTION A-A DRAFT
+- You are drafting a cross-cutting vertical SECTION VIEW of the building structure.
+- You MUST draw the depth-wise vertical cut profile of the building.
+- Set up horizontal height markers for structural base level lines on 'A-GRID': Foundation Level (y=-1200), GL (Ground Level, y=0), PL (Plinth Level, y=600), Clear Headroom Ceiling (y=3600), Roof Slab (y=6600).
+- Draw concrete foundation pads / footing piers below the ground (y=-1200 to y=0) using rectangles representing concrete bases.
+- Draw the cutting edges of load-bearing walls using vertical double-line segments of thickness 230mm on 'A-WALL' starting from the PL (+600) up to the roof frame.
+- Draw solid horizontal roof concrete slabs of thickness 150mm on layer 'A-WALL-INT' running along the top boundaries (e.g. 'rec x1,6450 x2,6600' representing 150mm reinforced concrete roof slab).
+- Detail structural cutaways of dog-legged stairs profile lines ('la A-FURN', stairs treads and risers steps) and place multiline text headroom measurements 'mt x,y HEIGHT CLEARANCE\\nMin. 2400mm\\nPASSING' on layer 'A-TEXT'.`;
+    }
+
+    if (standards === "ada") {
+      activeSystemInstruction += `\n\n### REGULATORY STANDARD: ADA WHEELCHAIR ACCESSIBILITY ENFORCEMENT
+- Every door clear opening width ('la A-DOOR') MUST be at least 900mm wide (use standard 900mm clearance).
+- Multi-user bath layouts MUST incorporate a circular wheelchair navigation clear zone centered inside the space. Mark this with 'c cx,cy 760' (1520mm diameter turning circle) on layer 'A-GRID' so the user can verify compliance.
+- All circulation hallways and corridors between partition walls MUST be at least 1100mm wide to accommodate safe wheelchair turnings.`;
+    } else if (standards === "ibc") {
+      activeSystemInstruction += `\n\n### REGULATORY STANDARD: IBC LIFESAFETY BUILDING CODE ENFORCEMENT
+- Habitable rooms MUST exceed 2500mm in width and 7.0m² in area limits.
+- Exterior perimeter masonry walls are STRICTLY restricted to 230mm thickness ('dl 230 ...' on 'A-WALL'), and internal partitions to 115mm thickness ('dl 115 ...' on 'A-WALL-INT').
+- Sleeping bedrooms MUST capture an emergency escape/egress window on 'A-WINDOW' of at least 1500mm wide and with reasonable daylight ratios.
+- Clear floor-to-ceiling headroom height in any section/elevation must measure at least 3000mm.`;
+    }
 
     const contextPart = { text: "[ARCHITECTURAL CONTEXT]\n" + contextSummary + "\n\n[USER REQUEST]\n" + (prompt || "Produce architectural drafting.") };
     const userParts: any[] = [contextPart];
@@ -205,8 +329,9 @@ geminiRouter.post("/command", async (req, res) => {
     const result = await (async () => {
       const MODELS_TO_TRY = [
         "gemini-3.5-flash",        // Primary - modern standard flash model, active on free tiers
+        "gemini-3.1-pro-preview",  // High reasoning fallback model for complex CAD mathematical calculations
         "gemini-flash-latest",     // Dynamic alias pointing to the latest version of flash
-        "gemini-2.0-flash",        // Previous stable model
+        "gemini-3.1-flash-lite",   // Responsive fallback level model
       ];
 
       let generatedResult: any = null;
@@ -228,7 +353,7 @@ geminiRouter.post("/command", async (req, res) => {
               model: activeModel,
               contents,
               config: {
-                systemInstruction: SYSTEM_INSTRUCTION,
+                systemInstruction: activeSystemInstruction,
                 responseMimeType: "application/json",
                 responseSchema: {
                   type: Type.OBJECT,
@@ -238,8 +363,7 @@ geminiRouter.post("/command", async (req, res) => {
                   },
                   required: ["explanation", "commands"]
                 },
-                temperature: 0.1,
-                tools: [{ googleSearch: {} }]
+                temperature: 0.1
               }
             });
             modelSucceeded = true;
@@ -248,34 +372,38 @@ geminiRouter.post("/command", async (req, res) => {
             lastError = err;
             const status = err?.status || err?.code || 0;
             const errMsg = err?.message || JSON.stringify(err);
-            const isRateLimit = status === 429 || errMsg.includes('429') || errMsg.includes('QUOTA_EXHAUSTED') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota exceeded');
+            const isRateLimitOrBusy = status === 429 || status === 503 ||
+                                      errMsg.includes('429') || errMsg.includes('503') ||
+                                      errMsg.includes('QUOTA_EXHAUSTED') || errMsg.includes('RESOURCE_EXHAUSTED') ||
+                                      errMsg.includes('Quota exceeded') || errMsg.includes('UNAVAILABLE') ||
+                                      errMsg.includes('high demand') || errMsg.includes('temporary');
             const isLimitZero = errMsg.includes('limit: 0') || errMsg.includes('limit:0') || errMsg.includes('unsupported') || errMsg.includes('not found') || errMsg.includes('not support');
 
             if (isLimitZero) {
-              console.warn(`[VoxCADD AI Architect] Model ${activeModel} has zero quota limit (limit: 0) or is unsupported. Skipping to next model...`);
+              console.info(`[VoxCADD AI Architect] Model ${activeModel} has zero quota limit or is unsupported. Skipping to next model fallback option.`);
               break; // Break the retry loop for this model, fallback to next model immediately
             }
 
-            if (isRateLimit) {
+            if (isRateLimitOrBusy) {
               retries++;
               if (retries >= maxRetries) {
-                console.warn(`[VoxCADD AI Architect] Model ${activeModel} rate limited after max retries. Moving to next model...`);
+                console.info(`[VoxCADD AI Architect] Model ${activeModel} is busy or rate limited after max retries. Transitioning to next model fallback.`);
                 break;
               }
               // Exponential backoff with jitter
               const delay = baseDelay * Math.pow(2, retries) + Math.random() * 500;
-              console.warn(`[VoxCADD AI Architect] Rate Limit (429) for ${activeModel}. Retry ${retries}/${maxRetries} in ${Math.round(delay)}ms...`);
+              console.info(`[VoxCADD AI Architect] Model ${activeModel} transient busy or rate limit. Retrying (${retries}/${maxRetries}) in ${Math.round(delay)}ms.`);
               await new Promise(resolve => setTimeout(resolve, delay));
               continue;
             }
 
-            console.warn(`[VoxCADD AI Architect] Unexpected error on ${activeModel}:`, errMsg);
+            console.info(`[VoxCADD AI Architect] Model ${activeModel} bypassed to next fallback (constraint: ${errMsg.substring(0, 120)}).`);
             break; // Fallback to next model
           }
         }
 
         if (modelSucceeded && generatedResult) {
-          console.log(`[VoxCADD AI Architect] Successfully generated content using model: ${activeModel}`);
+          console.info(`[VoxCADD AI Architect] Successfully compiled request using model: ${activeModel}`);
           break; // Succeeded! Break the outer loop
         }
 
@@ -283,7 +411,7 @@ geminiRouter.post("/command", async (req, res) => {
       }
 
       if (!generatedResult) {
-        throw new Error("Unable to fulfill request via generative model.");
+        throw new Error("Unable to fulfill request via generative model lines.");
       }
 
       return generatedResult;
@@ -303,7 +431,7 @@ geminiRouter.post("/command", async (req, res) => {
     });
 
   } catch (error: any) {
-    console.warn("[VoxCADD AI Architect] Activating Local Heuristic Fallback (External API limit or quota reached).");
+    console.info("[VoxCADD AI Architect] Activating Local Heuristic Fallback.");
     
     // Server-side fallback to avoid throwing 500 when Gemini API key limit is reached
     try {
@@ -325,10 +453,10 @@ geminiRouter.post("/command", async (req, res) => {
         explanation = `Drafted a custom ${w}x${h}mm Bedroom space with thick exterior bounds, primary door opening space, visual window, full-size bed block, and center room tag.`;
         commands = [
           "la A-WALL",
-          `dl 0,0 ${w},0 230`,
-          `dl ${w},0 ${w},${h} 230`,
-          `dl ${w},${h} 0,${h} 230`,
-          `dl 0,${h} 0,0 230`,
+          `dl 230 0,0 ${w},0`,
+          `dl 230 ${w},0 ${w},${h}`,
+          `dl 230 ${w},${h} 0,${h}`,
+          `dl 230 0,${h} 0,0`,
           "la A-DOOR",
           `rec 200,-50 900,50`,
           "la A-WINDOW",
@@ -346,10 +474,10 @@ geminiRouter.post("/command", async (req, res) => {
         explanation = `Drafted a standard ${w}x${h}mm Bathroom layout containing exterior masonry bounds, internal floor sink block, circular wash basin, shower/wet area divider, and text annotations.`;
         commands = [
           "la A-WALL",
-          `dl 0,0 ${w},0 230`,
-          `dl ${w},0 ${w},${h} 230`,
-          `dl ${w},${h} 0,${h} 230`,
-          `dl 0,${h} 0,0 230`,
+          `dl 230 0,0 ${w},0`,
+          `dl 230 ${w},0 ${w},${h}`,
+          `dl 230 ${w},${h} 0,${h}`,
+          `dl 230 0,${h} 0,0`,
           "la A-FURN",
           `rec 100,100 700,700`,
           `c ${w - 400},400 200`,
@@ -369,10 +497,10 @@ geminiRouter.post("/command", async (req, res) => {
         explanation = `Heuristically constructed custom workspace bounds for "${prompt}". Included primary walls, door, center label annotation, and linear dimension tagging.`;
         commands = [
           "la A-WALL",
-          `dl 0,0 ${val1},0 230`,
-          `dl ${val1},0 ${val1},${val2} 230`,
-          `dl ${val1},${val2} 0,${val2} 230`,
-          `dl 0,${val2} 0,0 230`,
+          `dl 230 0,0 ${val1},0`,
+          `dl 230 ${val1},0 ${val1},${val2}`,
+          `dl 230 ${val1},${val2} 0,${val2}`,
+          `dl 230 0,${val2} 0,0`,
           "la A-DOOR",
           `rec 300,-50 1000,50`,
           "la A-TEXT",

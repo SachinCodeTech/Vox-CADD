@@ -1500,7 +1500,17 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
   const drawShape = (ctx: CanvasRenderingContext2D, s: Shape, ts: number, blockContext?: { color: string, thickness: number, lineType: LineType }) => {
     const isSafe = (v: number) => typeof v === 'number' && isFinite(v) && Math.abs(v) < 1e12;
     const isS = selectedIds.includes(s.id), isH = highlightIds.includes(s.id) || highlightedIds.includes(s.id);
-    const conf = layerConfig[s.layer]; 
+    
+    const getLayerConf = (layerName: string | undefined): LayerConfig | undefined => {
+        if (!layerName) return undefined;
+        const cleaned = layerName.trim();
+        if (layerConfig[cleaned]) return layerConfig[cleaned];
+        const lower = cleaned.toLowerCase();
+        const found = Object.keys(layerConfig).find(k => k.trim().toLowerCase() === lower);
+        return found ? layerConfig[found] : undefined;
+    };
+
+    const conf = getLayerConf(s.layer);
     if (!s.isPreview && conf && (!conf.visible || conf.frozen)) return;
     
     // LOD: Skip tiny text
@@ -1520,9 +1530,24 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
 
     ctx.save(); ctx.beginPath();
     
-    let baseColor = resolved.color;
+    const getColor = (shape: any) => {
+        if (shape.color !== undefined && shape.color !== null && shape.color !== 'bylayer' && shape.color !== 'byblock') {
+            const colorNum = Number(shape.color);
+            if (!isNaN(colorNum)) {
+                return `#${colorNum.toString(16).padStart(6, '0')}`;
+            }
+            if (typeof shape.color === 'string' && shape.color.trim() !== '') {
+                const trimmed = shape.color.trim();
+                if (trimmed.startsWith('#') || trimmed.startsWith('rgb')) return trimmed;
+                return `#${trimmed}`; // prefix fallback
+            }
+        }
+        return resolved.color || '#ffffff';
+    };
+
+    let baseColor = getColor(s);
     if (s.isPreview && isCommandActive) {
-        const currentLayerConf = layerConfig[settings.currentLayer];
+        const currentLayerConf = getLayerConf(settings.currentLayer);
         baseColor = currentLayerConf?.color || "#FFFFFF";
     }
     
@@ -1530,7 +1555,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     let weight = typeof resolved.lineweight === 'number' ? resolved.lineweight : 0.25;
     
     // Explicitly override to layerConfig.thickness if weight is bylayer/default or not explicitly a number
-    const layerConf = layerConfig[s.layer];
+    const layerConf = conf;
     if (layerConf && typeof layerConf.thickness === 'number') {
         if (!s.thickness || s.thickness === 'bylayer' || s.thickness === 'DEFAULT' || typeof s.thickness !== 'number') {
             weight = layerConf.thickness;
@@ -1564,6 +1589,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
 
     if (s.isPreview) { 
         ctx.strokeStyle = baseColor; 
+        ctx.fillStyle = baseColor;
         ctx.setLineDash([6/ts, 4/ts]); 
         ctx.globalAlpha = 0.5; 
         ctx.lineWidth = 1.2/ts; 
@@ -1571,18 +1597,21 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     }
     else if (isS) { 
         ctx.strokeStyle = baseColor; 
+        ctx.fillStyle = baseColor;
         const minLw = (weight <= 0.001) ? 0.25/ts : 0.6/ts;
         ctx.lineWidth = Math.max(minLw + 1.2/ts, (finalThickness + 1.2)/ts); 
         ctx.setLineDash([4/ts, 4/ts]); 
     }
     else if (isH) { 
         ctx.strokeStyle = baseColor; 
+        ctx.fillStyle = baseColor;
         const minLw = (weight <= 0.001) ? 0.25/ts : 0.6/ts;
         ctx.lineWidth = Math.max(minLw + 0.6/ts, (finalThickness + 0.6)/ts); 
         ctx.setLineDash([6/ts, 6/ts]); 
     }
     else { 
         ctx.strokeStyle = baseColor; 
+        ctx.fillStyle = baseColor;
         ctx.globalAlpha = resolved.opacity;
         if (conf?.locked) ctx.globalAlpha *= 0.6; // Increased from 0.45 for better visibility        // Ensure even hairline is visible at any zoom
         const minLw = (weight <= 0.001) ? 0.25/ts : 0.6/ts;
@@ -1789,19 +1818,28 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
     };
 
     const drawArrowhead = (size: number, type: string = 'closed') => {
+        // Automatically scale relative to current viewport zoom ts
+        const currentPixelSize = size * ts;
+        let adjustedSize = size;
+        if (currentPixelSize > 30) {
+            adjustedSize = 30 / ts;
+        } else if (currentPixelSize < 3) {
+            adjustedSize = 3 / ts;
+        }
+
         ctx.save();
         ctx.beginPath();
         ctx.fillStyle = ctx.strokeStyle;
         if (type === 'tick') {
-            ctx.moveTo(-size/2, -size/2); ctx.lineTo(size/2, size/2);
+            ctx.moveTo(-adjustedSize/2, -adjustedSize/2); ctx.lineTo(adjustedSize/2, adjustedSize/2);
             ctx.stroke();
         } else if (type === 'dot') {
-            ctx.arc(0, 0, size/4, 0, Math.PI * 2); ctx.fill();
+            ctx.arc(0, 0, adjustedSize/4, 0, Math.PI * 2); ctx.fill();
         } else if (type === 'open') {
-            ctx.moveTo(size, size/3); ctx.lineTo(0, 0); ctx.lineTo(size, -size/3);
+            ctx.moveTo(adjustedSize, adjustedSize/3); ctx.lineTo(0, 0); ctx.lineTo(adjustedSize, -adjustedSize/3);
             ctx.stroke();
         } else {
-            ctx.moveTo(size, size/4); ctx.lineTo(0, 0); ctx.lineTo(size, -size/4); 
+            ctx.moveTo(adjustedSize, adjustedSize/4); ctx.lineTo(0, 0); ctx.lineTo(adjustedSize, -adjustedSize/4); 
             ctx.closePath(); 
             ctx.fill();
         }
@@ -1980,8 +2018,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
 
           const finalDimTextSize = rawSize * finalDimScale;
           // Scale arrow size in direct proportion to visual text size to prevent bloating in imported drawings
-          const rawArrowS = (s.size ? s.size * 0.72 : (ds.arrowSize || rawSize * 0.72)) * (ds.arrowScale || 1.0) * finalDimScale;
-          const arrowS = Math.max(finalDimTextSize * 0.15, Math.min(finalDimTextSize * 0.32, rawArrowS * 0.32));
+          const arrowS = finalDimTextSize * 0.72 * (ds.arrowScale || 1.0);
           const tOffset = (s.size ? s.size * 0.4 : (ds.textOffset || defaultH * 0.4)) * finalDimScale;
 
           const measuredValue = calculateDimensionValue(s, s.dimX, s.dimY);
@@ -2151,14 +2188,42 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           if (typeof s.dimX !== 'number' || isNaN(s.dimX)) s.dimX = (s.x1 + s.x2) / 2;
           if (typeof s.dimY !== 'number' || isNaN(s.dimY)) s.dimY = (s.y1 + s.y2) / 2 + 15;
 
+          // Prevent extreme coordinate blowups from rogue dimension point offsets
+          const spanDist = Math.sqrt(Math.pow(s.x2 - s.x1, 2) + Math.pow(s.y2 - s.y1, 2));
+          const maxAllowed = spanDist * 10.0 + 10000;
+          const actualOff = Math.sqrt(Math.pow(s.dimX - s.x1, 2) + Math.pow(s.dimY - s.y1, 2));
+          if (actualOff > maxAllowed) {
+              s.dimX = (s.x1 + s.x2) / 2;
+              s.dimY = (s.y1 + s.y2) / 2 + spanDist * 0.4 + 10;
+          }
+
           let dx = s.x2 - s.x1, dy = s.y2 - s.y1;
           let d_len = Math.sqrt(dx * dx + dy * dy);
           if (d_len === 0) break;
 
           if (s.dimType === 'linear') {
-             const mx = (s.x1 + s.x2)/2, my = (s.y1 + s.y2)/2;
-             const vdx = Math.abs(s.dimX - mx), vdy = Math.abs(s.dimY - my);
-             if (vdx > vdy) { dx = 0; d_len = Math.abs(dy); } else { dy = 0; d_len = Math.abs(dx); }
+              let measureY = false;
+              if (typeof (s as any).rotation === 'number' && !isNaN((s as any).rotation)) {
+                  let rot = (s as any).rotation % Math.PI;
+                  if (rot < 0) rot += Math.PI;
+                  if (Math.abs(rot - Math.PI/2) < Math.PI/4) {
+                      measureY = true;
+                  }
+              } else {
+                  const dx_orig = Math.abs(s.x2 - s.x1);
+                  const dy_orig = Math.abs(s.y2 - s.y1);
+                  if (dy_orig > dx_orig) {
+                      measureY = true;
+                  }
+              }
+
+              if (measureY) {
+                  dx = 0;
+                  d_len = Math.abs(dy);
+              } else {
+                  dy = 0;
+                  d_len = Math.abs(dx);
+              }
           }
           
           if (d_len === 0) break;
@@ -2281,32 +2346,44 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
                 offset2 = 0;
             }
             
-            const pts1 = getPolylineOffsetPoints(s.points, offset1, s.closed);
-            const pts2 = getPolylineOffsetPoints(s.points, offset2, s.closed);
-            
-            // Draw path 1
-            if (pts1.length > 0) {
-                ctx.moveTo(pts1[0].x, pts1[0].y);
-                pts1.forEach(p => ctx.lineTo(p.x, p.y));
-                if (s.closed) ctx.closePath();
-            }
-            
-            // Draw path 2
-            if (pts2.length > 0) {
-                ctx.moveTo(pts2[0].x, pts2[0].y);
-                pts2.forEach(p => ctx.lineTo(p.x, p.y));
-                if (s.closed) ctx.closePath();
+            let normPoints: Point[] = [];
+            if (typeof s.points[0] === 'number') {
+                const flatPoints = s.points as any;
+                for (let i = 0; i < flatPoints.length; i += 2) {
+                    normPoints.push({ x: flatPoints[i], y: flatPoints[i+1] });
+                }
+            } else {
+                normPoints = s.points as Point[];
             }
 
-            // Optional: Draw end caps if not closed
-            if (!s.closed) {
-                if (pts1.length > 0 && pts2.length > 0) {
-                    // Start cap
+            if (normPoints.length > 1) {
+                const pts1 = getPolylineOffsetPoints(normPoints, offset1, s.closed);
+                const pts2 = getPolylineOffsetPoints(normPoints, offset2, s.closed);
+                
+                // Draw path 1
+                if (pts1.length > 0) {
                     ctx.moveTo(pts1[0].x, pts1[0].y);
-                    ctx.lineTo(pts2[0].x, pts2[0].y);
-                    // End cap
-                    ctx.moveTo(pts1[pts1.length-1].x, pts1[pts1.length-1].y);
-                    ctx.lineTo(pts2[pts2.length-1].x, pts2[pts2.length-1].y);
+                    pts1.forEach(p => ctx.lineTo(p.x, p.y));
+                    if (s.closed) ctx.closePath();
+                }
+                
+                // Draw path 2
+                if (pts2.length > 0) {
+                    ctx.moveTo(pts2[0].x, pts2[0].y);
+                    pts2.forEach(p => ctx.lineTo(p.x, p.y));
+                    if (s.closed) ctx.closePath();
+                }
+
+                // Optional: Draw end caps if not closed
+                if (!s.closed) {
+                    if (pts1.length > 0 && pts2.length > 0) {
+                        // Start cap
+                        ctx.moveTo(pts1[0].x, pts1[0].y);
+                        ctx.lineTo(pts2[0].x, pts2[0].y);
+                        // End cap
+                        ctx.moveTo(pts1[pts1.length-1].x, pts1[pts1.length-1].y);
+                        ctx.lineTo(pts2[pts2.length-1].x, pts2[pts2.length-1].y);
+                    }
                 }
             }
         }
@@ -2341,8 +2418,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
           }
 
           const finalDimTextSize = rawSize * finalDimScale;
-          const rawArrowS = (s.size ? s.size * 0.72 : (ds.arrowSize || rawSize * 0.72)) * (ds.arrowScale || 1.0) * finalDimScale;
-          const arrowS = Math.max(finalDimTextSize * 0.15, Math.min(finalDimTextSize * 0.32, rawArrowS * 0.32));
+          const arrowS = finalDimTextSize * 0.72 * (ds.arrowScale || 1.0);
           
           ctx.save();
           ctx.translate(s.x1, s.y1);
@@ -2568,9 +2644,10 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
             ctx.translate(-block.basePoint.x, -block.basePoint.y);
           }
           
-          const currentColor = resolveColor(s, layerConfig[s.layer], activeTab, blockContext);
-          const currentThickness = resolveLineWeight(s, layerConfig[s.layer], blockContext);
-          const currentLT = resolveLineType(s, layerConfig[s.layer], blockContext);
+          const blockLayerConf = getLayerConf(s.layer);
+          const currentColor = resolveColor(s, blockLayerConf, activeTab, blockContext);
+          const currentThickness = resolveLineWeight(s, blockLayerConf, blockContext);
+          const currentLT = resolveLineType(s, blockLayerConf, blockContext);
           
           block.shapes.forEach(bs => drawShape(ctx, bs, ts, { color: currentColor, thickness: currentThickness, lineType: currentLT }));
           ctx.restore();
@@ -3832,56 +3909,80 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
         />
         
         {/* Dynamic Input Floating UI */}
-        {isCommandActive && (
-          <div 
-            className="absolute pointer-events-none flex flex-col gap-1.5"
-            style={{ 
-              left: (worldCursorRef.current ? worldToScreen(worldCursorRef.current.x, worldCursorRef.current.y).x : 0) + 20, 
-              top: (worldCursorRef.current ? worldToScreen(worldCursorRef.current.x, worldCursorRef.current.y).y : 0) + 20,
-              zIndex: 50
-            }}
-          >
-            {/* Prompt */}
-            {activePrompt && (
-              <div className="bg-black/80 backdrop-blur-md border border-white/10 rounded px-2 py-0.5 whitespace-nowrap shadow-xl">
-                 <span className="text-[9px] font-mono text-neutral-400 leading-none">{activePrompt.split(':')[0]}</span>
-              </div>
-            )}
-            
-            {/* Current Input / Stats */}
-            <div className="flex items-center gap-1.5">
-               <div className="bg-[#00bcd4]/95 border border-[#00bcd4] rounded px-2 py-0.5 shadow-[0_0_15px_rgba(0,188,212,0.4)] min-w-[40px] flex items-center justify-center">
-                  <span className="text-[10px] font-mono text-black font-bold tracking-tight">
-                    {commandInput || "SPECIFY_POINT"}
-                    {commandInput && <span className="animate-pulse ml-0.5">_</span>}
-                  </span>
-               </div>
-               
-               {basePoint && (
-                 <div className="bg-neutral-900/90 border border-white/5 rounded px-2 py-0.5 backdrop-blur-sm">
-                    <span className="text-[9px] font-mono text-neutral-300">
-                        {formatLength(distance(basePoint, worldCursorRef.current), settings)} {" < "} {(Math.atan2(worldCursorRef.current.y - basePoint.y, worldCursorRef.current.x - basePoint.x) * 180 / Math.PI + 360) % 360}°
+        {isCommandActive && (() => {
+          const r = getPixelRatio();
+          const canvasWidth = canvasRef.current ? canvasRef.current.width / r : window.innerWidth;
+          const canvasHeight = canvasRef.current ? canvasRef.current.height / r : window.innerHeight;
+          const basePos = worldCursorRef.current ? worldToScreen(worldCursorRef.current.x, worldCursorRef.current.y) : { x: 0, y: 0 };
+          
+          let left = basePos.x + 20;
+          let top = basePos.y + 20;
+          
+          // Constrain width boundary of floating card (assumed max size approx 240px wide, 110px high)
+          const estW = 240;
+          const estH = 110;
+          
+          if (left + estW > canvasWidth) {
+            left = Math.max(10, basePos.x - estW - 10);
+          }
+          if (top + estH > canvasHeight) {
+            top = Math.max(10, basePos.y - estH - 10);
+          }
+          
+          left = Math.max(10, Math.min(left, canvasWidth - estW - 10));
+          top = Math.max(10, Math.min(top, canvasHeight - estH - 10));
+
+          return (
+            <div 
+              className="absolute pointer-events-none flex flex-col gap-1.5"
+              style={{ 
+                left, 
+                top,
+                zIndex: 50
+              }}
+            >
+              {/* Prompt */}
+              {activePrompt && (
+                <div className="bg-[#0b0c10]/95 backdrop-blur-md border border-white/10 rounded px-2 py-1.5 max-w-[240px] break-words shadow-2xl">
+                   <span className="text-[9px] font-mono text-neutral-400 leading-normal">{activePrompt.split(':')[0]}</span>
+                </div>
+              )}
+              
+              {/* Current Input / Stats */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                 <div className="bg-[#00bcd4]/95 border border-[#00bcd4] rounded px-2 py-0.5 shadow-[0_0_15px_rgba(0,188,212,0.4)] min-w-[40px] flex items-center justify-center">
+                    <span className="text-[10px] font-mono text-black font-bold tracking-tight">
+                      {commandInput || "SPECIFY_POINT"}
+                      {commandInput && <span className="animate-pulse ml-0.5">_</span>}
                     </span>
                  </div>
-               )}
-            </div>
-
-            {settings.aiSuggestionsEnabled && aiRecommendation && (
-              <div className="bg-indigo-500/90 backdrop-blur-md border border-indigo-400/50 rounded px-2 py-0.5 shadow-xl animate-in fade-in slide-in-from-left-2 duration-300 flex items-center gap-1.5">
-                 <div className="w-1 h-1 rounded-full bg-white animate-pulse" />
-                 <span className="text-[8px] font-black text-white uppercase tracking-widest">
-                    SUGGESTION: {aiRecommendation}
-                 </span>
+                 
+                 {basePoint && (
+                   <div className="bg-neutral-900/90 border border-white/5 rounded px-2 py-0.5 backdrop-blur-sm">
+                      <span className="text-[9px] font-mono text-neutral-300 whitespace-nowrap">
+                          {formatLength(distance(basePoint, worldCursorRef.current), settings)} {" < "} {(Math.atan2(worldCursorRef.current.y - basePoint.y, worldCursorRef.current.x - basePoint.x) * 180 / Math.PI + 360) % 360}°
+                      </span>
+                   </div>
+                 )}
               </div>
-            )}
-            
-            <div className="flex items-center gap-1 opacity-60">
-               <span className="text-[7px] font-mono text-neutral-500 uppercase tracking-tighter">TAB: CYCLE FIELDS</span>
-               <span className="text-[7px] font-mono text-white/20">|</span>
-               <span className="text-[7px] font-mono text-neutral-500 uppercase tracking-tighter">ENTER: CONFIRM</span>
+  
+              {settings.aiSuggestionsEnabled && aiRecommendation && (
+                <div className="bg-indigo-500/90 backdrop-blur-md border border-indigo-400/50 rounded px-2 py-1 shadow-xl animate-in fade-in slide-in-from-left-2 duration-300 flex items-center gap-1.5 max-w-[240px] break-words">
+                   <div className="w-1 h-1 rounded-full bg-white animate-pulse shrink-0" />
+                   <span className="text-[8px] font-black text-white uppercase tracking-widest leading-normal">
+                      SUGGESTION: {aiRecommendation}
+                   </span>
+                </div>
+              )}
+              
+              <div className="flex items-center gap-1 opacity-60 flex-wrap">
+                 <span className="text-[7px] font-mono text-neutral-500 uppercase tracking-tighter">TAB: CYCLE FIELDS</span>
+                 <span className="text-[7px] font-mono text-white/20">|</span>
+                 <span className="text-[7px] font-mono text-neutral-500 uppercase tracking-tighter">ENTER: CONFIRM</span>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Confirmation Dialog to Catch Accidental Cancel/Escape */}
         {showConfirmCancel && (

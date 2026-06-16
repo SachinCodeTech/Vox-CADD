@@ -211,6 +211,8 @@ const CommandBar: React.FC<CommandBarProps> = ({
         setSuggestionIdx(-1);
     } else {
         if (!trimmed && !attachment) return; // AI needs input
+        setShowSuggestions(false);
+        setSuggestionIdx(-1);
         onAiQuery(trimmed, attachment);
         setAttachment(null);
         onChange('');
@@ -394,7 +396,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
         <div className="bg-black px-3 pb-3 pt-1 border-t border-white/5 shadow-[0_-20px_40px_rgba(0,0,0,0.5)]">
           {activeTab === 'cli' ? (
             <form onSubmit={handleSubmit} className="flex items-start gap-2 bg-[#0a0a0c] border border-white/10 rounded-xl px-3 min-h-10 focus-within:border-[#00bcd4]/50 transition-all relative">
-                {showSuggestions && suggestions.length > 0 && (
+                {showSuggestions && suggestions.length > 0 && !isAiThinking && (
                     <div className="absolute bottom-full left-0 mb-2 w-full bg-[#111] border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,1)] z-[200] overflow-hidden backdrop-blur-xl max-h-[260px] flex flex-col">
                         <div className="px-3 py-1.5 border-b border-white/5 bg-[#161619] flex justify-between items-center shrink-0">
                             <span className="text-[7.5px] font-black text-cyan-400/80 uppercase tracking-widest leading-relaxed">
@@ -501,7 +503,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
             </form>
            ) : (
               <form onSubmit={handleSubmit} className={`flex flex-col gap-2.5 bg-[#040406]/95 border rounded-[22px] p-3 w-full transition-all relative shadow-[0_15px_35px_rgba(0,0,0,0.6)] ${isAiThinking ? 'border-indigo-500 shadow-[0_0_24px_rgba(99,102,241,0.2)]' : 'border-indigo-500/25 focus-within:border-indigo-500/50 focus-within:shadow-[0_0_24px_rgba(99,102,241,0.15)]'}`}>
-                  {showSuggestions && suggestions.length > 0 && (
+                  {showSuggestions && suggestions.length > 0 && !isAiThinking && (
                       <div className="absolute bottom-full left-0 mb-2 w-full bg-[#111] border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,1)] z-[200] overflow-hidden backdrop-blur-xl max-h-[260px] flex flex-col">
                           <div className="px-3 py-1.5 border-b border-white/5 bg-[#161619] flex gap-2 items-center shrink-0">
                               <Bot size={10} className="text-indigo-500" />

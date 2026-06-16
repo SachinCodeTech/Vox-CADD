@@ -424,10 +424,17 @@ export class DoubleLineCommand implements CADCommand {
         if (t === 'zero' || t === 'z') { this.justification = 'zero'; this.ctx.setMessage("Justification: ZERO. Specify start point:"); return true; }
         if (t === 'bottom' || t === 'b') { this.justification = 'bottom'; this.ctx.setMessage("Justification: BOTTOM. Specify start point:"); return true; }
         
-        if (!isNaN(parseFloat(t)) && !t.includes(',') && this.pts.length === 0) {
-            this.thickness = parseFloat(t);
-            this.ctx.setMessage("DLINE Thickness set. Specify start point:");
-            return true;
+        if (!isNaN(parseFloat(t)) && !t.includes(',')) {
+            if (this.pts.length === 0) {
+                this.thickness = parseFloat(t);
+                this.ctx.setMessage("DLINE Thickness set. Specify start point:");
+                return true;
+            } else if (this.pts.length === 2) {
+                // Backward compatibility / AI scripting convenience: Use 3rd numeric parameter as thickness and finish!
+                this.thickness = parseFloat(t);
+                this.onEnter();
+                return true;
+            }
         }
 
         const last = this.pts.length > 0 ? this.pts[this.pts.length - 1] : null;
@@ -1941,6 +1948,8 @@ export class RectCommand implements CADCommand {
     height: number | null = null;
     rotation: number = 0;
     mode: 'default' | 'dimensions' | 'rotation' = 'default';
+    fillOverride?: boolean;
+    colorOverride?: string;
 
     constructor(public ctx: CommandContext) {}
 
@@ -1951,6 +1960,19 @@ export class RectCommand implements CADCommand {
     onInput(text: string): boolean {
         const t = text.trim().toLowerCase();
         
+        if (t === 'true' || t === 'fill') {
+            this.fillOverride = true;
+            return true;
+        }
+        if (t === 'false' || t === 'nofill') {
+            this.fillOverride = false;
+            return true;
+        }
+        if (t.startsWith('#')) {
+            this.colorOverride = text.trim();
+            return true;
+        }
+
         if (t === 'd' || t === 'dimensions') {
             this.mode = 'dimensions';
             this.ctx.setMessage("RECT Specify width for rectangles:");
@@ -2025,7 +2047,9 @@ export class RectCommand implements CADCommand {
             id: generateId(), 
             type: 'pline', 
             layer: style.layer, 
-            color: style.color, 
+            color: this.colorOverride || style.color, 
+            filled: this.fillOverride !== undefined ? this.fillOverride : undefined,
+            fill: this.fillOverride !== undefined ? this.fillOverride : undefined,
             points, 
             closed: true, 
             thickness: style.thickness, 

@@ -36,10 +36,10 @@ export const parsePromptOffline = (prompt: string): OfflineResult => {
       explanation: `Drafted a custom ${w}x${h}mm Bedroom space with thick exterior bounds, primary door opening space, visual window, full-size bed block, and center room tag.`,
       commands: [
         "la A-WALL",
-        `dl 0,0 ${w},0 230`,
-        `dl ${w},0 ${w},${h} 230`,
-        `dl ${w},${h} 0,${h} 230`,
-        `dl 0,${h} 0,0 230`,
+        `dl 230 0,0 ${w},0`,
+        `dl 230 ${w},0 ${w},${h}`,
+        `dl 230 ${w},${h} 0,${h}`,
+        `dl 230 0,${h} 0,0`,
         "la A-DOOR",
         `rec 200,-50 900,50`,
         "la A-WINDOW",
@@ -61,10 +61,10 @@ export const parsePromptOffline = (prompt: string): OfflineResult => {
       explanation: `Drafted a standard ${w}x${h}mm Bathroom layout containing exterior masonry bounds, internal floor sink block, circular wash basin, shower/wet area divider, and text annotations.`,
       commands: [
         "la A-WALL",
-        `dl 0,0 ${w},0 230`,
-        `dl ${w},0 ${w},${h} 230`,
-        `dl ${w},${h} 0,${h} 230`,
-        `dl 0,${h} 0,0 230`,
+        `dl 230 0,0 ${w},0`,
+        `dl 230 ${w},0 ${w},${h}`,
+        `dl 230 ${w},${h} 0,${h}`,
+        `dl 230 0,${h} 0,0`,
         "la A-FURN",
         `rec 100,100 700,700`, // Shower
         `c ${w - 400},400 200`, // Basin
@@ -84,10 +84,10 @@ export const parsePromptOffline = (prompt: string): OfflineResult => {
       explanation: `Drafted an offline functional Kitchen layout layout. Included custom perimeter granite counter top bounds, nested sink square, circular burner blocks, wall annotations, and dimensions.`,
       commands: [
         "la A-WALL",
-        `dl 0,0 ${w},0 230`,
-        `dl ${w},0 ${w},${h} 230`,
-        `dl ${w},${h} 0,${h} 230`,
-        `dl 0,${h} 0,0 230`,
+        `dl 230 0,0 ${w},0`,
+        `dl 230 ${w},0 ${w},${h}`,
+        `dl 230 ${w},${h} 0,${h}`,
+        `dl 230 0,${h} 0,0`,
         "la A-FURN",
         `rec 0,0 600,${h}`, // Left counter
         `rec 600,${h - 600} ${w},${h}`, // Top counter
@@ -135,9 +135,9 @@ export const parsePromptOffline = (prompt: string): OfflineResult => {
       commands: [
         "la A-FURN",
         "rec 0,0 700,700",
-        "dl 0,550 700,550 20", // Backrest
-        "dl 100,0 100,550 15", // Armrest left
-        "dl 600,0 600,550 15", // Armrest right
+        "l 0,550 700,550", // Backrest
+        "l 100,0 100,550", // Armrest left
+        "l 600,0 600,550", // Armrest right
         "la A-TEXT",
         "mt 350,250 Seat"
       ]
@@ -173,7 +173,7 @@ export const parsePromptOffline = (prompt: string): OfflineResult => {
       explanation: `Drafted a linear vector segment layer starting at 0,0 with length ${length}mm along the X-axis.`,
       commands: [
         "la 0",
-        `dl 0,0 ${length},0 230`
+        `dl 230 0,0 ${length},0`
       ]
     };
   }
@@ -185,10 +185,10 @@ export const parsePromptOffline = (prompt: string): OfflineResult => {
     explanation: `Heuristically constructed custom workspace bounds for "${prompt}". Included primary walls, door, center label annotation, and linear dimension tagging.`,
     commands: [
       "la A-WALL",
-      `dl 0,0 ${val1},0 230`,
-      `dl ${val1},0 ${val1},${val2} 230`,
-      `dl ${val1},${val2} 0,${val2} 230`,
-      `dl 0,${val2} 0,0 230`,
+      `dl 230 0,0 ${val1},0`,
+      `dl 230 ${val1},0 ${val1},${val2}`,
+      `dl 230 ${val1},${val2} 0,${val2}`,
+      `dl 230 0,${val2} 0,0`,
       "la A-DOOR",
       `rec 300,-50 1000,50`,
       "la A-TEXT",
@@ -200,7 +200,14 @@ export const parsePromptOffline = (prompt: string): OfflineResult => {
   };
 };
 
-export const getCommandFromAI = async (prompt: string, contextSummary: string = "", sketchData?: string | null, history: {role: string, parts: any[]}[] = []): Promise<AiResponse> => {
+export const getCommandFromAI = async (
+  prompt: string, 
+  contextSummary: string = "", 
+  sketchData?: string | null, 
+  history: {role: string, parts: any[]}[] = [],
+  drawingType?: string,
+  standards?: string
+): Promise<AiResponse> => {
   try {
     // VoxCADD Architecture Update: AI processing is now performed on the secure server-side engine.
     const response = await fetch("/api/gemini/command", {
@@ -212,7 +219,9 @@ export const getCommandFromAI = async (prompt: string, contextSummary: string = 
         prompt,
         contextSummary,
         sketchData,
-        history
+        history,
+        drawingType,
+        standards
       })
     });
 
@@ -250,8 +259,8 @@ You are the **VoxCADD Principal AI Architect (PA-24)** in a LIVE drafting sessio
 1. Call 'executeCAD' with multi-line commands separated by '\\n'.
 2. Example: To draw a 100x100 room:
    executeCAD({
-     commands: "la A-WALL\\ndl 0,0 100,0 230\\ndl 100,0 100,100 230\\ndl 100,100 0,100 230\\ndl 0,100 0,0 230",
-     reasoning: "Architectural primitive: drafting a 100mm internal chamber."
+     commands: "la A-WALL\\ndl 230 0,0 100,0\\ndl 230 100,0 100,100\\ndl 230 100,100 0,100\\ndl 230 0,100 0,0",
+     reasoning: "Architectural primitive: drafting a 100mm internal chamber with 230mm walls."
    })
 
 ### CRITICAL:

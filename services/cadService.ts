@@ -57,9 +57,19 @@ export const calculateDimensionValue = (s: { type: string, dimType?: string, x1:
     if (s.dimType === 'linear') {
         const dx = Math.abs(s.x2 - s.x1);
         const dy = Math.abs(s.y2 - s.y1);
-        const vdx = Math.abs(dimX - (s.x1 + s.x2) / 2);
-        const vdy = Math.abs(dimY - (s.y1 + s.y2) / 2);
-        return vdx > vdy ? dy : dx;
+        let measureY = false;
+        if (typeof (s as any).rotation === 'number' && !isNaN((s as any).rotation)) {
+            let rot = (s as any).rotation % Math.PI;
+            if (rot < 0) rot += Math.PI;
+            if (Math.abs(rot - Math.PI/2) < Math.PI/4) {
+                measureY = true;
+            }
+        } else {
+            if (dy > dx) {
+                measureY = true;
+            }
+        }
+        return measureY ? dy : dx;
     }
     if (s.dimType === 'ordinate') {
         const dx = Math.abs(dimX - s.x1);
@@ -226,6 +236,7 @@ export const isShapeClosed = (s: Shape): boolean => {
             return true;
         case 'pline':
         case 'spline':
+        case 'dline':
             return !!s.closed;
         default:
             return false;
@@ -516,8 +527,22 @@ export const hitTestShape = (x: number, y: number, s: Shape, threshold: number, 
         else if (justification === 'top') { offset1 = 0; offset2 = -thickness; }
         else if (justification === 'bottom') { offset1 = thickness; offset2 = 0; }
 
-        const pts1 = getPolylineOffsetPoints(s.points, offset1, s.closed);
-        const pts2 = getPolylineOffsetPoints(s.points, offset2, s.closed);
+        let normPoints: Point[] = [];
+        if (s.points && s.points.length > 0) {
+            if (typeof s.points[0] === 'number') {
+                const flatPoints = s.points as any;
+                for (let i = 0; i < flatPoints.length; i += 2) {
+                    normPoints.push({ x: flatPoints[i], y: flatPoints[i+1] });
+                }
+            } else {
+                normPoints = s.points as Point[];
+            }
+        }
+
+        if (normPoints.length < 2) return false;
+
+        const pts1 = getPolylineOffsetPoints(normPoints, offset1, s.closed);
+        const pts2 = getPolylineOffsetPoints(normPoints, offset2, s.closed);
 
         // Check path 1
         for(let i=0; i<pts1.length-1; i++) {
@@ -528,8 +553,8 @@ export const hitTestShape = (x: number, y: number, s: Shape, threshold: number, 
             if (distToSegment(x, y, pts2[i].x, pts2[i].y, pts2[i+1].x, pts2[i+1].y) < threshold) return true;
         }
         // Also check if it's "inside" the wall (between the lines)
-        for(let i=0; i<s.points.length-1; i++) {
-            if (distToSegment(x, y, s.points[i].x, s.points[i].y, s.points[i+1].x, s.points[i+1].y) < (thickness/2 + threshold)) return true;
+        for(let i=0; i<normPoints.length-1; i++) {
+            if (distToSegment(x, y, normPoints[i].x, normPoints[i].y, normPoints[i+1].x, normPoints[i+1].y) < (thickness/2 + threshold)) return true;
         }
         return false;
     }
@@ -635,47 +660,64 @@ export const getShapeBounds = (s: Shape, blocks?: Record<string, BlockDefinition
             if (!s.points || s.points.length === 0) {
                 bounds = { xMin: 0, yMin: 0, xMax: 0, yMax: 0 };
             } else {
-                let pxMin = s.points[0].x, pyMin = s.points[0].y, pxMax = s.points[0].x, pyMax = s.points[0].y;
-                for (let i = 0; i < s.points.length; i++) {
-                    const p1 = s.points[i];
-                    pxMin = Math.min(pxMin, p1.x); pyMin = Math.min(pyMin, p1.y);
-                    pxMax = Math.max(pxMax, p1.x); pyMax = Math.max(pyMax, p1.y);
-                    
-                    const nextIdx = (i + 1) % s.points.length;
-                    const isActuallyClosed = s.type === 'polygon' || (s.type as string) === 'hatch' || !!(s as any).closed;
-                    if (nextIdx === 0 && !isActuallyClosed) continue;
-                    const p2 = s.points[nextIdx];
-                    
-                    if (p1.bulge && Math.abs(p1.bulge) > 0.0001) {
-                        const arc = getArcFromBulge(p1, p2, p1.bulge);
-                        // Approximate arc bounds by checking its 4 extreme points if they're on the arc
-                        const angles = [0, Math.PI/2, Math.PI, 3*Math.PI/2];
-                        angles.forEach(a => {
-                            let sA = arc.startAngle, eA = arc.endAngle;
-                            while (sA < 0) sA += Math.PI * 2;
-                            while (eA < 0) eA += Math.PI * 2;
-                            let normalizedA = a;
-                            while (normalizedA < 0) normalizedA += Math.PI * 2;
-                            
-                            let onArc = false;
-                            if (p1.bulge! > 0) { // CCW
-                                if (eA < sA) onArc = normalizedA >= sA || normalizedA <= eA;
-                                else onArc = normalizedA >= sA && normalizedA <= eA;
-                            } else { // CW
-                                if (sA < eA) onArc = normalizedA >= eA || normalizedA <= sA;
-                                else onArc = normalizedA >= eA && normalizedA <= sA;
-                            }
-                            
-                            if (onArc) {
-                                const ex = arc.centerX + arc.r * Math.cos(a);
-                                const ey = arc.centerY + arc.r * Math.sin(a);
-                                pxMin = Math.min(pxMin, ex); pyMin = Math.min(pyMin, ey);
-                                pxMax = Math.max(pxMax, ex); pyMax = Math.max(pyMax, ey);
-                            }
-                        });
+                let normPoints: Point[] = [];
+                if (typeof s.points[0] === 'number') {
+                    for (let i = 0; i < s.points.length; i += 2) {
+                        const px = s.points[i] as any;
+                        const py = s.points[i+1] !== undefined ? s.points[i+1] as any : px;
+                        normPoints.push({ x: px, y: py });
                     }
+                } else {
+                    normPoints = s.points as Point[];
                 }
-                bounds = { xMin: pxMin, yMin: pyMin, xMax: pxMax, yMax: pyMax };
+                
+                if (normPoints.length === 0) {
+                    bounds = { xMin: 0, yMin: 0, xMax: 0, yMax: 0 };
+                } else {
+                    let pxMin = normPoints[0].x, pyMin = normPoints[0].y, pxMax = normPoints[0].x, pyMax = normPoints[0].y;
+                    for (let i = 0; i < normPoints.length; i++) {
+                        const p1 = normPoints[i];
+                        if (!p1) continue;
+                        pxMin = Math.min(pxMin, p1.x); pyMin = Math.min(pyMin, p1.y);
+                        pxMax = Math.max(pxMax, p1.x); pyMax = Math.max(pyMax, p1.y);
+                        
+                        const nextIdx = (i + 1) % normPoints.length;
+                        const isActuallyClosed = s.type === 'polygon' || (s.type as string) === 'hatch' || !!(s as any).closed;
+                        if (nextIdx === 0 && !isActuallyClosed) continue;
+                        const p2 = normPoints[nextIdx];
+                        if (!p2) continue;
+                        
+                        if (p1.bulge && Math.abs(p1.bulge) > 0.0001) {
+                            const arc = getArcFromBulge(p1, p2, p1.bulge);
+                            // Approximate arc bounds by checking its 4 extreme points if they're on the arc
+                            const angles = [0, Math.PI/2, Math.PI, 3*Math.PI/2];
+                            angles.forEach(a => {
+                                let sA = arc.startAngle, eA = arc.endAngle;
+                                while (sA < 0) sA += Math.PI * 2;
+                                while (eA < 0) eA += Math.PI * 2;
+                                let normalizedA = a;
+                                while (normalizedA < 0) normalizedA += Math.PI * 2;
+                                
+                                let onArc = false;
+                                if (p1.bulge! > 0) { // CCW
+                                    if (eA < sA) onArc = normalizedA >= sA || normalizedA <= eA;
+                                    else onArc = normalizedA >= sA && normalizedA <= eA;
+                                } else { // CW
+                                    if (sA < eA) onArc = normalizedA >= eA || normalizedA <= sA;
+                                    else onArc = normalizedA >= eA && normalizedA <= sA;
+                                }
+                                
+                                if (onArc) {
+                                    const ex = arc.centerX + arc.r * Math.cos(a);
+                                    const ey = arc.centerY + arc.r * Math.sin(a);
+                                    pxMin = Math.min(pxMin, ex); pyMin = Math.min(pyMin, ey);
+                                    pxMax = Math.max(pxMax, ex); pyMax = Math.max(pyMax, ey);
+                                }
+                            });
+                        }
+                    }
+                    bounds = { xMin: pxMin, yMin: pyMin, xMax: pxMax, yMax: pyMax };
+                }
             }
             break;
         case 'text':
@@ -750,18 +792,36 @@ export const getShapeBounds = (s: Shape, blocks?: Record<string, BlockDefinition
             bounds = { xMin: Math.min(s.x1, s.x2), yMin: Math.min(s.y1, s.y2), xMax: Math.max(s.x1, s.x2), yMax: Math.max(s.y1, s.y2) };
             break;
         }
-        case 'dline':
+        case 'dline': {
             if (!s.points || s.points.length === 0) {
                 bounds = { xMin: 0, yMin: 0, xMax: 0, yMax: 0 };
             } else {
-                let dxMin = s.points[0].x, dyMin = s.points[0].y, dxMax = s.points[0].x, dyMax = s.points[0].y;
-                s.points.forEach(p => {
-                    dxMin = Math.min(dxMin, p.x); dyMin = Math.min(dyMin, p.y);
-                    dxMax = Math.max(dxMax, p.x); dyMax = Math.max(dyMax, p.y);
-                });
-                bounds = { xMin: dxMin - s.thickness/2, yMin: dyMin - s.thickness/2, xMax: dxMax + s.thickness/2, yMax: dyMax + s.thickness/2 };
+                let normPoints: Point[] = [];
+                if (typeof s.points[0] === 'number') {
+                    for (let i = 0; i < s.points.length; i += 2) {
+                        const px = s.points[i] as any;
+                        const py = s.points[i+1] !== undefined ? s.points[i+1] as any : px;
+                        normPoints.push({ x: px, y: py });
+                    }
+                } else {
+                    normPoints = s.points as Point[];
+                }
+                
+                if (normPoints.length === 0) {
+                    bounds = { xMin: 0, yMin: 0, xMax: 0, yMax: 0 };
+                } else {
+                    let dxMin = normPoints[0].x, dyMin = normPoints[0].y, dxMax = normPoints[0].x, dyMax = normPoints[0].y;
+                    normPoints.forEach(p => {
+                        if (!p) return;
+                        dxMin = Math.min(dxMin, p.x); dyMin = Math.min(dyMin, p.y);
+                        dxMax = Math.max(dxMax, p.x); dyMax = Math.max(dyMax, p.y);
+                    });
+                    const halfTh = (s.thickness || 0.25) / 2;
+                    bounds = { xMin: dxMin - halfTh, yMin: dyMin - halfTh, xMax: dxMax + halfTh, yMax: dyMax + halfTh };
+                }
             }
             break;
+        }
         case 'hatch': {
             let hxMin = Infinity, hyMin = Infinity, hxMax = -Infinity, hyMax = -Infinity;
             const hLoops = (s as any).loops || ((s as any).points ? [(s as any).points] : []);
@@ -791,14 +851,34 @@ export const getShapeBounds = (s: Shape, blocks?: Record<string, BlockDefinition
             }
             break;
         }
-        case 'dimension':
+        case 'dimension': {
+            const x1s = isNaN(s.x1) || typeof s.x1 !== 'number' ? 0 : s.x1;
+            const y1s = isNaN(s.y1) || typeof s.y1 !== 'number' ? 0 : s.y1;
+            const x2s = isNaN(s.x2) || typeof s.x2 !== 'number' ? x1s + 10 : s.x2;
+            const y2s = isNaN(s.y2) || typeof s.y2 !== 'number' ? y1s : s.y2;
+            const dXs = isNaN(s.dimX) || typeof s.dimX !== 'number' ? (x1s + x2s)/2 : s.dimX;
+            const dYs = isNaN(s.dimY) || typeof s.dimY !== 'number' ? (y1s + y2s)/2 + 15 : s.dimY;
+            
+            // Cap dimension annotation point offsets within a safe outer limit of the measured span
+            const spanDist = Math.sqrt(Math.pow(x2s - x1s, 2) + Math.pow(y2s - y1s, 2));
+            const maxAllowedOffset = spanDist * 10.0 + 10000;
+            const actualOffsetDist = Math.sqrt(Math.pow(dXs - x1s, 2) + Math.pow(dYs - y1s, 2));
+            
+            let finalDimX = dXs;
+            let finalDimY = dYs;
+            if (actualOffsetDist > maxAllowedOffset) {
+                finalDimX = (x1s + x2s)/2;
+                finalDimY = (y1s + y2s)/2 + spanDist * 0.4 + 10;
+            }
+
             bounds = { 
-                xMin: Math.min(s.x1, s.x2, s.dimX), 
-                yMin: Math.min(s.y1, s.y2, s.dimY), 
-                xMax: Math.max(s.x1, s.x2, s.dimX), 
-                yMax: Math.max(s.y1, s.y2, s.dimY) 
+                xMin: Math.min(x1s, x2s, finalDimX), 
+                yMin: Math.min(y1s, y2s, finalDimY), 
+                xMax: Math.max(x1s, x2s, finalDimX), 
+                yMax: Math.max(y1s, y2s, finalDimY) 
             };
             break;
+        }
         default:
             bounds = { xMin: -1e9, yMin: -1e9, xMax: 1e9, yMax: 1e9 };
     }
@@ -838,8 +918,18 @@ export const getAllShapesBounds = (
 ): { xMin: number, yMin: number, xMax: number, yMax: number } | null => {
     const list: Shape[] = Array.isArray(layers) ? layers : Object.values(layers).flat();
     
-    // Filter out rays/xlines and non-geometry elements
-    const eligible = list.filter(s => s && s.type !== 'ray' && s.type !== 'xline');
+    // Filter out rays/xlines and non-geometry elements, as well as 'defpoints' and non-printing layers
+    const eligible = list.filter(s => {
+        if (!s) return false;
+        if (s.type === 'ray' || s.type === 'xline') return false;
+        if (s.layer) {
+            const layerLower = String(s.layer).toLowerCase();
+            if (layerLower === 'defpoints' || layerLower === 'non-plot' || layerLower === 'nonplot') {
+                return false;
+            }
+        }
+        return true;
+    });
     if (eligible.length === 0) return null;
 
     // Retrieve bounding boxes and centroids for eligible shapes
@@ -1459,6 +1549,51 @@ export const getShapeSegments = (s: Shape): { p1: Point, p2: Point }[] => {
         case 'line':
             segments.push({ p1: { x: (s as any).x1, y: (s as any).y1 }, p2: { x: (s as any).x2, y: (s as any).y2 } });
             break;
+        case 'dline': {
+            const thickness = s.thickness || 230;
+            const justification = s.justification || 'zero';
+            let offset1 = 0, offset2 = 0;
+            if (justification === 'zero') { offset1 = thickness/2; offset2 = -thickness/2; }
+            else if (justification === 'top') { offset1 = 0; offset2 = -thickness; }
+            else if (justification === 'bottom') { offset1 = thickness; offset2 = 0; }
+
+            let normPoints: Point[] = [];
+            if (s.points && s.points.length > 0) {
+                if (typeof s.points[0] === 'number') {
+                    const flatPoints = s.points as any;
+                    for (let i = 0; i < flatPoints.length; i += 2) {
+                        normPoints.push({ x: flatPoints[i], y: flatPoints[i+1] });
+                    }
+                } else {
+                    normPoints = s.points as Point[];
+                }
+            }
+
+            if (normPoints.length > 1) {
+                const pts1 = getPolylineOffsetPoints(normPoints, offset1, s.closed);
+                const pts2 = getPolylineOffsetPoints(normPoints, offset2, s.closed);
+
+                for (let i = 0; i < pts1.length - 1; i++) {
+                    segments.push({ p1: pts1[i], p2: pts1[i+1] });
+                }
+                if (s.closed && pts1.length > 2) {
+                    segments.push({ p1: pts1[pts1.length-1], p2: pts1[0] });
+                }
+
+                for (let i = 0; i < pts2.length - 1; i++) {
+                    segments.push({ p1: pts2[i], p2: pts2[i+1] });
+                }
+                if (s.closed && pts2.length > 2) {
+                    segments.push({ p1: pts2[pts2.length-1], p2: pts2[0] });
+                }
+
+                if (!s.closed && pts1.length > 0 && pts2.length > 0) {
+                    segments.push({ p1: pts1[0], p2: pts2[0] });
+                    segments.push({ p1: pts1[pts1.length-1], p2: pts2[pts2.length-1] });
+                }
+            }
+            break;
+        }
         case 'rect':
             const rp1 = { x: s.x, y: s.y };
             const rp2 = { x: s.x + s.width, y: s.y };
@@ -1628,7 +1763,7 @@ export const resolvePointInput = (input: string, lastPoint: Point | null, settin
     }
 
     let isAbsolute = text.startsWith('#');
-    let isRelative = text.startsWith('@') || (!isAbsolute && lastPoint !== null);
+    let isRelative = text.startsWith('@');
     let workingText = (text.startsWith('@') || text.startsWith('#')) ? text.substring(1) : text;
     let base = (isRelative && lastPoint) ? lastPoint : { x: 0, y: 0 };
 

@@ -436,6 +436,7 @@ export interface AppSettings {
   aiSuggestionsEnabled?: boolean;
   namedViews?: NamedView[];
   snapViewportToGrid?: boolean;
+  autoFitPadding?: number;
   geometricConstraintsEnabled?: boolean;
   wallCleanupMode?: boolean;
   isometricGrid?: boolean;

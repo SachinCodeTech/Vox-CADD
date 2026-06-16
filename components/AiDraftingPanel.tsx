@@ -2,13 +2,21 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   X, Sparkles, Send, Copy, RotateCcw, 
   ChevronDown, ChevronRight, Check, Play, Info, CornerDownLeft, MessageSquare, History,
-  Trash2, Camera, UploadCloud, Image as ImageIcon, Target
+  Trash2, Camera, UploadCloud, Image as ImageIcon, Target, Shield, Settings2, Sliders, Eraser, AlertTriangle
 } from 'lucide-react';
+import { validateAndSnapCommands, SnappingEngineReport } from '../services/cadSnappingService';
 
 interface AiDraftingPanelProps {
   onClose: () => void;
   onCommand: (cmd: string) => void;
-  getCommandFromAI: (prompt: string, contextSummary: string, sketchData?: string | null, history?: any[]) => Promise<any>;
+  getCommandFromAI: (
+    prompt: string, 
+    contextSummary: string, 
+    sketchData?: string | null, 
+    history?: any[],
+    drawingType?: string,
+    standards?: string
+  ) => Promise<any>;
   getAiContextSummary: () => string;
   undo: () => void;
   setLogMessage: (msg: string) => void;
@@ -71,6 +79,14 @@ export const AiDraftingPanel: React.FC<AiDraftingPanelProps> = ({
   const [loading, setLoading] = useState(false);
   const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({ 'arch-layouts': true });
   const [attachedSketch, setAttachedSketch] = useState<string | null>(null);
+
+  // VoxCADD Architecture UI State variables
+  const [drawingType, setDrawingType] = useState<'floorplan' | 'elevation' | 'section'>('floorplan');
+  const [standards, setStandards] = useState<'none' | 'ada' | 'ibc'>('none');
+  const [autoExecute, setAutoExecute] = useState(false); 
+  const [verificationProposal, setVerificationProposal] = useState<any | null>(null);
+  const [proposalExplanation, setProposalExplanation] = useState('');
+  const [editedCommandsText, setEditedCommandsText] = useState('');
   
   // Real AI conversation log with local storage persistence
   const [messages, setMessages] = useState<MessageLogEntry[]>(() => {
@@ -191,7 +207,7 @@ export const AiDraftingPanel: React.FC<AiDraftingPanelProps> = ({
     // Add user message to log
     const userMsg: MessageLogEntry = {
       sender: 'user',
-      text: activePrompt || "Analyze and draft the attached sketch image.",
+      text: activePrompt || `Analyze and draft sketch as a standard ${drawingType.toUpperCase()} complying to ${standards.toUpperCase()} standard.`,
       timestamp: new Date(),
       hasSketch: !!attachedSketch
     };
@@ -212,30 +228,43 @@ export const AiDraftingPanel: React.FC<AiDraftingPanelProps> = ({
         .map(m => ({ role: 'user', parts: [{ text: m.text }] }));
 
       const res = await getCommandFromAI(
-        activePrompt || "Analyze this image as a CAD sketch. Convert the rough visual strokes into precise commands (RECT, LINE, CIRCLE, etc). Maintain relative proportions and align to axes where obvious.", 
+        activePrompt || `Draft a standard ${drawingType} schema with standard architectural details conforming to ${standards} building codes. Convertrough visual elements into accurate elements.`, 
         context, 
         currentAttachedImage, 
-        historyPayload
+        historyPayload,
+        drawingType,
+        standards
       );
       
       const commands: string[] = res.commands && Array.isArray(res.commands) ? res.commands : [];
       const explanation: string = res.explanation || res.text || "CAD Commands generated successfully.";
 
+      // Run our high-fidelity Architectural Snapping & Validation Engine
+      const snappingReport = validateAndSnapCommands(commands);
+
       // Add AI Response to conversation log
       const assistantMsg: MessageLogEntry = {
         sender: 'assistant',
         text: explanation,
-        commands,
+        commands: snappingReport.snappedCommands,
         timestamp: new Date()
       };
       setMessages(prev => [...prev, assistantMsg]);
 
-      // Execute generated commands instantly
       if (commands.length > 0) {
-        commands.forEach(cmd => {
-          onCommand(cmd);
-        });
-        setLogMessage(`SUCCESS: DRAFTED ${commands.length} CAD COMMANDS`);
+        if (autoExecute) {
+          // If auto-execute is enabled, directly render subcommands
+          snappingReport.snappedCommands.forEach(cmd => {
+            onCommand(cmd);
+          });
+          setLogMessage(`SUCCESS: SNAP-ALIGNED & DRAWN ${snappingReport.snappedCommands.length} ELEMENTS`);
+        } else {
+          // Trigger the diagnostic & verification console overlay
+          setVerificationProposal(snappingReport);
+          setProposalExplanation(explanation);
+          setEditedCommandsText(snappingReport.snappedCommands.join('\n'));
+          setLogMessage("VERIFICATION NEEDED: Review AI Blueprint Layout & Wall Dimensions");
+        }
       } else {
         setLogMessage("AI: Processed successfully, but no drafting commands generated.");
       }
@@ -287,6 +316,144 @@ export const AiDraftingPanel: React.FC<AiDraftingPanelProps> = ({
   return (
     <div className="relative w-80 sm:w-96 max-w-[calc(100vw-30px)] h-[calc(100vh-140px)] sm:h-[650px] bg-[#111115] border border-white/10 rounded-2xl shadow-[0_30px_100px_rgba(0,0,0,0.85)] flex flex-col overflow-hidden select-none font-sans z-[1000] text-neutral-300">
       
+      {/* AI Verification & Snapping Proposal Overlay */}
+      {verificationProposal && (
+        <div className="absolute inset-0 bg-neutral-950/95 z-[150] flex flex-col p-4 overflow-y-auto border border-indigo-500/20 rounded-2xl animate-in fade-in zoom-in-95 duration-150">
+          {/* Header */}
+          <div className="flex justify-between items-center pb-2.5 border-b border-indigo-500/20 shrink-0">
+            <div className="flex items-center gap-1.5">
+              <Shield className="text-emerald-400" size={14} />
+              <div>
+                <h3 className="text-[10px] font-black uppercase text-white tracking-wider font-mono">AI CAD Verification Console</h3>
+                <span className="text-[7.5px] font-mono text-emerald-400 uppercase">Interactive Snapping Engine</span>
+              </div>
+            </div>
+            <button 
+              onClick={() => {
+                setVerificationProposal(null);
+                setLogMessage("VERIFICATION_DISMISSED");
+              }} 
+              className="p-1 rounded-lg text-neutral-400 hover:text-white hover:bg-white/5 transition-all"
+            >
+              <X size={12} />
+            </button>
+          </div>
+
+          <div className="flex-1 flex flex-col gap-3 py-3 overflow-y-auto min-h-0">
+            {/* Thought Process / AI Explanation */}
+            <div className="flex flex-col gap-1.5 p-2.5 bg-[#4f46e5]/10 border border-indigo-500/10 rounded-xl">
+              <span className="text-[7.5px] font-bold font-mono text-indigo-400 uppercase tracking-widest flex items-center gap-1">
+                <Sparkles size={9} /> AI Architect Design Intent
+              </span>
+              <p className="text-[9px] text-neutral-300 font-medium leading-normal max-h-[80px] overflow-y-auto whitespace-pre-line pr-1">
+                {proposalExplanation}
+              </p>
+            </div>
+
+            {/* Diagnostic Snapping Reports */}
+            <div className="flex flex-col gap-1.5 p-2.5 bg-amber-950/20 border border-amber-500/15 rounded-xl">
+              <span className="text-[7.5px] font-bold font-mono text-amber-400 uppercase tracking-widest flex items-center gap-1">
+                <Sliders size={9} /> Snap Auto-Corrections Report ({verificationProposal.logs.length})
+              </span>
+              <div className="max-h-[85px] overflow-y-auto flex flex-col gap-1 pr-1 font-mono text-[8px]">
+                {verificationProposal.logs.length === 0 ? (
+                  <span className="text-neutral-500 italic">No rounding or parallel angles snap needed. Pure geometry matched.</span>
+                ) : (
+                  verificationProposal.logs.map((log: string, lIdx: number) => (
+                    <div key={lIdx} className="flex gap-1.5 py-0.5 text-neutral-300">
+                      <span className="text-amber-500 shrink-0">🔧</span>
+                      <span className="leading-tight">{log}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Detected Elements Entity Matrix */}
+            <div className="flex flex-col gap-1.5 p-2.5 bg-black/40 border border-white/5 rounded-xl">
+              <span className="text-[7.5px] font-bold font-mono text-teal-400 uppercase tracking-widest flex items-center gap-1">
+                <Target size={9} /> Compiled Entity List ({verificationProposal.entities.filter((e: any) => e.type !== 'UNKNOWN').length})
+              </span>
+              <div className="max-h-[100px] overflow-y-auto flex flex-col gap-1 pr-1 font-mono text-[8.5px]">
+                {verificationProposal.entities.filter((e: any) => e.type !== 'UNKNOWN').map((ent: any, eIdx: number) => (
+                  <div key={eIdx} className="flex justify-between items-center py-1 border-b border-white/5">
+                    <div className="flex gap-1.5 items-center">
+                      <span className="px-1 py-0.5 rounded text-[7px] font-black uppercase bg-white/5 text-neutral-300">
+                        {ent.type}
+                      </span>
+                      <span className="text-neutral-400 text-[8px]">{ent.layer}</span>
+                    </div>
+                    <span className="text-neutral-200 truncate max-w-[120px]" title={ent.snapped}>{ent.snapped}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Editable Macro Commands */}
+            <div className="flex flex-col gap-1 flex-1 min-h-[90px]">
+              <span className="text-[7.5px] font-bold font-mono text-neutral-400 uppercase tracking-widest">
+                Target Output Commands (Editable):
+              </span>
+              <textarea
+                value={editedCommandsText}
+                onChange={(e) => setEditedCommandsText(e.target.value)}
+                className="flex-1 w-full bg-black border border-white/10 rounded-xl p-2 font-mono text-[9px] text-[#00bcd4] outline-none focus:border-indigo-500/50 resize-y"
+                placeholder="No commands loaded."
+              />
+            </div>
+          </div>
+
+          {/* Action Trigger Buttons */}
+          <div className="flex flex-col gap-2 pt-2.5 border-t border-indigo-500/10 shrink-0">
+            <div className="flex items-center justify-between pb-1">
+              <span className="text-[7.5px] font-mono text-neutral-500 uppercase">Save verification choice list:</span>
+              <label className="flex items-center gap-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoExecute}
+                  onChange={(e) => setAutoExecute(e.target.checked)}
+                  className="accent-indigo-500 text-indigo-500 bg-black border-white/10 rounded"
+                />
+                <span className="text-[8px] font-mono text-neutral-400 uppercase select-none">Auto-Execute future drafts</span>
+              </label>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => {
+                  setVerificationProposal(null);
+                  setLogMessage("DISCARDED_AI_PLAN");
+                }}
+                className="py-1.5 px-3 bg-neutral-900 border border-white/10 hover:bg-neutral-800 text-neutral-300 font-bold text-[9px] uppercase tracking-widest rounded-lg flex items-center justify-center gap-1.5 transition-all active:scale-95"
+              >
+                <Eraser size={10} className="text-neutral-400" />
+                Discard
+              </button>
+              <button
+                onClick={() => {
+                  const commandList = editedCommandsText
+                    .split('\n')
+                    .map(c => c.trim())
+                    .filter(c => c.length > 0);
+                  
+                  if (commandList.length > 0) {
+                    commandList.forEach(cmd => {
+                      onCommand(cmd);
+                    });
+                    setLogMessage(`SUCCESS: DRAWN ${commandList.length} ELEMENTS`);
+                  }
+                  setVerificationProposal(null);
+                }}
+                className="py-1.5 px-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[9px] uppercase tracking-widest rounded-lg flex items-center justify-center gap-1.5 shadow-[0_4px_12px_rgba(16,185,129,0.2)] transition-all active:scale-95"
+              >
+                <Play size={10} />
+                Approve & Render
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Premium Indigo Header */}
       <div className="flex justify-between items-center p-4 border-b border-white/5 bg-[#14141a]/90 backdrop-blur-md">
         <div className="flex items-center gap-2.5">
@@ -550,6 +717,65 @@ export const AiDraftingPanel: React.FC<AiDraftingPanelProps> = ({
               accept="image/*" 
               className="hidden" 
             />
+          </div>
+        </div>
+
+        {/* Template & Code Standards Controls */}
+        <div className="flex flex-col gap-2 p-3 bg-neutral-900/60 border border-white/5 rounded-xl shrink-0">
+          <label className="text-[8px] font-black font-mono text-indigo-400 uppercase tracking-widest flex items-center gap-1">
+            <Settings2 size={10} />
+            AI Drafting Config & Standards
+          </label>
+          
+          <div className="flex flex-col gap-2">
+            {/* Drawing Mode Segmented Control */}
+            <div className="flex flex-col gap-1">
+              <span className="text-[7.5px] font-mono text-neutral-400 uppercase">Target Drawing Type:</span>
+              <div className="grid grid-cols-3 gap-1 bg-black/60 p-0.5 rounded-lg border border-white/5">
+                {(['floorplan', 'elevation', 'section'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setDrawingType(mode)}
+                    className={`py-1 text-[8.5px] font-bold uppercase rounded-md transition-all ${
+                      drawingType === mode
+                        ? 'bg-indigo-600/90 text-white shadow-sm'
+                        : 'text-neutral-500 hover:text-neutral-300'
+                    }`}
+                  >
+                    {mode === 'floorplan' ? 'Floor Plan' : mode === 'elevation' ? 'Elevation' : 'Section'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Regulatory Building Codes Selector */}
+            <div className="flex flex-col gap-1">
+              <span className="text-[7.5px] font-mono text-neutral-400 uppercase">Code Compliance Guardrail:</span>
+              <select
+                value={standards}
+                onChange={(e) => setStandards(e.target.value as any)}
+                className="w-full bg-black/60 border border-white/10 rounded-lg p-1.5 text-[9px] font-bold uppercase text-neutral-300 outline-none focus:border-indigo-500/50"
+              >
+                <option value="none">No Standard Injection (Raw)</option>
+                <option value="ada">ADA Compliant (Accessibility Space)</option>
+                <option value="ibc">IBC Compliant (Building Codes)</option>
+              </select>
+            </div>
+
+            {/* Auto Execute Toggle */}
+            <div className="flex items-center justify-between pt-1 border-t border-white/5">
+              <span className="text-[8px] font-mono text-neutral-400 uppercase">Auto-Execute CAD Output:</span>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  checked={autoExecute}
+                  onChange={(e) => setAutoExecute(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-7 h-4 bg-black peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-neutral-400 after:border-neutral-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:after:bg-indigo-400 peer-checked:bg-indigo-950 border border-white/5"></div>
+              </label>
+            </div>
           </div>
         </div>
 

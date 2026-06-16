@@ -260,6 +260,21 @@ const DraftingSettings: React.FC<DraftingSettingsProps> = ({ options, settings, 
                        </button>
                     </div>
                  </div>
+
+                 <div className="space-y-4 pt-4 border-t border-white/5">
+                   <label className="text-[8px] font-black text-neutral-600 uppercase tracking-[0.25em] px-1 block">Auto-Fit Padding Buffer</label>
+                   <div className="flex items-center gap-3">
+                      <input 
+                          type="number" 
+                          value={settings.autoFitPadding !== undefined ? settings.autoFitPadding : 350} 
+                          onChange={e => onSettingsChange({ autoFitPadding: Math.max(0, parseFloat(e.target.value) || 0) })}
+                          className="w-1/2 bg-black border border-white/10 rounded-xl py-3.5 px-4 text-xs text-cyan-400 font-mono focus:border-cyan-500 outline-none" 
+                          min="0"
+                          max="5000"
+                      />
+                      <span className="text-[8px] text-neutral-500 font-black uppercase tracking-widest block">Drawing Units</span>
+                   </div>
+                 </div>
                </div>
             )}
 

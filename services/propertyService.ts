@@ -14,7 +14,7 @@ export const resolveColor = (
     activeTab: string = 'model',
     blockContext?: { color: string, thickness: number, lineType: LineType }
 ): string => {
-    let rawColor: any = shape.color || 'bylayer';
+    let rawColor: any = (shape.color !== undefined && shape.color !== null) ? shape.color : 'bylayer';
     let color = 'bylayer';
     if (typeof rawColor === 'number') {
         if (rawColor >= 0 && rawColor < 256) {
@@ -38,33 +38,44 @@ export const resolveColor = (
         }
     }
 
-    if (color.toLowerCase() === 'bylayer') {
-        const layerColor: any = layerConf?.color || '#FFFFFF';
-        if (typeof layerColor === 'number') {
-            if (layerColor >= 0 && layerColor < 256) {
-                const hex = aciToHex(layerColor);
-                color = hex === 'bylayer' ? '#FFFFFF' : hex;
-            } else {
-                color = `#${layerColor.toString(16).padStart(6, '0')}`;
+    const isInsideBlockOnLayer0 = !!blockContext && (shape.layer === '0' || !shape.layer || shape.layer.toLowerCase() === '0');
+
+    if (isInsideBlockOnLayer0) {
+        if (color.toLowerCase() === 'bylayer' || color.toLowerCase() === 'byblock') {
+            color = blockContext.color;
+        }
+    } else {
+        if (color.toLowerCase() === 'bylayer') {
+            let layerColor: any = (layerConf?.color !== undefined && layerConf?.color !== null) ? layerConf.color : '#FFFFFF';
+            if (typeof layerColor === 'string' && (layerColor.toLowerCase() === 'bylayer' || layerColor.toLowerCase() === 'byblock')) {
+                layerColor = '#FFFFFF';
             }
-        } else if (typeof layerColor === 'string') {
-            const trimmed = layerColor.trim();
-            if (/^\d+$/.test(trimmed)) {
-                const num = parseInt(trimmed, 10);
-                if (num >= 0 && num < 256) {
-                    const hex = aciToHex(num);
+            if (typeof layerColor === 'number') {
+                if (layerColor >= 0 && layerColor < 256) {
+                    const hex = aciToHex(layerColor);
                     color = hex === 'bylayer' ? '#FFFFFF' : hex;
                 } else {
-                    color = `#${num.toString(16).padStart(6, '0')}`;
+                    color = `#${layerColor.toString(16).padStart(6, '0')}`;
+                }
+            } else if (typeof layerColor === 'string') {
+                const trimmed = layerColor.trim();
+                if (/^\d+$/.test(trimmed)) {
+                    const num = parseInt(trimmed, 10);
+                    if (num >= 0 && num < 256) {
+                        const hex = aciToHex(num);
+                        color = hex === 'bylayer' ? '#FFFFFF' : hex;
+                    } else {
+                        color = `#${num.toString(16).padStart(6, '0')}`;
+                    }
+                } else {
+                    color = trimmed;
                 }
             } else {
-                color = trimmed;
+                color = '#FFFFFF';
             }
-        } else {
-            color = '#FFFFFF';
+        } else if (color.toLowerCase() === 'byblock' && blockContext) {
+            color = blockContext.color;
         }
-    } else if (color.toLowerCase() === 'byblock' && blockContext) {
-        color = blockContext.color;
     }
     
     if (color.toLowerCase() === 'bylayer') color = '#FFFFFF';
@@ -88,7 +99,12 @@ export const resolveLineWeight = (
     if (typeof weight === 'string') {
         const wStr = weight.toLowerCase();
         if (wStr === 'bylayer') {
-            weight = layerConf?.thickness || 0.25;
+            const isInsideBlockOnLayer0 = !!blockContext && (shape.layer === '0' || !shape.layer || shape.layer.toLowerCase() === '0');
+            if (isInsideBlockOnLayer0) {
+                weight = blockContext.thickness;
+            } else {
+                weight = layerConf?.thickness || 0.25;
+            }
         } else if (wStr === 'byblock' && blockContext) {
             weight = blockContext.thickness;
         } else {
@@ -105,7 +121,12 @@ export const resolveLineType = (
 ): LineType => {
     let lt = shape.lineType || 'bylayer';
     if (lt === 'bylayer') {
-        lt = layerConf?.lineType || 'continuous';
+        const isInsideBlockOnLayer0 = !!blockContext && (shape.layer === '0' || !shape.layer || shape.layer.toLowerCase() === '0');
+        if (isInsideBlockOnLayer0) {
+            lt = blockContext.lineType;
+        } else {
+            lt = layerConf?.lineType || 'continuous';
+        }
     } else if (lt === 'byblock' && blockContext) {
         lt = blockContext.lineType;
     }
@@ -122,7 +143,7 @@ export const resolveShapeProperties = (
     blockContext?: { color: string, thickness: number, lineType: LineType },
     activeTab: string = 'model'
 ): ResolvedProperties => {
-    let rawColor: any = shape.color || 'bylayer';
+    let rawColor: any = (shape.color !== undefined && shape.color !== null) ? shape.color : 'bylayer';
     let color = 'bylayer';
     if (typeof rawColor === 'number') {
         if (rawColor >= 0 && rawColor < 256) {
@@ -146,33 +167,53 @@ export const resolveShapeProperties = (
         }
     }
     
-    if (color.toLowerCase() === 'bylayer') {
-        const layerColor: any = layerConfig[shape.layer]?.color || '#FFFFFF';
-        if (typeof layerColor === 'number') {
-            if (layerColor >= 0 && layerColor < 256) {
-                const hex = aciToHex(layerColor);
-                color = hex === 'bylayer' ? '#FFFFFF' : hex;
-            } else {
-                color = `#${layerColor.toString(16).padStart(6, '0')}`;
+    // Multi-key case-insensitive layer configuration lookup
+    const targetLayer = (shape.layer || '0').trim();
+    let layerConf = layerConfig[targetLayer];
+    if (!layerConf) {
+        const lowerLayer = targetLayer.toLowerCase();
+        const matchedKey = Object.keys(layerConfig).find(k => k.trim().toLowerCase() === lowerLayer);
+        if (matchedKey) layerConf = layerConfig[matchedKey];
+    }
+    
+    const isInsideBlockOnLayer0 = !!blockContext && (targetLayer === '0' || targetLayer.toLowerCase() === '0');
+
+    if (isInsideBlockOnLayer0) {
+        if (color.toLowerCase() === 'bylayer' || color.toLowerCase() === 'byblock') {
+            color = blockContext.color;
+        }
+    } else {
+        if (color.toLowerCase() === 'bylayer') {
+            let layerColor: any = (layerConf?.color !== undefined && layerConf?.color !== null) ? layerConf.color : '#FFFFFF';
+            if (typeof layerColor === 'string' && (layerColor.toLowerCase() === 'bylayer' || layerColor.toLowerCase() === 'byblock')) {
+                layerColor = '#FFFFFF';
             }
-        } else if (typeof layerColor === 'string') {
-            const trimmed = layerColor.trim();
-            if (/^\d+$/.test(trimmed)) {
-                const num = parseInt(trimmed, 10);
-                if (num >= 0 && num < 256) {
-                    const hex = aciToHex(num);
+            if (typeof layerColor === 'number') {
+                if (layerColor >= 0 && layerColor < 256) {
+                    const hex = aciToHex(layerColor);
                     color = hex === 'bylayer' ? '#FFFFFF' : hex;
                 } else {
-                    color = `#${num.toString(16).padStart(6, '0')}`;
+                    color = `#${layerColor.toString(16).padStart(6, '0')}`;
+                }
+            } else if (typeof layerColor === 'string') {
+                const trimmed = layerColor.trim();
+                if (/^\d+$/.test(trimmed)) {
+                    const num = parseInt(trimmed, 10);
+                    if (num >= 0 && num < 256) {
+                        const hex = aciToHex(num);
+                        color = hex === 'bylayer' ? '#FFFFFF' : hex;
+                    } else {
+                        color = `#${num.toString(16).padStart(6, '0')}`;
+                    }
+                } else {
+                    color = trimmed;
                 }
             } else {
-                color = trimmed;
+                color = '#FFFFFF';
             }
-        } else {
-            color = '#FFFFFF';
+        } else if (color.toLowerCase() === 'byblock' && blockContext) {
+            color = blockContext.color;
         }
-    } else if (color.toLowerCase() === 'byblock' && blockContext) {
-        color = blockContext.color;
     }
     
     // If it's still ByLayer/ByBlock string (e.g. from block reference), resolve it
@@ -187,7 +228,11 @@ export const resolveShapeProperties = (
     if (typeof weight === 'string') {
         const wStr = weight.toLowerCase();
         if (wStr === 'bylayer') {
-            weight = layerConfig[shape.layer]?.thickness || 0.25;
+            if (isInsideBlockOnLayer0) {
+                weight = blockContext.thickness;
+            } else {
+                weight = layerConf?.thickness || 0.25;
+            }
         } else if (wStr === 'byblock' && blockContext) {
             weight = blockContext.thickness;
         } else {
@@ -210,7 +255,11 @@ export const resolveShapeProperties = (
     // 3. Resolve LineType
     let lt = shape.lineType || 'bylayer';
     if (lt === 'bylayer') {
-        lt = layerConfig[shape.layer]?.lineType || 'continuous';
+        if (isInsideBlockOnLayer0) {
+            lt = blockContext.lineType;
+        } else {
+            lt = layerConf?.lineType || 'continuous';
+        }
     } else if (lt === 'byblock' && blockContext) {
         lt = blockContext.lineType;
     }
