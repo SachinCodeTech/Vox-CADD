@@ -240,16 +240,16 @@ export function draft12x18ModernVillaPlan(): {
   };
 
   const layerConfigs = {
-    'A-GRID': { id: 'A-GRID', name: 'A-GRID', visible: true, locked: false, frozen: false, plottable: true, color: '#ffeb3b', thickness: 0.15, lineType: 'continuous' },
-    'A-WALL': { id: 'A-WALL', name: 'A-WALL', visible: true, locked: false, frozen: false, plottable: true, color: '#ffffff', thickness: 0.50, lineType: 'continuous' },
-    'A-WALL-INT': { id: 'A-WALL-INT', name: 'A-WALL-INT', visible: true, locked: false, frozen: false, plottable: true, color: '#a1887f', thickness: 0.25, lineType: 'continuous' },
-    'A-DOOR': { id: 'A-DOOR', name: 'A-DOOR', visible: true, locked: false, frozen: false, plottable: true, color: '#ffb74d', thickness: 0.18, lineType: 'continuous' },
-    'A-WINDOW': { id: 'A-WINDOW', name: 'A-WINDOW', visible: true, locked: false, frozen: false, plottable: true, color: '#4fc3f7', thickness: 0.18, lineType: 'continuous' },
-    'A-COLS': { id: 'A-COLS', name: 'A-COLS', visible: true, locked: false, frozen: false, plottable: true, color: '#e53935', thickness: 0.40, lineType: 'continuous' },
-    'A-BEAMS': { id: 'A-BEAMS', name: 'A-BEAMS', visible: true, locked: false, frozen: false, plottable: true, color: '#26a69a', thickness: 0.15, lineType: 'dashed' },
-    'A-FURN': { id: 'A-FURN', name: 'A-FURN', visible: true, locked: false, frozen: false, plottable: true, color: '#81c784', thickness: 0.15, lineType: 'continuous' },
-    'A-TEXT': { id: 'A-TEXT', name: 'A-TEXT', visible: true, locked: false, frozen: false, plottable: true, color: '#e0e0e0', thickness: 0.18, lineType: 'continuous' },
-    'A-DIM': { id: 'A-DIM', name: 'A-DIM', visible: true, locked: false, frozen: false, plottable: true, color: '#90a4ae', thickness: 0.15, lineType: 'continuous' }
+    'A-GRID': { id: 'A-GRID', name: 'A-GRID', visible: true, locked: false, frozen: false, plottable: true, color: '#607D8B', thickness: 0.15, lineType: 'continuous' },
+    'A-WALL': { id: 'A-WALL', name: 'A-WALL', visible: true, locked: false, frozen: false, plottable: true, color: '#FF9800', thickness: 0.30, lineType: 'continuous' },
+    'A-WALL-INT': { id: 'A-WALL-INT', name: 'A-WALL-INT', visible: true, locked: false, frozen: false, plottable: true, color: '#FF9800', thickness: 0.25, lineType: 'continuous' },
+    'A-DOOR': { id: 'A-DOOR', name: 'A-DOOR', visible: true, locked: false, frozen: false, plottable: true, color: '#4CAF50', thickness: 0.20, lineType: 'continuous' },
+    'A-WINDOW': { id: 'A-WINDOW', name: 'A-WINDOW', visible: true, locked: false, frozen: false, plottable: true, color: '#00BCD4', thickness: 0.20, lineType: 'continuous' },
+    'A-COLS': { id: 'A-COLS', name: 'A-COLS', visible: true, locked: false, frozen: false, plottable: true, color: '#FF00FF', thickness: 0.35, lineType: 'continuous' },
+    'A-BEAMS': { id: 'A-BEAMS', name: 'A-BEAMS', visible: true, locked: false, frozen: false, plottable: true, color: '#F44336', thickness: 0.18, lineType: 'dashed' },
+    'A-FURN': { id: 'A-FURN', name: 'A-FURN', visible: true, locked: false, frozen: false, plottable: true, color: '#81C784', thickness: 0.15, lineType: 'continuous' },
+    'A-TEXT': { id: 'A-TEXT', name: 'A-TEXT', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.18, lineType: 'continuous' },
+    'A-DIM': { id: 'A-DIM', name: 'A-DIM', visible: true, locked: false, frozen: false, plottable: true, color: '#FFEB3B', thickness: 0.15, lineType: 'continuous' }
   };
 
   const plotW = 12000;
@@ -916,16 +916,16 @@ export function draft20x30CommercialOfficePlan(): {
   };
 
   const layerConfigs = {
-    'A-GRID': { id: 'A-GRID', name: 'A-GRID', visible: true, locked: false, frozen: false, plottable: true, color: '#f1c40f', thickness: 0.18, lineType: 'continuous' },
-    'A-WALL': { id: 'A-WALL', name: 'A-WALL', visible: true, locked: false, frozen: false, plottable: true, color: '#ffffff', thickness: 0.50, lineType: 'continuous' },
-    'A-WALL-INT': { id: 'A-WALL-INT', name: 'A-WALL-INT', visible: true, locked: false, frozen: false, plottable: true, color: '#bdc3c7', thickness: 0.25, lineType: 'continuous' },
-    'A-DOOR': { id: 'A-DOOR', name: 'A-DOOR', visible: true, locked: false, frozen: false, plottable: true, color: '#e67e22', thickness: 0.18, lineType: 'continuous' },
-    'A-WINDOW': { id: 'A-WINDOW', name: 'A-WINDOW', visible: true, locked: false, frozen: false, plottable: true, color: '#1abc9c', thickness: 0.18, lineType: 'continuous' },
-    'A-COLS': { id: 'A-COLS', name: 'A-COLS', visible: true, locked: false, frozen: false, plottable: true, color: '#e74c3c', thickness: 0.40, lineType: 'continuous' },
-    'A-BEAMS': { id: 'A-BEAMS', name: 'A-BEAMS', visible: true, locked: false, frozen: false, plottable: true, color: '#2980b9', thickness: 0.15, lineType: 'dashed' },
-    'A-FURN': { id: 'A-FURN', name: 'A-FURN', visible: true, locked: false, frozen: false, plottable: true, color: '#2ecc71', thickness: 0.15, lineType: 'continuous' },
-    'A-TEXT': { id: 'A-TEXT', name: 'A-TEXT', visible: true, locked: false, frozen: false, plottable: true, color: '#ecf0f1', thickness: 0.18, lineType: 'continuous' },
-    'A-DIM': { id: 'A-DIM', name: 'A-DIM', visible: true, locked: false, frozen: false, plottable: true, color: '#7f8c8d', thickness: 0.15, lineType: 'continuous' }
+    'A-GRID': { id: 'A-GRID', name: 'A-GRID', visible: true, locked: false, frozen: false, plottable: true, color: '#607D8B', thickness: 0.15, lineType: 'continuous' },
+    'A-WALL': { id: 'A-WALL', name: 'A-WALL', visible: true, locked: false, frozen: false, plottable: true, color: '#FF9800', thickness: 0.30, lineType: 'continuous' },
+    'A-WALL-INT': { id: 'A-WALL-INT', name: 'A-WALL-INT', visible: true, locked: false, frozen: false, plottable: true, color: '#FF9800', thickness: 0.25, lineType: 'continuous' },
+    'A-DOOR': { id: 'A-DOOR', name: 'A-DOOR', visible: true, locked: false, frozen: false, plottable: true, color: '#4CAF50', thickness: 0.20, lineType: 'continuous' },
+    'A-WINDOW': { id: 'A-WINDOW', name: 'A-WINDOW', visible: true, locked: false, frozen: false, plottable: true, color: '#00BCD4', thickness: 0.20, lineType: 'continuous' },
+    'A-COLS': { id: 'A-COLS', name: 'A-COLS', visible: true, locked: false, frozen: false, plottable: true, color: '#FF00FF', thickness: 0.35, lineType: 'continuous' },
+    'A-BEAMS': { id: 'A-BEAMS', name: 'A-BEAMS', visible: true, locked: false, frozen: false, plottable: true, color: '#F44336', thickness: 0.18, lineType: 'dashed' },
+    'A-FURN': { id: 'A-FURN', name: 'A-FURN', visible: true, locked: false, frozen: false, plottable: true, color: '#81C784', thickness: 0.15, lineType: 'continuous' },
+    'A-TEXT': { id: 'A-TEXT', name: 'A-TEXT', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.18, lineType: 'continuous' },
+    'A-DIM': { id: 'A-DIM', name: 'A-DIM', visible: true, locked: false, frozen: false, plottable: true, color: '#FFEB3B', thickness: 0.15, lineType: 'continuous' }
   };
 
   // Floor setup: Side-by-side layout
@@ -1807,16 +1807,16 @@ export function draft10x15DuplexPlan(): {
   };
 
   const layerConfigs = {
-    'A-GRID': { id: 'A-GRID', name: 'A-GRID', visible: true, locked: false, frozen: false, plottable: true, color: '#ffeb3b', thickness: 0.15, lineType: 'continuous' },
-    'A-WALL': { id: 'A-WALL', name: 'A-WALL', visible: true, locked: false, frozen: false, plottable: true, color: '#ffffff', thickness: 0.50, lineType: 'continuous' },
-    'A-WALL-INT': { id: 'A-WALL-INT', name: 'A-WALL-INT', visible: true, locked: false, frozen: false, plottable: true, color: '#a1887f', thickness: 0.25, lineType: 'continuous' },
-    'A-DOOR': { id: 'A-DOOR', name: 'A-DOOR', visible: true, locked: false, frozen: false, plottable: true, color: '#ffb74d', thickness: 0.18, lineType: 'continuous' },
-    'A-WINDOW': { id: 'A-WINDOW', name: 'A-WINDOW', visible: true, locked: false, frozen: false, plottable: true, color: '#4fc3f7', thickness: 0.18, lineType: 'continuous' },
-    'A-COLS': { id: 'A-COLS', name: 'A-COLS', visible: true, locked: false, frozen: false, plottable: true, color: '#e53935', thickness: 0.40, lineType: 'continuous' },
-    'A-BEAMS': { id: 'A-BEAMS', name: 'A-BEAMS', visible: true, locked: false, frozen: false, plottable: true, color: '#26a69a', thickness: 0.15, lineType: 'dashed' },
-    'A-FURN': { id: 'A-FURN', name: 'A-FURN', visible: true, locked: false, frozen: false, plottable: true, color: '#81c784', thickness: 0.15, lineType: 'continuous' },
-    'A-TEXT': { id: 'A-TEXT', name: 'A-TEXT', visible: true, locked: false, frozen: false, plottable: true, color: '#e0e0e0', thickness: 0.18, lineType: 'continuous' },
-    'A-DIM': { id: 'A-DIM', name: 'A-DIM', visible: true, locked: false, frozen: false, plottable: true, color: '#90a4ae', thickness: 0.15, lineType: 'continuous' }
+    'A-GRID': { id: 'A-GRID', name: 'A-GRID', visible: true, locked: false, frozen: false, plottable: true, color: '#607D8B', thickness: 0.15, lineType: 'continuous' },
+    'A-WALL': { id: 'A-WALL', name: 'A-WALL', visible: true, locked: false, frozen: false, plottable: true, color: '#FF9800', thickness: 0.30, lineType: 'continuous' },
+    'A-WALL-INT': { id: 'A-WALL-INT', name: 'A-WALL-INT', visible: true, locked: false, frozen: false, plottable: true, color: '#FF9800', thickness: 0.25, lineType: 'continuous' },
+    'A-DOOR': { id: 'A-DOOR', name: 'A-DOOR', visible: true, locked: false, frozen: false, plottable: true, color: '#4CAF50', thickness: 0.20, lineType: 'continuous' },
+    'A-WINDOW': { id: 'A-WINDOW', name: 'A-WINDOW', visible: true, locked: false, frozen: false, plottable: true, color: '#00BCD4', thickness: 0.20, lineType: 'continuous' },
+    'A-COLS': { id: 'A-COLS', name: 'A-COLS', visible: true, locked: false, frozen: false, plottable: true, color: '#FF00FF', thickness: 0.35, lineType: 'continuous' },
+    'A-BEAMS': { id: 'A-BEAMS', name: 'A-BEAMS', visible: true, locked: false, frozen: false, plottable: true, color: '#F44336', thickness: 0.18, lineType: 'dashed' },
+    'A-FURN': { id: 'A-FURN', name: 'A-FURN', visible: true, locked: false, frozen: false, plottable: true, color: '#81C784', thickness: 0.15, lineType: 'continuous' },
+    'A-TEXT': { id: 'A-TEXT', name: 'A-TEXT', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.18, lineType: 'continuous' },
+    'A-DIM': { id: 'A-DIM', name: 'A-DIM', visible: true, locked: false, frozen: false, plottable: true, color: '#FFEB3B', thickness: 0.15, lineType: 'continuous' }
   };
 
   // ==========================================

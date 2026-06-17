@@ -56,7 +56,30 @@ const SHAPE_ID_TO_TYPE: Record<number, string> = {
 export const createEmptyVoxProject = (settings: AppSettings): VoxProject => {
   const defaultLayers: Record<string, LayerConfig> = { 
     '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' },
-    'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, plottable: false, color: '#666666', thickness: 0.1, lineType: 'continuous' }
+    'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, plottable: false, color: '#666666', thickness: 0.1, lineType: 'continuous' },
+    
+    // Standard User-specified layers
+    'WALL': { id: 'WALL', name: 'WALL', visible: true, locked: false, frozen: false, plottable: true, color: '#FF9800', thickness: 0.30, lineType: 'continuous' },
+    'DOOR': { id: 'DOOR', name: 'DOOR', visible: true, locked: false, frozen: false, plottable: true, color: '#4CAF50', thickness: 0.20, lineType: 'continuous' },
+    'WINDOW': { id: 'WINDOW', name: 'WINDOW', visible: true, locked: false, frozen: false, plottable: true, color: '#00BCD4', thickness: 0.20, lineType: 'continuous' },
+    'COLUMN': { id: 'COLUMN', name: 'COLUMN', visible: true, locked: false, frozen: false, plottable: true, color: '#FF00FF', thickness: 0.35, lineType: 'continuous' },
+    'BEAM_CENTER': { id: 'BEAM_CENTER', name: 'BEAM_CENTER', visible: true, locked: false, frozen: false, plottable: true, color: '#F44336', thickness: 0.18, lineType: 'dashed' },
+    'DIMENSION': { id: 'DIMENSION', name: 'DIMENSION', visible: true, locked: false, frozen: false, plottable: true, color: '#FFEB3B', thickness: 0.15, lineType: 'continuous' },
+    'TEXT': { id: 'TEXT', name: 'TEXT', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.18, lineType: 'continuous' },
+    'GRID': { id: 'GRID', name: 'GRID', visible: true, locked: false, frozen: false, plottable: true, color: '#607D8B', thickness: 0.15, lineType: 'continuous' },
+    'FURNITURE': { id: 'FURNITURE', name: 'FURNITURE', visible: true, locked: false, frozen: false, plottable: true, color: '#81C784', thickness: 0.15, lineType: 'continuous' },
+
+    // A- prefixed legacy/alternate standard layers
+    'A-WALL': { id: 'A-WALL', name: 'A-WALL', visible: true, locked: false, frozen: false, plottable: true, color: '#FF9800', thickness: 0.30, lineType: 'continuous' },
+    'A-WALL-INT': { id: 'A-WALL-INT', name: 'A-WALL-INT', visible: true, locked: false, frozen: false, plottable: true, color: '#FF9800', thickness: 0.25, lineType: 'continuous' },
+    'A-DOOR': { id: 'A-DOOR', name: 'A-DOOR', visible: true, locked: false, frozen: false, plottable: true, color: '#4CAF50', thickness: 0.20, lineType: 'continuous' },
+    'A-WINDOW': { id: 'A-WINDOW', name: 'A-WINDOW', visible: true, locked: false, frozen: false, plottable: true, color: '#00BCD4', thickness: 0.20, lineType: 'continuous' },
+    'A-COLS': { id: 'A-COLS', name: 'A-COLS', visible: true, locked: false, frozen: false, plottable: true, color: '#FF00FF', thickness: 0.35, lineType: 'continuous' },
+    'A-BEAMS': { id: 'A-BEAMS', name: 'A-BEAMS', visible: true, locked: false, frozen: false, plottable: true, color: '#F44336', thickness: 0.18, lineType: 'dashed' },
+    'A-DIM': { id: 'A-DIM', name: 'A-DIM', visible: true, locked: false, frozen: false, plottable: true, color: '#FFEB3B', thickness: 0.15, lineType: 'continuous' },
+    'A-TEXT': { id: 'A-TEXT', name: 'A-TEXT', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.18, lineType: 'continuous' },
+    'A-GRID': { id: 'A-GRID', name: 'A-GRID', visible: true, locked: false, frozen: false, plottable: true, color: '#607D8B', thickness: 0.15, lineType: 'continuous' },
+    'A-FURN': { id: 'A-FURN', name: 'A-FURN', visible: true, locked: false, frozen: false, plottable: true, color: '#81C784', thickness: 0.15, lineType: 'continuous' }
   };
 
   const project: VoxProject = {
