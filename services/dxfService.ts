@@ -6,7 +6,7 @@ import {
     Point, LayerConfig, MTextShape, AppSettings, BlockDefinition, VoxProject, LineTypeDefinition,
     DimensionStyle, LayoutDefinition, DimensionType
 } from '../types';
-import { generateId, getAllShapesBounds } from './cadService';
+import { generateId, getAllShapesBounds, getPolylineOffsetPoints } from './cadService';
 import { aciToHex, hexToACI, mapLineweight } from './colorUtils';
 
 const mmToDXFLineWeight = (mm: number | string | undefined): number => {
@@ -194,6 +194,68 @@ const writeEntity = (
             });
             break;
         }
+        case 'dline': {
+            const dl = s as DoubleLineShape;
+            if (dl.points && dl.points.length > 1) {
+                const thickness = dl.thickness || 230;
+                const justification = dl.justification || 'zero';
+                
+                let offset1 = 0;
+                let offset2 = 0;
+                
+                if (justification === 'zero') {
+                    offset1 = thickness / 2;
+                    offset2 = -thickness / 2;
+                } else if (justification === 'top') {
+                    offset1 = 0;
+                    offset2 = -thickness;
+                } else if (justification === 'bottom') {
+                    offset1 = thickness;
+                    offset2 = 0;
+                }
+                
+                // Ensure helper works with the points array
+                const normPoints = dl.points as Point[];
+                const pts1 = getPolylineOffsetPoints(normPoints, offset1, dl.closed);
+                const pts2 = getPolylineOffsetPoints(normPoints, offset2, dl.closed);
+                
+                // Write path 1 as a LWPOLYLINE
+                if (pts1.length > 0) {
+                    writeCommon("LWPOLYLINE", "AcDbPolyline");
+                    writer.write(90, pts1.length);
+                    writer.write(70, dl.closed ? 1 : 0);
+                    pts1.forEach(pt => {
+                        writer.write(10, pt.x);
+                        writer.write(20, pt.y);
+                    });
+                }
+                
+                // Write path 2 as a LWPOLYLINE
+                if (pts2.length > 0) {
+                    writeCommon("LWPOLYLINE", "AcDbPolyline");
+                    writer.write(90, pts2.length);
+                    writer.write(70, dl.closed ? 1 : 0);
+                    pts2.forEach(pt => {
+                        writer.write(10, pt.x);
+                        writer.write(20, pt.y);
+                    });
+                }
+                
+                // Optional: Draw end caps if not closed
+                if (!dl.closed && pts1.length > 0 && pts2.length > 0) {
+                    // Start cap line
+                    writeCommon("LINE", "AcDbLine");
+                    writer.write(10, pts1[0].x); writer.write(20, pts1[0].y); writer.write(30, 0.0);
+                    writer.write(11, pts2[0].x); writer.write(21, pts2[0].y); writer.write(31, 0.0);
+                    
+                    // End cap line
+                    writeCommon("LINE", "AcDbLine");
+                    writer.write(10, pts1[pts1.length-1].x); writer.write(20, pts1[pts1.length-1].y); writer.write(31, 0.0);
+                    writer.write(11, pts2[pts2.length-1].x); writer.write(21, pts2[pts2.length-1].y); writer.write(31, 0.0);
+                }
+            }
+            break;
+        }
         case 'block': {
             const i = s as any;
             writeCommon("INSERT", "AcDbBlockReference");
@@ -203,6 +265,31 @@ const writeEntity = (
             writer.write(42, i.scaleY || 1.0);
             writer.write(43, i.scaleZ || 1.0);
             writer.write(50, (i.rotation || 0) * 180 / Math.PI);
+            break;
+        }
+        case 'dimension': {
+            const d = s as DimensionShape;
+            writeCommon("DIMENSION", "AcDbDimension");
+            writer.write(2, "*D" + (s.id || '').replace(/[^a-zA-Z0-9]/g, "").substring(0, 8));
+            writer.write(10, d.dimX); writer.write(20, d.dimY); writer.write(30, 0.0);
+            writer.write(11, (d.x1 + d.x2)/2); writer.write(21, (d.y1 + d.y2)/2); writer.write(31, 0.0);
+            writer.write(70, 0); // Aligned dimension
+            writer.write(1, d.text);
+            writer.write(100, "AcDbAlignedDimension");
+            writer.write(13, d.x1); writer.write(23, d.y1); writer.write(33, 0.0);
+            writer.write(14, d.x2); writer.write(24, d.y2); writer.write(34, 0.0);
+            break;
+        }
+        case 'leader': {
+            const l = s as any;
+            writeCommon("LEADER", "AcDbLeader");
+            writer.write(3, "STANDARD");
+            writer.write(71, 1);
+            writer.write(72, 0); // Straight lines
+            writer.write(73, 3);
+            writer.write(76, 2); // 2 points
+            writer.write(10, l.x1); writer.write(20, l.y1); writer.write(30, 0.0);
+            writer.write(10, l.x2); writer.write(20, l.y2); writer.write(30, 0.0);
             break;
         }
     }

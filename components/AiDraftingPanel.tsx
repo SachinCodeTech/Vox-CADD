@@ -44,6 +44,46 @@ const DRAFTING_CATEGORIES = [
     ]
   },
   {
+    id: 'arch-styles',
+    title: 'Architectural Styles',
+    description: 'Specialized facade layouts and styling themes',
+    items: [
+      { label: 'Neoclassical Symmetrical Plan', prompt: 'Draft a Neoclassical symmetrical layout of size 8000x6000mm. Center a grand entrance foyer (3000x3000mm) at the axis with paired monumental 300x300mm columns on la A-COLS. Add classical window openings on la A-WINDOW, and a centered labeling standard on la A-TEXT.' },
+      { label: 'Mughal Courtyard Layout', prompt: 'Create a Traditional Mughal/Islamic layout of size 12000x12000mm. Place a square central courtyard area (4000x4000mm) with a water basin pool (circle of radius 1200mm) at coordinate 6000,6000. Surround it with symmetrical arched corridors and geometric tiles on la A-HATCH.' },
+      { label: 'Brutalist Raw Concrete Blocks', prompt: 'Draw a Brutalist modular office component of size 10000x5000mm. Use massive thick 400mm exterior masonry concrete segments, deep structural window recesses on la A-WINDOW, heavy rectangular columns on la A-COLS, and rough architectural shadow hatches on la A-HATCH.' },
+      { label: 'Eco-Biophilic Carbon-Neutral Plan', prompt: 'Design an Eco-Biophilic carbon-neutral LEED floorplan of size 9000x6000mm. Add highly insulated double-cavity outer walls on la A-WALL, a integrated vertical planter green box (2000x600mm) on la A-GRID, a circular rainwater harvester on la M-PLUMB, and dual rooftop solar panel vectors on la A-HATCH.' }
+    ]
+  },
+  {
+    id: 'mep-networks',
+    title: 'Building MEP Services',
+    description: 'Draw mechanical, electrical, plumbing and safety lines',
+    items: [
+      { label: 'Mechanical & HVAC Ductwork', prompt: 'Draft a full ventilation supply layout inside a 6000x4000mm conference room envelope. Run standard 300mm wide HVAC parallel supply ducts on la M-HVAC, place 4 air terminal diffuser squares with diagonal crossings, and add an AC outdoor heat pump unit (rect) in the setback.' },
+      { label: 'Electrical Light & Conduit Grid', prompt: 'Deploy a complete clean lighting network for a 5000x5000mm living area. Place 4 ceiling downlight circle fixtures on active layer E-ELEC, connect them all with continuous conduit power lines, and wire them to a corner main distribution board.' },
+      { label: 'Plumbing Supply & Drainage Line', prompt: 'Draw plumbing supply and drainage piping routes for a 2400x1800mm master bathroom. Run fresh water lines (teal) from the main riser shaft to the WC, basin, and shower on la M-PLUMB, and run continuous soil wastewater lines to the drain outlet trap.' },
+      { label: 'Smart Building Sensors Network', prompt: 'Layout smart building controls for a open-office space. Draft 3 ceiling multi-sensors (smoke + motion) as decorative circle nodes on active layer E-SENS, connected to a master web controller terminal.' }
+    ]
+  },
+  {
+    id: 'bubble-zoning',
+    title: 'Zoning & Bubble Charts',
+    description: 'Map space adjacencies & circulation pathways',
+    items: [
+      { label: 'Residential Bubble Diagram', prompt: 'Draft a professional connectivity bubble diagram. Draw circle zones on la A-GRID: Primary Public Living Lounge (radius 1800mm, labeled at center), Semi-Public Dining Room (radius 1400mm), Private Bed Chamber (radius 1600mm), and Service Kitchen (radius 1200mm). Link connected adjacent bubbles using thick circulation pathway lines.' },
+      { label: 'Commerce Bubble Matrix', prompt: 'Draft a functional business zoning chart detailing 3 key bubbles: main Customer Showroom (radius 2000mm), Back-of-House storage (radius 1500mm), and Office staff locker (radius 1000mm). Sketch occupant transition arrows as decorative leaders between centers.' }
+    ]
+  },
+  {
+    id: 'inch-feet-math',
+    title: 'Advanced Imperial & Units',
+    description: 'Convert raw feet/inches to precise millimeter coordinates',
+    items: [
+      { label: 'Draft 15ft x 12ft Room', prompt: 'Create a spatial design measuring exactly 15 feet width by 12 feet height (convert internally: 15\' = 4572 mm, 12\' = 3658 mm) using 9 inch (228 mm) exterior walls on la A-WALL. Add standard 3ft (914 mm) swing doors on la A-DOOR, and a centering label stating dimensions as "15\'-0\\" x 12\'-0\\"" on la A-TEXT.' },
+      { label: 'Draft 6ft Prep Counter Suite', prompt: 'Design a professional culinary preparation island suite of 6ft length by 2ft width counter (1829 x 610 mm) centered in a 12ft x 12ft (3658 x 3658 mm) kitchen on active layer A-FURN. Place dual wash basins (rects) and stove elements inside the prep counter.' }
+    ]
+  },
+  {
     id: 'structural-openings',
     title: 'Room Openings & Structures',
     description: 'Add standard doors, windows, and columns',

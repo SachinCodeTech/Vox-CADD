@@ -147,10 +147,13 @@ export function determineBuildingFootprint(prompt: string): string {
   const p = prompt.toLowerCase();
   if (p.includes("l shape") || p.includes("l-shape") || p.includes("l_shape")) return "L Shape";
   if (p.includes("u shape") || p.includes("u-shape") || p.includes("u_shape")) return "U Shape";
-  if (p.includes("courtyard") || p.includes("court-yard")) return "Courtyard";
-  if (p.includes("circular") || p.includes("round") || p.includes("circle")) return "Circular";
+  if (p.includes("courtyard") || p.includes("court-yard") || p.includes("atrium")) return "Courtyard";
+  if (p.includes("circular") || p.includes("round") || p.includes("circle") || p.includes("radial") || p.includes("sphere")) return "Circular";
+  if (p.includes("triangle") || p.includes("triangular") || p.includes("three-sided")) return "Triangle";
+  if (p.includes("pentagon") || p.includes("five-sided") || p.includes("five sided")) return "Pentagon";
+  if (p.includes("hexagon") || p.includes("six-sided") || p.includes("six sided")) return "Hexagon";
   if (p.includes("t shape") || p.includes("t-shape") || p.includes("t_shape")) return "T Shape";
-  if (p.includes("corner plot") || p.includes("corner")) return "Corner Plot";
+  if (p.includes("corner plot") || p.includes("corner") || p.includes("commercial")) return "Corner Plot";
   return "Rectangle";
 }
 
@@ -797,6 +800,151 @@ export function designSpaceLayout(prompt: string, plotW: number, plotH: number):
       ["kitchen", "bedroom2"]
     );
 
+  } else if (footprint === "Triangle") {
+    const cx = Math.round((minX + maxX) / 2);
+    
+    const entrance: Room = {
+      id: "entrance",
+      name: "Triangular Lobby Foyer",
+      x1: cx - Math.round(bW * 0.22),
+      y1: minY,
+      x2: cx + Math.round(bW * 0.22),
+      y2: minY + Math.round(bH * 0.35),
+      width: Math.round(bW * 0.44),
+      height: Math.round(bH * 0.35),
+      area: 0
+    };
+    
+    const living: Room = {
+      id: "living",
+      name: "Panoramic Left Lounge",
+      x1: minX,
+      y1: minY,
+      x2: cx - Math.round(bW * 0.22),
+      y2: minY + Math.round(bH * 0.45),
+      width: (cx - Math.round(bW * 0.22)) - minX,
+      height: Math.round(bH * 0.45),
+      area: 0
+    };
+
+    const kitchen: Room = {
+      id: "kitchen",
+      name: "Apex Right Kitchen",
+      x1: cx + Math.round(bW * 0.22),
+      y1: minY,
+      x2: maxX,
+      y2: minY + Math.round(bH * 0.45),
+      width: maxX - (cx + Math.round(bW * 0.22)),
+      height: Math.round(bH * 0.45),
+      area: 0
+    };
+
+    const bathroom: Room = {
+      id: "bathroom",
+      name: "Core Toilet Facility",
+      x1: cx - Math.round(bW * 0.16),
+      y1: minY + Math.round(bH * 0.35),
+      x2: cx + Math.round(bW * 0.16),
+      y2: minY + Math.round(bH * 0.6),
+      width: Math.round(bW * 0.32),
+      height: Math.round(bH * 0.25),
+      area: 0
+    };
+
+    const bed1: Room = {
+      id: "bedroom1",
+      name: "Apex Suite Chamber",
+      x1: cx - Math.round(bW * 0.28),
+      y1: minY + Math.round(bH * 0.6),
+      x2: cx + Math.round(bW * 0.28),
+      y2: maxY,
+      width: Math.round(bW * 0.56),
+      height: maxY - (minY + Math.round(bH * 0.6)),
+      area: 0
+    };
+
+    rooms.push(entrance, living, kitchen, bathroom, bed1);
+    desiredConnections.push(
+      ["entrance", "living"],
+      ["entrance", "kitchen"],
+      ["entrance", "bathroom"],
+      ["bathroom", "bedroom1"]
+    );
+
+  } else if (footprint === "Pentagon" || footprint === "Hexagon") {
+    const cx = Math.round((minX + maxX) / 2);
+    const cy = Math.round((minY + maxY) / 2);
+    const halfW = Math.round(bW * 0.22);
+    const halfH = Math.round(bH * 0.22);
+
+    const entrance: Room = {
+      id: "entrance",
+      name: "Central Polygonal Lobby",
+      x1: cx - halfW,
+      y1: cy - halfH,
+      x2: cx + halfW,
+      y2: cy + halfH,
+      width: halfW * 2,
+      height: halfH * 2,
+      area: 0
+    };
+
+    const living: Room = {
+      id: "living",
+      name: "Public Grand Salon",
+      x1: cx,
+      y1: cy,
+      x2: maxX,
+      y2: maxY,
+      width: maxX - cx,
+      height: maxY - cy,
+      area: 0
+    };
+
+    const bed1: Room = {
+      id: "bedroom1",
+      name: "Quiet Master Suite",
+      x1: minX,
+      y1: cy,
+      x2: cx,
+      y2: maxY,
+      width: cx - minX,
+      height: maxY - cy,
+      area: 0
+    };
+
+    const kitchen: Room = {
+      id: "kitchen",
+      name: "Service Kitchen Unit",
+      x1: cx,
+      y1: minY,
+      x2: maxX,
+      y2: cy,
+      width: maxX - cx,
+      height: cy - minY,
+      area: 0
+    };
+
+    const bathroom: Room = {
+      id: "bathroom",
+      name: "Wet Restroom Stack",
+      x1: minX,
+      y1: minY,
+      x2: cx,
+      y2: cy,
+      width: cx - minX,
+      height: cy - minY,
+      area: 0
+    };
+
+    rooms.push(entrance, living, bed1, kitchen, bathroom);
+    desiredConnections.push(
+      ["entrance", "living"],
+      ["entrance", "bedroom1"],
+      ["entrance", "kitchen"],
+      ["entrance", "bathroom"]
+    );
+
   } else {
     // RECTANGLE DEEP OR WIDE (as before, but cleaned up)
     if (bH >= bW) {
@@ -1103,6 +1251,12 @@ export function designSpaceLayout(prompt: string, plotW: number, plotH: number):
     footprintReason = "A Courtyard footprint is selected to organize the entire building around a tranquil central light well, optimizing natural internal cooling, daylighting, and spatial safety.";
   } else if (footprint === "Circular") {
     footprintReason = "A Circular/Radial layout is chosen for its futuristic aesthetic and extremely compact surface-to-volume ratio, centering circulation inside a majestic central atrium hub.";
+  } else if (footprint === "Triangle") {
+    footprintReason = "A Triangular footprint is selected for its bold, iconic modern silhouette, projecting dynamic energy lines and optimizing corner lot setbacks efficiently.";
+  } else if (footprint === "Pentagon") {
+    footprintReason = "A Pentagonal layout is chosen as a classic landmark geometric form, providing uniform daylight access across all five peripheral facets surrounding a highly centralized radial core.";
+  } else if (footprint === "Hexagon") {
+    footprintReason = "An organic Hexagonal layout is chosen for its superior honeycomb efficiency, organizing individual rooms modularly around a central service node to optimize travel distance and spatial connectivity.";
   } else if (footprint === "T Shape") {
     footprintReason = "A T-Shape massing separates the public stem foyer from the long private and service rear crosspiece wings, optimizing logical privacy-zoning transitions.";
   } else if (footprint === "Corner Plot") {
@@ -1709,6 +1863,41 @@ export function compilePlanToCADCommands(plan: FloorPlanPlan): string[] {
     const R = Math.round(Math.min(bW, bH) / 2);
     commands.push(`c ${cx},${cy} ${R}`);
     commands.push(`c ${cx},${cy} ${R - 230}`);
+  } else if (footprint === "Triangle") {
+    const tx1 = minX, ty1 = minY;
+    const tx2 = maxX, ty2 = minY;
+    const tx3 = Math.round((minX + maxX) / 2), ty3 = maxY;
+    
+    // Draw outer triangular envelope with 230mm thickness
+    commands.push(`l ${tx1},${ty1} ${tx2},${ty2}`);
+    commands.push(`l ${tx2},${ty2} ${tx3},${ty3}`);
+    commands.push(`l ${tx3},${ty3} ${tx1},${ty1}`);
+
+    const inset = 230;
+    const cxCenter = Math.round((minX + maxX) / 2);
+    commands.push(`l ${tx1 + inset},${ty1 + inset} ${tx2 - inset},${ty2 + inset}`);
+    commands.push(`l ${tx2 - inset},${ty2 + inset} ${cxCenter},${ty3 - inset}`);
+    commands.push(`l ${cxCenter},${ty3 - inset} ${tx1 + inset},${ty1 + inset}`);
+  } else if (footprint === "Pentagon" || footprint === "Hexagon") {
+    const cx = Math.round((minX + maxX) / 2);
+    const cy = Math.round((minY + maxY) / 2);
+    const R1 = Math.round(Math.min(bW, bH) / 2);
+    const R2 = R1 - 230;
+    const numSides = footprint === "Pentagon" ? 5 : 6;
+    
+    const pts1: [number, number][] = [];
+    const pts2: [number, number][] = [];
+
+    for (let i = 0; i <= numSides; i++) {
+      const angle = (i * 2 * Math.PI) / numSides - Math.PI / 2;
+      pts1.push([cx + Math.round(R1 * Math.cos(angle)), cy + Math.round(R1 * Math.sin(angle))]);
+      pts2.push([cx + Math.round(R2 * Math.cos(angle)), cy + Math.round(R2 * Math.sin(angle))]);
+    }
+
+    for (let i = 0; i < numSides; i++) {
+      commands.push(`l ${pts1[i][0]},${pts1[i][1]} ${pts1[i+1][0]},${pts1[i+1][1]}`);
+      commands.push(`l ${pts2[i][0]},${pts2[i][1]} ${pts2[i+1][0]},${pts2[i+1][1]}`);
+    }
   } else {
     exteriorSegments.forEach(seg => {
       drawSegmentWithPunchouts(seg.type, seg.coord, seg.start, seg.end, 230, commands);

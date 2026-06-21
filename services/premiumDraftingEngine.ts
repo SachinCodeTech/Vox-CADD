@@ -1,4 +1,4 @@
-import { Shape, Point, LineShape, CircleShape, RectShape, ArcShape, TextShape, MTextShape, DimensionShape, LineType } from '../types';
+import { Shape, Point, LineShape, CircleShape, RectShape, ArcShape, TextShape, MTextShape, DimensionShape, LineType, DoubleLineShape } from '../types';
 
 /**
  * Procedural UUID generator
@@ -376,14 +376,12 @@ export function draft12x18ModernVillaPlan(): {
   extWalls.forEach(w => {
     layers['A-WALL'].push({
       id: uuid(),
-      type: 'line',
+      type: 'dline',
       layer: 'A-WALL',
-      x1: w.x1,
-      y1: w.y1,
-      x2: w.x2,
-      y2: w.y2,
+      points: [{ x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 }],
       thickness: w.t,
-    } as LineShape);
+      justification: 'zero'
+    } as DoubleLineShape);
   });
 
   // Internal walls partitions (thickness 115)
@@ -416,14 +414,12 @@ export function draft12x18ModernVillaPlan(): {
   intWalls.forEach(w => {
     layers['A-WALL-INT'].push({
       id: uuid(),
-      type: 'line',
+      type: 'dline',
       layer: 'A-WALL-INT',
-      x1: w.x1,
-      y1: w.y1,
-      x2: w.x2,
-      y2: w.y2,
+      points: [{ x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 }],
       thickness: w.t,
-    } as LineShape);
+      justification: 'zero'
+    } as DoubleLineShape);
   });
 
   // --- 4. DOORS (A-DOOR) ---
@@ -1112,14 +1108,12 @@ export function draft20x30CommercialOfficePlan(): {
     extWalls.forEach(w => {
       layers['A-WALL'].push({
         id: uuid(),
-        type: 'line',
+        type: 'dline',
         layer: 'A-WALL',
-        x1: oX + w.x1,
-        y1: w.y1,
-        x2: oX + w.x2,
-        y2: w.y2,
+        points: [{ x: oX + w.x1, y: w.y1 }, { x: oX + w.x2, y: w.y2 }],
         thickness: 230,
-      } as LineShape);
+        justification: 'zero'
+      } as DoubleLineShape);
     });
 
     // --- INTERIOR DESIGN LAYOUT WALLS (A-WALL-INT, 115mm thickness) ---
@@ -1153,14 +1147,12 @@ export function draft20x30CommercialOfficePlan(): {
       intWallsGF.forEach(w => {
         layers['A-WALL-INT'].push({
           id: uuid(),
-          type: 'line',
+          type: 'dline',
           layer: 'A-WALL-INT',
-          x1: oX + w.x1,
-          y1: w.y1,
-          x2: oX + w.x2,
-          y2: w.y2,
+          points: [{ x: oX + w.x1, y: w.y1 }, { x: oX + w.x2, y: w.y2 }],
           thickness: 115,
-        } as LineShape);
+          justification: 'zero'
+        } as DoubleLineShape);
       });
 
       // ___ GROUND FLOOR DOORS ___
@@ -1324,20 +1316,32 @@ export function draft20x30CommercialOfficePlan(): {
       intWalls1st.forEach(w => {
         layers['A-WALL-INT'].push({
           id: uuid(),
-          type: 'line',
+          type: 'dline',
           layer: 'A-WALL-INT',
-          x1: oX + w.x1,
-          y1: w.y1,
-          x2: oX + w.x2,
-          y2: w.y2,
+          points: [{ x: oX + w.x1, y: w.y1 }, { x: oX + w.x2, y: w.y2 }],
           thickness: 115,
-        } as LineShape);
+          justification: 'zero'
+        } as DoubleLineShape);
       });
 
       // ___ FIRST FLOOR BALCONY GLASS BAILLUSTADE (A-WALL) ___
       // FRONT BALCONY cantilevered outside Director Office: (X=2500 to 7500, Y=4500 to 6000)
-      layers['A-WALL'].push({ id: uuid(), type: 'line', layer: 'A-WALL', x1: oX + 2500, y1: 4500, x2: oX + 7500, y2: 4500, thickness: 115 } as LineShape);
-      layers['A-WALL'].push({ id: uuid(), type: 'line', layer: 'A-WALL', x1: oX + 2500, y1: 4500, x2: oX + 2500, y2: 6000, thickness: 115 } as LineShape);
+      layers['A-WALL'].push({
+        id: uuid(),
+        type: 'dline',
+        layer: 'A-WALL',
+        points: [{ x: oX + 2500, y: 4500 }, { x: oX + 7500, y: 4500 }],
+        thickness: 115,
+        justification: 'zero'
+      } as DoubleLineShape);
+      layers['A-WALL'].push({
+        id: uuid(),
+        type: 'dline',
+        layer: 'A-WALL',
+        points: [{ x: oX + 2500, y: 4500 }, { x: oX + 2500, y: 6000 }],
+        thickness: 115,
+        justification: 'zero'
+      } as DoubleLineShape);
 
       // ___ FIRST FLOOR DOORS ___
       // Slider door to Balcony from Director Cabin: Y=6000, X=5000
@@ -1897,15 +1901,15 @@ export function draft10x15DuplexPlan(): {
 
   // External Walls (A-WALL)
   const addWallLine = (lay: string, x1: number, y1: number, x2: number, y2: number) => {
+    const isInt = lay.includes('INT');
     layers[lay].push({
       id: uuid(),
-      type: 'line',
+      type: 'dline',
       layer: lay,
-      x1,
-      y1,
-      x2,
-      y2,
-    } as LineShape);
+      points: [{ x: x1, y: y1 }, { x: x2, y: y2 }],
+      thickness: isInt ? 115 : 230,
+      justification: 'zero'
+    } as DoubleLineShape);
   };
 
   // External Ground walls:

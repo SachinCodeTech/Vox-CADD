@@ -199,7 +199,14 @@ const INITIAL_LAYERS_CONFIG: Record<string, LayerConfig> = {
   'A-DIM': { id: 'A-DIM', name: 'A-DIM', visible: true, locked: false, frozen: false, plottable: true, color: '#FFEB3B', thickness: 0.15, lineType: 'continuous' },
   'A-TEXT': { id: 'A-TEXT', name: 'A-TEXT', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.18, lineType: 'continuous' },
   'A-GRID': { id: 'A-GRID', name: 'A-GRID', visible: true, locked: false, frozen: false, plottable: true, color: '#607D8B', thickness: 0.15, lineType: 'continuous' },
-  'A-FURN': { id: 'A-FURN', name: 'A-FURN', visible: true, locked: false, frozen: false, plottable: true, color: '#81C784', thickness: 0.15, lineType: 'continuous' }
+  'A-FURN': { id: 'A-FURN', name: 'A-FURN', visible: true, locked: false, frozen: false, plottable: true, color: '#81C784', thickness: 0.15, lineType: 'continuous' },
+  
+  // Advanced MEP Systems & Materials Hatch Layers
+  'M-HVAC': { id: 'M-HVAC', name: 'M-HVAC', visible: true, locked: false, frozen: false, plottable: true, color: '#03a9f4', thickness: 0.20, lineType: 'continuous' },
+  'E-ELEC': { id: 'E-ELEC', name: 'E-ELEC', visible: true, locked: false, frozen: false, plottable: true, color: '#fbbf24', thickness: 0.18, lineType: 'continuous' },
+  'M-PLUMB': { id: 'M-PLUMB', name: 'M-PLUMB', visible: true, locked: false, frozen: false, plottable: true, color: '#14b8a6', thickness: 0.20, lineType: 'continuous' },
+  'E-SENS': { id: 'E-SENS', name: 'E-SENS', visible: true, locked: false, frozen: false, plottable: true, color: '#8b5cf6', thickness: 0.15, lineType: 'continuous' },
+  'A-HATCH': { id: 'A-HATCH', name: 'A-HATCH', visible: true, locked: false, frozen: false, plottable: true, color: '#4b5563', thickness: 0.13, lineType: 'continuous' }
 };
 
 export type ToolbarCategory = 'Draw' | 'Modify' | 'Anno' | 'View' | 'Tools' | 'History' | 'Edit' | 'Macros';
@@ -3309,7 +3316,8 @@ const App: React.FC = () => {
       Drawing Context:
       - Units: ${settingsRef.current.units} (${settingsRef.current.unitSubtype})
       - Active Layer: ${settingsRef.current.currentLayer}
-      - Visible Layers: ${layerNames}
+      - Layer Inventory (ID, Name, Color, Visible, Locked):
+        ${Object.values(layerConfig).map((l: any) => `* ID: "${l.id}", Name: "${l.name}", Color: "${l.color}", Visible: ${l.visible}, Locked: ${l.locked}`).join('\n        ')}
       - Entity Count: ${totalEntities}
       - Sketches in 'A-SKETCH': ${sketchShapes}
       - Extents: ${bounds ? `Min(${bounds.xMin.toFixed(0)}, ${bounds.yMin.toFixed(0)}), Max(${bounds.xMax.toFixed(0)}, ${bounds.yMax.toFixed(0)})` : 'None'}
@@ -4150,6 +4158,71 @@ Use only RECT and LINE commands.`;
     }
 
     if (cmdKey === 'la' || cmdKey === 'layer') {
+        const parts = trimmed.split(/\s+/);
+        const subCommand = parts[1]?.toLowerCase();
+        
+        if (subCommand === 'color' || subCommand === 'colour') {
+            const layerNameInput = parts[2]?.toUpperCase();
+            const colorInput = parts[3];
+            if (layerNameInput && colorInput) {
+                const targetLayer = (Object.values(layerConfig) as LayerConfig[]).find(l => l.name.toUpperCase() === layerNameInput);
+                if (targetLayer) {
+                    setLayerConfig(prev => ({
+                        ...prev,
+                        [targetLayer.id]: { ...prev[targetLayer.id], color: colorInput }
+                    }));
+                    setLogMessage(`LAYER_COLOR: ${layerNameInput} -> ${colorInput}`);
+                    setTimeout(commitToHistory, 100);
+                } else {
+                    setLogMessage(`ERR: LAYER "${layerNameInput}" NOT FOUND`);
+                }
+            } else {
+                setLogMessage("ERR: USAGE: la color [layer_name] [color_hex]");
+            }
+            setCommandInput('');
+            return;
+        } else if (subCommand === 'linetype' || subCommand === 'style' || subCommand === 'lt') {
+            const layerNameInput = parts[2]?.toUpperCase();
+            const linetypeInput = parts[3]?.toLowerCase();
+            if (layerNameInput && linetypeInput) {
+                const targetLayer = (Object.values(layerConfig) as LayerConfig[]).find(l => l.name.toUpperCase() === layerNameInput);
+                if (targetLayer) {
+                    setLayerConfig(prev => ({
+                        ...prev,
+                        [targetLayer.id]: { ...prev[targetLayer.id], lineType: linetypeInput as any }
+                    }));
+                    setLogMessage(`LAYER_LINETYPE: ${layerNameInput} -> ${linetypeInput}`);
+                    setTimeout(commitToHistory, 100);
+                } else {
+                    setLogMessage(`ERR: LAYER "${layerNameInput}" NOT FOUND`);
+                }
+            } else {
+                setLogMessage("ERR: USAGE: la linetype [layer_name] [continuous/dashed/dotted/dashdot]");
+            }
+            setCommandInput('');
+            return;
+        } else if (subCommand === 'thickness' || subCommand === 'weight' || subCommand === 'lw') {
+            const layerNameInput = parts[2]?.toUpperCase();
+            const thicknessValue = parseFloat(parts[3]);
+            if (layerNameInput && !isNaN(thicknessValue)) {
+                const targetLayer = (Object.values(layerConfig) as LayerConfig[]).find(l => l.name.toUpperCase() === layerNameInput);
+                if (targetLayer) {
+                    setLayerConfig(prev => ({
+                        ...prev,
+                        [targetLayer.id]: { ...prev[targetLayer.id], thickness: thicknessValue }
+                    }));
+                    setLogMessage(`LAYER_THICKNESS: ${layerNameInput} -> ${thicknessValue}`);
+                    setTimeout(commitToHistory, 100);
+                } else {
+                    setLogMessage(`ERR: LAYER "${layerNameInput}" NOT FOUND`);
+                }
+            } else {
+                setLogMessage("ERR: USAGE: la thickness [layer_name] [numeric]");
+            }
+            setCommandInput('');
+            return;
+        }
+
         const val = args.trim().toUpperCase();
         if (val) {
             const existingLayer = (Object.values(layerConfig) as LayerConfig[]).find(l => l.name.toUpperCase() === val);
@@ -5023,7 +5096,7 @@ Use only RECT and LINE commands.`;
               setLogMessage(`YOU: "${query.toUpperCase()}"`);
               
               setCommandHistory(prev => [...prev.slice(-50), "VOICE> " + query.toUpperCase()]);
-              setLogMessage(`AI ARCHITECT IS DRAFTING...`);
+              setLogMessage(`ARCHITECT AI IS DRAUGHTING...`);
               setIsAiThinking(true);
               
               try {

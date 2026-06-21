@@ -1170,7 +1170,7 @@ const CADCanvas = forwardRef<CADCanvasHandle, CADCanvasProps>(({
       ctx.font = '900 12px Inter';
       ctx.textAlign = 'center';
       ctx.fillStyle = `rgba(0, 188, 212, ${0.4 + pulse * 0.6})`;
-      ctx.fillText('ARCHITECT IS DRAFTING...', w / 2, h / 2);
+      ctx.fillText('ARCHITECT AI IS DRAUGHTING...', w / 2, h / 2);
       
       // Scanning line effect
       const scanY = (Date.now() / 10) % h;
