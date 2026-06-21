@@ -552,7 +552,7 @@ const CommandBar: React.FC<CommandBarProps> = ({
                            }
                          }}
                          className="w-full bg-transparent text-white outline-none text-[13px] placeholder:text-neutral-500 tracking-wider disabled:opacity-50 select-text font-bold resize-none py-1.5 h-[36px] max-h-[120px] scrollbar-none block focus:ring-0 ring-offset-0 ring-0 transition-colors"
-                         placeholder={isAiThinking ? "PRINCIPAL ARCHITECT IS THINKING..." : "INTERACT WITH AI / E.G. \"PLAN...\""}
+                         placeholder={isAiThinking ? "ARCHITECT AI IS DRAUGHTING..." : "INTERACT WITH AI / E.G. \"PLAN...\""}
                          autoComplete="new-ai-query"
                          autoCorrect="off"
                          autoCapitalize="off"

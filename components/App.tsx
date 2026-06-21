@@ -74,7 +74,7 @@ const monoCtb = createDefaultCtb();
 const INITIAL_SETTINGS: AppSettings = {
   ortho: true, snap: true, grid: true, geometricConstraintsEnabled: true, isometricGrid: false,
   showSimulatedCollaborators: true, unlimitedGrid: true,
-  currentLayer: '0', drawingScale: 1, penThickness: 'BYLAYER',
+  currentLayer: 'DEFAULT', drawingScale: 1, penThickness: 'BYLAYER',
   activeLineType: 'bylayer',
   cursorX: 0, cursorY: 0, 
   units: 'metric', unitSubtype: 'mm', 
@@ -139,75 +139,99 @@ const INITIAL_SETTINGS: AppSettings = {
 
 const INITIAL_VIEW: ViewState = { scale: 0.05, originX: 0, originY: 0 };
 
+const INITIAL_LAYERS_CONFIG: Record<string, LayerConfig> = { 
+  '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FF0000', thickness: 0.25, lineType: 'continuous' },
+  'DEFAULT': { id: 'DEFAULT', name: 'DEFAULT', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' },
+  'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, plottable: false, color: '#666666', thickness: 0.1, lineType: 'continuous' },
+
+  // DRAWING PROPERTY
+  'TEXT': { id: 'TEXT', name: 'TEXT', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.15, lineType: 'continuous' },
+  'DIMENSION': { id: 'DIMENSION', name: 'DIMENSION', visible: true, locked: false, frozen: false, plottable: true, color: '#00BCD4', thickness: 0.18, lineType: 'continuous' },
+  'CENTERLINE': { id: 'CENTERLINE', name: 'CENTERLINE', visible: true, locked: false, frozen: false, plottable: true, color: '#4CAF50', thickness: 0.13, lineType: 'center' },
+  'CL_TEXT': { id: 'CL_TEXT', name: 'CL_TEXT', visible: true, locked: false, frozen: false, plottable: true, color: '#4CAF50', thickness: 0.15, lineType: 'continuous' },
+  'CL_DIMENSION': { id: 'CL_DIMENSION', name: 'CL_DIMENSION', visible: true, locked: false, frozen: false, plottable: true, color: '#4CAF50', thickness: 0.15, lineType: 'continuous' },
+  'LEVEL_TAG': { id: 'LEVEL_TAG', name: 'LEVEL_TAG', visible: true, locked: false, frozen: false, plottable: true, color: '#E91E63', thickness: 0.20, lineType: 'continuous' },
+  'GRID': { id: 'GRID', name: 'GRID', visible: true, locked: false, frozen: false, plottable: true, color: '#4CAF50', thickness: 0.13, lineType: 'center' },
+
+  // CONSTRUCTION
+  'BRICK_WALL': { id: 'BRICK_WALL', name: 'BRICK_WALL', visible: true, locked: false, frozen: false, plottable: true, color: '#FFEB3B', thickness: 0.35, lineType: 'continuous' },
+  'AAC_BLOCK_WALL': { id: 'AAC_BLOCK_WALL', name: 'AAC_BLOCK_WALL', visible: true, locked: false, frozen: false, plottable: true, color: '#FFEB3B', thickness: 0.30, lineType: 'continuous' },
+  'STRUCTURAL_WALL': { id: 'STRUCTURAL_WALL', name: 'STRUCTURAL_WALL', visible: true, locked: false, frozen: false, plottable: true, color: '#FF0000', thickness: 0.50, lineType: 'continuous' },
+  'NON_STRUCTURAL_WALL': { id: 'NON_STRUCTURAL_WALL', name: 'NON_STRUCTURAL_WALL', visible: true, locked: false, frozen: false, plottable: true, color: '#FFEB3B', thickness: 0.30, lineType: 'continuous' },
+  'RCC_COLUMN': { id: 'RCC_COLUMN', name: 'RCC_COLUMN', visible: true, locked: false, frozen: false, plottable: true, color: '#FF0000', thickness: 0.50, lineType: 'continuous' },
+  'BEAM': { id: 'BEAM', name: 'BEAM', visible: true, locked: false, frozen: false, plottable: true, color: '#FF0000', thickness: 0.35, lineType: 'dashed' },
+  'LINTEL': { id: 'LINTEL', name: 'LINTEL', visible: true, locked: false, frozen: false, plottable: true, color: '#FF9800', thickness: 0.30, lineType: 'dashed' },
+  'SHEAR_WALL': { id: 'SHEAR_WALL', name: 'SHEAR_WALL', visible: true, locked: false, frozen: false, plottable: true, color: '#8B0000', thickness: 0.60, lineType: 'continuous' },
+  'MULLION': { id: 'MULLION', name: 'MULLION', visible: true, locked: false, frozen: false, plottable: true, color: '#00BCD4', thickness: 0.20, lineType: 'continuous' },
+
+  // FABRICATION
+  'BOX_SECTION': { id: 'BOX_SECTION', name: 'BOX_SECTION', visible: true, locked: false, frozen: false, plottable: true, color: '#2196F3', thickness: 0.30, lineType: 'continuous' },
+  'FLAT': { id: 'FLAT', name: 'FLAT', visible: true, locked: false, frozen: false, plottable: true, color: '#00BCD4', thickness: 0.25, lineType: 'continuous' },
+  'ROD': { id: 'ROD', name: 'ROD', visible: true, locked: false, frozen: false, plottable: true, color: '#E91E63', thickness: 0.20, lineType: 'continuous' },
+
+  // EXTERIOR FINISH
+  'PLASTER': { id: 'PLASTER', name: 'PLASTER', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.18, lineType: 'continuous' },
+  'EXPOSED_RCC': { id: 'EXPOSED_RCC', name: 'EXPOSED_RCC', visible: true, locked: false, frozen: false, plottable: true, color: '#9E9E9E', thickness: 0.20, lineType: 'continuous' },
+  'TEXTURE': { id: 'TEXTURE', name: 'TEXTURE', visible: true, locked: false, frozen: false, plottable: true, color: '#E0E0E0', thickness: 0.18, lineType: 'continuous' },
+  'HERITAGE_TEXTURE': { id: 'HERITAGE_TEXTURE', name: 'HERITAGE_TEXTURE', visible: true, locked: false, frozen: false, plottable: true, color: '#795548', thickness: 0.18, lineType: 'continuous' },
+  'WASH_TERRAZZO': { id: 'WASH_TERRAZZO', name: 'WASH_TERRAZZO', visible: true, locked: false, frozen: false, plottable: true, color: '#E0F7FA', thickness: 0.18, lineType: 'continuous' },
+  'CLADDING': { id: 'CLADDING', name: 'CLADDING', visible: true, locked: false, frozen: false, plottable: true, color: '#FF9800', thickness: 0.20, lineType: 'continuous' },
+  'PAINT': { id: 'PAINT', name: 'PAINT', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.15, lineType: 'continuous' },
+
+  // INTERIOR
+  'FLOORING': { id: 'FLOORING', name: 'FLOORING', visible: true, locked: false, frozen: false, plottable: true, color: '#4CAF50', thickness: 0.18, lineType: 'continuous' },
+  'FALSE_CEILING': { id: 'FALSE_CEILING', name: 'FALSE_CEILING', visible: true, locked: false, frozen: false, plottable: true, color: '#00BCD4', thickness: 0.18, lineType: 'dashed' },
+  'FURNITURE': { id: 'FURNITURE', name: 'FURNITURE', visible: true, locked: false, frozen: false, plottable: true, color: '#E91E63', thickness: 0.20, lineType: 'continuous' },
+  'PALMAT': { id: 'PALMAT', name: 'PALMAT', visible: true, locked: false, frozen: false, plottable: true, color: '#795548', thickness: 0.18, lineType: 'continuous' },
+  'CURTAIN': { id: 'CURTAIN', name: 'CURTAIN', visible: true, locked: false, frozen: false, plottable: true, color: '#E3F2FD', thickness: 0.15, lineType: 'continuous' },
+  'DOOR': { id: 'DOOR', name: 'DOOR', visible: true, locked: false, frozen: false, plottable: true, color: '#4CAF50', thickness: 0.25, lineType: 'continuous' },
+  'WINDOW': { id: 'WINDOW', name: 'WINDOW', visible: true, locked: false, frozen: false, plottable: true, color: '#00BCD4', thickness: 0.25, lineType: 'continuous' },
+
+  // MEPF
+  'HVAC': { id: 'HVAC', name: 'HVAC', visible: true, locked: false, frozen: false, plottable: true, color: '#FF9800', thickness: 0.25, lineType: 'continuous' },
+  'ELECTRICAL': { id: 'ELECTRICAL', name: 'ELECTRICAL', visible: true, locked: false, frozen: false, plottable: true, color: '#2196F3', thickness: 0.20, lineType: 'continuous' },
+  'PLUMBING': { id: 'PLUMBING', name: 'PLUMBING', visible: true, locked: false, frozen: false, plottable: true, color: '#795548', thickness: 0.20, lineType: 'continuous' },
+  'FIRE_FIGHTING': { id: 'FIRE_FIGHTING', name: 'FIRE_FIGHTING', visible: true, locked: false, frozen: false, plottable: true, color: '#FF0000', thickness: 0.25, lineType: 'continuous' },
+
+  // DOCUMENTATION
+  'SECTION_LINE': { id: 'SECTION_LINE', name: 'SECTION_LINE', visible: true, locked: false, frozen: false, plottable: true, color: '#FF0000', thickness: 0.35, lineType: 'phantom' },
+  'DETAIL_MARKER': { id: 'DETAIL_MARKER', name: 'DETAIL_MARKER', visible: true, locked: false, frozen: false, plottable: true, color: '#FFEB3B', thickness: 0.25, lineType: 'continuous' },
+  'ROOM_TAG': { id: 'ROOM_TAG', name: 'ROOM_TAG', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.15, lineType: 'continuous' },
+  'AREA_TAG': { id: 'AREA_TAG', name: 'AREA_TAG', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.15, lineType: 'continuous' },
+  'NORTH_ARROW': { id: 'NORTH_ARROW', name: 'NORTH_ARROW', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.20, lineType: 'continuous' },
+  'REVISION_CLOUD': { id: 'REVISION_CLOUD', name: 'REVISION_CLOUD', visible: true, locked: false, frozen: false, plottable: true, color: '#E91E63', thickness: 0.25, lineType: 'continuous' },
+  'TITLE_BLOCK': { id: 'TITLE_BLOCK', name: 'TITLE_BLOCK', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.20, lineType: 'continuous' },
+
+  // Mapped/Legacy standard layers to keep compatibility with existing models/templates
+  'WALL': { id: 'WALL', name: 'WALL', visible: true, locked: false, frozen: false, plottable: true, color: '#FFEB3B', thickness: 0.35, lineType: 'continuous' },
+  'COLUMN': { id: 'COLUMN', name: 'COLUMN', visible: true, locked: false, frozen: false, plottable: true, color: '#FF0000', thickness: 0.50, lineType: 'continuous' },
+  'BEAM_CENTER': { id: 'BEAM_CENTER', name: 'BEAM_CENTER', visible: true, locked: false, frozen: false, plottable: true, color: '#FF0000', thickness: 0.35, lineType: 'dashed' },
+  'A-WALL': { id: 'A-WALL', name: 'A-WALL', visible: true, locked: false, frozen: false, plottable: true, color: '#FFEB3B', thickness: 0.35, lineType: 'continuous' },
+  'A-WALL-INT': { id: 'A-WALL-INT', name: 'A-WALL-INT', visible: true, locked: false, frozen: false, plottable: true, color: '#FFEB3B', thickness: 0.30, lineType: 'continuous' },
+  'A-DOOR': { id: 'A-DOOR', name: 'A-DOOR', visible: true, locked: false, frozen: false, plottable: true, color: '#4CAF50', thickness: 0.25, lineType: 'continuous' },
+  'A-WINDOW': { id: 'A-WINDOW', name: 'A-WINDOW', visible: true, locked: false, frozen: false, plottable: true, color: '#00BCD4', thickness: 0.25, lineType: 'continuous' },
+  'A-COLS': { id: 'A-COLS', name: 'A-COLS', visible: true, locked: false, frozen: false, plottable: true, color: '#FF0000', thickness: 0.50, lineType: 'continuous' },
+  'A-BEAMS': { id: 'A-BEAMS', name: 'A-BEAMS', visible: true, locked: false, frozen: false, plottable: true, color: '#FF0000', thickness: 0.35, lineType: 'dashed' },
+  'A-DIM': { id: 'A-DIM', name: 'A-DIM', visible: true, locked: false, frozen: false, plottable: true, color: '#00BCD4', thickness: 0.18, lineType: 'continuous' },
+  'A-TEXT': { id: 'A-TEXT', name: 'A-TEXT', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.15, lineType: 'continuous' },
+  'A-GRID': { id: 'A-GRID', name: 'A-GRID', visible: true, locked: false, frozen: false, plottable: true, color: '#4CAF50', thickness: 0.13, lineType: 'center' },
+  'A-FURN': { id: 'A-FURN', name: 'A-FURN', visible: true, locked: false, frozen: false, plottable: true, color: '#E91E63', thickness: 0.20, lineType: 'continuous' },
+  'A-SKETCH': { id: 'A-SKETCH', name: 'A-SKETCH', visible: true, locked: false, frozen: false, plottable: true, color: '#9E9E9E', thickness: 0.15, lineType: 'continuous' }
+};
+
+const INITIAL_LAYERS_STATE: Record<string, Shape[]> = Object.keys(INITIAL_LAYERS_CONFIG).reduce((acc, lId) => {
+  acc[lId] = [];
+  return acc;
+}, {} as Record<string, Shape[]>);
+
 export function getCadStandardForLayer(layerName: string): { color: string; lineType: string; thickness: number } | null {
   const norm = layerName.trim().toUpperCase();
-  if (norm === 'WALL' || norm === 'A-WALL') {
-    return { color: '#FF9800', lineType: 'continuous', thickness: 0.30 };
-  }
-  if (norm === 'A-WALL-INT') {
-    return { color: '#FF9800', lineType: 'continuous', thickness: 0.25 };
-  }
-  if (norm === 'DOOR' || norm === 'A-DOOR') {
-    return { color: '#4CAF50', lineType: 'continuous', thickness: 0.20 };
-  }
-  if (norm === 'WINDOW' || norm === 'A-WINDOW') {
-    return { color: '#00BCD4', lineType: 'continuous', thickness: 0.20 };
-  }
-  if (norm === 'COLUMN' || norm === 'A-COLS') {
-    return { color: '#FF00FF', lineType: 'continuous', thickness: 0.35 };
-  }
-  if (norm === 'BEAM_CENTER' || norm === 'A-BEAMS') {
-    return { color: '#F44336', lineType: 'dashed', thickness: 0.18 };
-  }
-  if (norm === 'DIMENSION' || norm === 'A-DIM') {
-    return { color: '#FFEB3B', lineType: 'continuous', thickness: 0.15 };
-  }
-  if (norm === 'TEXT' || norm === 'A-TEXT') {
-    return { color: '#FFFFFF', lineType: 'continuous', thickness: 0.18 };
-  }
-  if (norm === 'GRID' || norm === 'A-GRID') {
-    return { color: '#607D8B', lineType: 'continuous', thickness: 0.15 };
-  }
-  if (norm === 'FURNITURE' || norm === 'A-FURN') {
-    return { color: '#81C784', lineType: 'continuous', thickness: 0.15 };
+  const config = INITIAL_LAYERS_CONFIG[norm];
+  if (config) {
+    return { color: config.color, lineType: config.lineType, thickness: config.thickness };
   }
   return null;
 }
-
-const INITIAL_LAYERS_CONFIG: Record<string, LayerConfig> = { 
-  '0': { id: '0', name: '0', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.25, lineType: 'continuous' },
-  'defpoints': { id: 'defpoints', name: 'defpoints', visible: true, locked: false, frozen: false, plottable: false, color: '#666666', thickness: 0.1, lineType: 'continuous' },
-  
-  // Standard User-specified layers
-  'WALL': { id: 'WALL', name: 'WALL', visible: true, locked: false, frozen: false, plottable: true, color: '#FF9800', thickness: 0.30, lineType: 'continuous' },
-  'DOOR': { id: 'DOOR', name: 'DOOR', visible: true, locked: false, frozen: false, plottable: true, color: '#4CAF50', thickness: 0.20, lineType: 'continuous' },
-  'WINDOW': { id: 'WINDOW', name: 'WINDOW', visible: true, locked: false, frozen: false, plottable: true, color: '#00BCD4', thickness: 0.20, lineType: 'continuous' },
-  'COLUMN': { id: 'COLUMN', name: 'COLUMN', visible: true, locked: false, frozen: false, plottable: true, color: '#FF00FF', thickness: 0.35, lineType: 'continuous' },
-  'BEAM_CENTER': { id: 'BEAM_CENTER', name: 'BEAM_CENTER', visible: true, locked: false, frozen: false, plottable: true, color: '#F44336', thickness: 0.18, lineType: 'dashed' },
-  'DIMENSION': { id: 'DIMENSION', name: 'DIMENSION', visible: true, locked: false, frozen: false, plottable: true, color: '#FFEB3B', thickness: 0.15, lineType: 'continuous' },
-  'TEXT': { id: 'TEXT', name: 'TEXT', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.18, lineType: 'continuous' },
-  'GRID': { id: 'GRID', name: 'GRID', visible: true, locked: false, frozen: false, plottable: true, color: '#607D8B', thickness: 0.15, lineType: 'continuous' },
-  'FURNITURE': { id: 'FURNITURE', name: 'FURNITURE', visible: true, locked: false, frozen: false, plottable: true, color: '#81C784', thickness: 0.15, lineType: 'continuous' },
-
-  // A- prefixed legacy/alternate standard layers
-  'A-WALL': { id: 'A-WALL', name: 'A-WALL', visible: true, locked: false, frozen: false, plottable: true, color: '#FF9800', thickness: 0.30, lineType: 'continuous' },
-  'A-WALL-INT': { id: 'A-WALL-INT', name: 'A-WALL-INT', visible: true, locked: false, frozen: false, plottable: true, color: '#FF9800', thickness: 0.25, lineType: 'continuous' },
-  'A-DOOR': { id: 'A-DOOR', name: 'A-DOOR', visible: true, locked: false, frozen: false, plottable: true, color: '#4CAF50', thickness: 0.20, lineType: 'continuous' },
-  'A-WINDOW': { id: 'A-WINDOW', name: 'A-WINDOW', visible: true, locked: false, frozen: false, plottable: true, color: '#00BCD4', thickness: 0.20, lineType: 'continuous' },
-  'A-COLS': { id: 'A-COLS', name: 'A-COLS', visible: true, locked: false, frozen: false, plottable: true, color: '#FF00FF', thickness: 0.35, lineType: 'continuous' },
-  'A-BEAMS': { id: 'A-BEAMS', name: 'A-BEAMS', visible: true, locked: false, frozen: false, plottable: true, color: '#F44336', thickness: 0.18, lineType: 'dashed' },
-  'A-DIM': { id: 'A-DIM', name: 'A-DIM', visible: true, locked: false, frozen: false, plottable: true, color: '#FFEB3B', thickness: 0.15, lineType: 'continuous' },
-  'A-TEXT': { id: 'A-TEXT', name: 'A-TEXT', visible: true, locked: false, frozen: false, plottable: true, color: '#FFFFFF', thickness: 0.18, lineType: 'continuous' },
-  'A-GRID': { id: 'A-GRID', name: 'A-GRID', visible: true, locked: false, frozen: false, plottable: true, color: '#607D8B', thickness: 0.15, lineType: 'continuous' },
-  'A-FURN': { id: 'A-FURN', name: 'A-FURN', visible: true, locked: false, frozen: false, plottable: true, color: '#81C784', thickness: 0.15, lineType: 'continuous' },
-  
-  // Advanced MEP Systems & Materials Hatch Layers
-  'M-HVAC': { id: 'M-HVAC', name: 'M-HVAC', visible: true, locked: false, frozen: false, plottable: true, color: '#03a9f4', thickness: 0.20, lineType: 'continuous' },
-  'E-ELEC': { id: 'E-ELEC', name: 'E-ELEC', visible: true, locked: false, frozen: false, plottable: true, color: '#fbbf24', thickness: 0.18, lineType: 'continuous' },
-  'M-PLUMB': { id: 'M-PLUMB', name: 'M-PLUMB', visible: true, locked: false, frozen: false, plottable: true, color: '#14b8a6', thickness: 0.20, lineType: 'continuous' },
-  'E-SENS': { id: 'E-SENS', name: 'E-SENS', visible: true, locked: false, frozen: false, plottable: true, color: '#8b5cf6', thickness: 0.15, lineType: 'continuous' },
-  'A-HATCH': { id: 'A-HATCH', name: 'A-HATCH', visible: true, locked: false, frozen: false, plottable: true, color: '#4b5563', thickness: 0.13, lineType: 'continuous' }
-};
 
 export type ToolbarCategory = 'Draw' | 'Modify' | 'Anno' | 'View' | 'Tools' | 'History' | 'Edit' | 'Macros';
 type PanelType = 'none' | 'layers' | 'properties' | 'calculator' | 'drafting' | 'file' | 'mainmenu' | 'drawing_props' | 'help' | 'about' | 'privacy' | 'new_file' | 'dimstyle' | 'linetypes' | 'views' | 'ai_drafting' | 'blocks' | 'wall_align' | 'dashboard' | 'section_generator' | 'block_definition';
@@ -372,7 +396,7 @@ const findMostRecentRectangularBoundary = (layers: Record<string, Shape[]>): { x
 
 const App: React.FC = () => {
   const { user, isAuthenticated } = useSession();
-  const [layers, setLayers] = useState<Record<string, Shape[]>>({ '0': [], 'defpoints': [] });
+  const [layers, setLayers] = useState<Record<string, Shape[]>>(INITIAL_LAYERS_STATE);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [blocks, setBlocks] = useState<Record<string, BlockDefinition>>({});
   const [layouts, setLayouts] = useState<LayoutDefinition[]>([
@@ -2667,7 +2691,7 @@ const App: React.FC = () => {
         const shapeCount = Object.values(layersRef.current || {}).flat().length;
         const doClose = () => {
           // Clear history and reset to default
-          setLayers({ '0': [], 'defpoints': [] });
+          setLayers(INITIAL_LAYERS_STATE);
           setLayerConfig(INITIAL_LAYERS_CONFIG);
           setSettings(INITIAL_SETTINGS);
           setCurrentFileName("Drawing 1.vox");
@@ -6373,7 +6397,7 @@ Use only RECT and LINE commands.`;
               >
                 <NewFileDialog onSelect={(cfg) => { 
                     const name = cfg.name + '.vox';
-                    setLayers({ '0': [], 'defpoints': [] }); 
+                    setLayers(INITIAL_LAYERS_STATE); 
                     setLayerConfig(INITIAL_LAYERS_CONFIG);
                     setSettings(s => ({
                       ...s, 
